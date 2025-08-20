@@ -1,5 +1,5 @@
 {
-  "0": [
+  "low": [
     {
       "lang_code": "kpm_Latn",
       "lang_name": "kàsim"
@@ -7287,9 +7287,7 @@
     {
       "lang_code": "ase_Latn",
       "lang_name": "American Sign Language (Latin)"
-    }
-  ],
-  "1": [
+    },
     {
       "lang_code": "tpi_Latn",
       "lang_name": "tok pisin"
@@ -8495,7 +8493,7 @@
       "lang_name": "Inuktitut (Latin)"
     }
   ],
-  "2": [
+  "mid": [
     {
       "lang_code": "pan_Guru",
       "lang_name": "eastern punjabi"
@@ -8767,9 +8765,7 @@
     {
       "lang_code": "azz_Latn",
       "lang_name": "Highland Puebla Nahuatl (Latin)"
-    }
-  ],
-  "3": [
+    },
     {
       "lang_code": "ukr_Cyrl",
       "lang_name": "ukrainian"
@@ -9163,7 +9159,7 @@
       "lang_name": "Central Atlas Tamazight (Tifinagh)"
     }
   ],
-  "4": [
+  "high": [
     {
       "lang_code": "swe_Latn",
       "lang_name": "swedish"
@@ -9423,9 +9419,7 @@
     {
       "lang_code": "yue_Latn",
       "lang_name": "Yue Chinese (Latin)"
-    }
-  ],
-  "5": [
+    },
     {
       "lang_code": "eng_Latn",
       "lang_name": "english"
