@@ -17,11 +17,6 @@ echo "Node: $SLURM_NODELIST"
 echo "Start Time: $(date)"
 echo "Working Directory: $(pwd)"
 
-# Create necessary directories
-mkdir -p results
-mkdir -p slurmlogs
-
-
 # Load required modules on LUMI
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.5
