@@ -5,9 +5,9 @@
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --time=1-00:00:00
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=4
+#SBATCH --time=0-12:00:00
+#SBATCH --mem=64G
 #SBATCH --account=project_462000675
 #SBATCH --array=0-127
 
@@ -23,10 +23,6 @@ export HF_HOME="/scratch/project_462000964/cache/huggingface"
 SOURCE_DIR="/scratch/project_462000964/MaLA-LM/mala-opus-dedup-2410-ReLID-by-GlotLID"
 OUTPUT_DIR="./mala-opus-dedup-2410-ReLID-by-GlotLID-conf-stats"
 FILELIST="./mala-opus-dedup-2410-ReLID-by-GlotLID-filelists/filelist_${SLURM_ARRAY_TASK_ID}.txt"
-
-# SOURCE_DIR="/scratch/project_462000964/MaLA-LM/mala-opus-dedup-2410-ReLID-by-ConLID"
-# OUTPUT_DIR="/scratch/project_462000964/MaLA-LM/mala-opus-dedup-2410-ReLID-by-ConLID-Threshold-${CONF_THRESHOLD//./_}"
-# FILELIST="./mala-opus-dedup-2410-ReLID-by-ConLID-filelists/filelist_${SLURM_ARRAY_TASK_ID}.txt"
 
 python ./get_conf_stats.py \
   --source_dir "$SOURCE_DIR" \
