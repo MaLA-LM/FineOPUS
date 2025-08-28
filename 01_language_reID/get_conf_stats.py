@@ -47,12 +47,12 @@ if __name__ == "__main__":
 
         try:
             ds = load_dataset("json", data_files=input_path, split="train").select_columns(
-                ["source_lang", "source_predlang_conf", "target_lang", "target_predlang_conf"]
+                ["source_predlang_id", "source_predlang_conf", "target_predlang_id", "target_predlang_conf"]
             )
             
-            src_langs = ds["source_lang"]
+            src_langs = ds["source_predlang_id"]
             src_confs = ds["source_predlang_conf"]
-            tgt_langs = ds["target_lang"]
+            tgt_langs = ds["target_predlang_id"]
             tgt_confs = ds["target_predlang_conf"]
 
             for lang, conf in zip(src_langs, src_confs):
