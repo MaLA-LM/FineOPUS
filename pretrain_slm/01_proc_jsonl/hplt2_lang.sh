@@ -26,7 +26,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 
 BASE_DIR="/scratch/project_462000964/source_data/monolingual/HPLT2.0_cleaned"
-LANG_CODE="zho_Hans"
+language_code="${1:-zho_Hans}"
 OUTPUT_DIR="/scratch/project_462000964/FineOPUS/ablation_data/HPLT2.0_cleaned/${LANG_CODE}"
 MAX_LINES=20000000
 

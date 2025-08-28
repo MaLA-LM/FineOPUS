@@ -26,7 +26,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
 
 BASE_DIR="/scratch/project_462000964/source_data/monolingual/DCAD-2000"
-LANG_CODE="spa_Latn"
+LANG_CODE="${1:-spa_Latn}"
 OUTPUT_DIR="/scratch/project_462000964/FineOPUS/ablation_data/dcad-2000/${LANG_CODE}"
 MAX_LINES=20000000
 
