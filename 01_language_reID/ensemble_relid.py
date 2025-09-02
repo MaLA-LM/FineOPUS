@@ -80,6 +80,7 @@ def main():
     ap.add_argument("--out_root", required=True)
     ap.add_argument("--part_size", type=int, default=15_000_000,
                     help="Max rows per output parquet (default: 15000000)")
+    ap.add_argument("--filelist", type=str, help="Path to list of relative jsonl paths")
     ap.add_argument("--compression", default="snappy",
                     choices=["snappy", "zstd", "gzip", "brotli", "none"])
     ap.add_argument("--strict_check", action="store_true",
@@ -89,16 +90,20 @@ def main():
     thr_g = load_thr_json(args.glotlid_thr_json)
     thr_c = load_thr_json(args.conlid_thr_json)
 
-    rel_files_g = set(list_rel_jsonl_files(args.glotlid_dir))
-    rel_files_c = set(list_rel_jsonl_files(args.conlid_dir))
-    rel_files = sorted(rel_files_g & rel_files_c)
+    if args.filelist:
+        with open(args.filelist, encoding="utf-8") as f:
+            rel_files = [line.strip() for line in f if line.strip()]
+    else:
+        rel_files_g = set(list_rel_jsonl_files(args.glotlid_dir))
+        rel_files_c = set(list_rel_jsonl_files(args.conlid_dir))
+        missing_g = sorted(rel_files_c - rel_files_g)
+        missing_c = sorted(rel_files_g - rel_files_c)
+        if missing_g:
+            logging.warning(f"[WARN] {len(missing_g)} files only in ConLID (missing in GlotLID), e.g. {missing_g[:3]}")
+        if missing_c:
+            logging.warning(f"[WARN] {len(missing_c)} files only in GlotLID (missing in ConLID), e.g. {missing_c[:3]}")
 
-    missing_g = sorted(rel_files_c - rel_files_g)
-    missing_c = sorted(rel_files_g - rel_files_c)
-    if missing_g:
-        logging.warning(f"[WARN] {len(missing_g)} files only in ConLID (missing in GlotLID), e.g. {missing_g[:3]}")
-    if missing_c:
-        logging.warning(f"[WARN] {len(missing_c)} files only in GlotLID (missing in ConLID), e.g. {missing_c[:3]}")
+        rel_files = sorted(rel_files_g & rel_files_c)    
 
     safe_mkdir(args.out_root)
 
@@ -115,7 +120,6 @@ def main():
     for file_idx, rel in enumerate(rel_files, start=1):
         logging.info(f"[PROGRESS] {file_idx}/{total_files} Processing file: {rel}")
         
-        # load two JSONL as streaming datasets
         path_g = os.path.join(args.glotlid_dir, rel)
         path_c = os.path.join(args.conlid_dir, rel)
 
