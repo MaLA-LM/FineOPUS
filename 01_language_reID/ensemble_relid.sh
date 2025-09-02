@@ -6,8 +6,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --time=1-00:00:00
-#SBATCH --mem=128G
+#SBATCH --time=3-00:00:00
+#SBATCH --mem=256G
 #SBATCH --account=project_462000964
 
 start_time=$(date +%s)
@@ -16,6 +16,8 @@ echo "Job started at: $(date)"
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.5
 source /flash/project_462000941/venv/opus2410_env/bin/activate
+
+export HF_HOME="/scratch/project_462000964/cache/huggingface"
 
 GLOTLID_DIR="/scratch/project_462000964/MaLA-LM/mala-opus-dedup-2410-ReLID-by-GlotLID"
 CONLID_DIR="/scratch/project_462000964/MaLA-LM/mala-opus-dedup-2410-ReLID-by-ConLID"
@@ -30,7 +32,7 @@ python ./ensemble_relid.py \
   --glotlid_thr_json "$GLOTLID_THR_JSON" \
   --conlid_thr_json "$CONLID_THR_JSON" \
   --out_root "$OUT_ROOT" \
-  --part_size 15000000 \
+  --part_size 10000000 \
   --compression snappy \
   --strict_check
 

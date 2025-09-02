@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --time=1-00:00:00
 #SBATCH --mem=128G
-#SBATCH --account=project_462000675
+#SBATCH --account=project_462000941
 
 
 start_time=$(date +%s)
