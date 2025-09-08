@@ -78,8 +78,10 @@ def main():
     ap.add_argument("--glotlid_thr_json", required=True)
     ap.add_argument("--conlid_thr_json", required=True)
     ap.add_argument("--out_root", required=True)
-    ap.add_argument("--part_size", type=int, default=15_000_000,
-                    help="Max rows per output parquet (default: 15000000)")
+    ap.add_argument("--max_rows_per_pair_shard", type=int, default=1_000_000,
+                    help="Max rows per output parquet (default: 1000000)")
+    ap.add_argument("--min_rows_per_pair_shard", type=int, default=100000,
+                    help="Min rows per output parquet (default: 100000)")
     ap.add_argument("--filelist", type=str, help="Path to list of relative jsonl paths")
     ap.add_argument("--compression", default="snappy",
                     choices=["snappy", "zstd", "gzip", "brotli", "none"])
@@ -201,8 +203,8 @@ def main():
             total_rows += 1
             file_row_count += 1
 
-            # shard flush by part_size
-            if len(buffers[out_pair]) >= args.part_size:
+            # shard flush by max_rows_per_pair_shard
+            if len(buffers[out_pair]) >= args.max_rows_per_pair_shard:
                 shard_idx[out_pair] += 1
                 out_path = write_shard(out_pair, args.out_root, shard_idx[out_pair],
                                        buffers[out_pair],
@@ -215,9 +217,29 @@ def main():
         # Log completion of current file
         logging.info(f"[COMPLETED] {file_idx}/{total_files} File: {rel} - Processed {file_row_count} rows")
 
+    mixed_buf = []
+    mixed_idx = 0    
+
+    def flush_mixed(force=False):
+        nonlocal mixed_buf, mixed_idx
+        if not mixed_buf:
+            return
+        if force or len(mixed_buf) >= args.max_rows_per_pair_shard:
+            mixed_idx += 1
+            out_path = os.path.join(args.out_root, "_mixed")
+            safe_mkdir(out_path)
+            out_file = os.path.join(out_path, f"mixed_part_{mixed_idx:03d}.parquet")
+            ds = Dataset.from_list(mixed_buf)
+            ds.to_parquet(out_file, compression=None if args.compression == "none" else args.compression)
+            logging.info(f"[FLUSH] _mixed -> {out_file} ({len(mixed_buf)} rows)")
+            mixed_buf.clear()
+
+
     # flush remaining
     for pair, buf in buffers.items():
-        if buf:
+        if not buf:
+            continue
+        if shard_idx.get(pair, 0) > 0 or len(buf) >= args.min_rows_per_pair_shard:
             shard_idx[pair] += 1
             out_path = write_shard(pair, args.out_root, shard_idx[pair], buf,
                                    compression=None if args.compression == "none" else args.compression)
@@ -225,6 +247,15 @@ def main():
             buffers[pair].clear()
             if out_path:
                 logging.info(f"[FLUSH] {pair} -> {out_path}")
+        else:
+            mixed_buf.extend(buf)
+            written_counts[pair] += len(buf)
+            buffers[pair].clear()
+
+            if len(mixed_buf) >= args.max_rows_per_pair_shard:
+                flush_mixed()
+
+    flush_mixed(force=True)
 
     # summary
     pairs_written = sum(1 for v in shard_idx.values() if v > 0)
