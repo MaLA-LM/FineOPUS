@@ -7,9 +7,9 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --time=1-00:00:00
-#SBATCH --mem=128G
+#SBATCH --mem=64G
 #SBATCH --account=project_462000941
-#SBATCH --array=1-127
+#SBATCH --array=0-63
 
 start_time=$(date +%s)
 echo "Job started at: $(date)"
@@ -36,12 +36,40 @@ python ./ensemble_relid.py \
   --out_root "$OUT_ROOT" \
   --part_size 1000000 \
   --filelist "$FILELIST" \
-  --compression snappy \
+  --compression snappy
   # --strict_check
   
+status=$?
+
+if [ $status -ne 0 ]; then
+  echo "Processing failed (exit code $status); skipping compression." >&2
+  end_time=$(date +%s)
+  echo "Job ended at: $(date)"
+  duration=$((end_time - start_time))
+  echo "Job duration: $(date -u -d @${duration} +%T)"
+  exit $status
+fi
+
+echo "Starting tar packaging of OUT_ROOT: $OUT_ROOT"
+
+if [ ! -d "$OUT_ROOT" ]; then
+  echo "OUT_ROOT directory not found: $OUT_ROOT" >&2
+else
+  ARCHIVE_BASE="${OUT_ROOT%/}"
+  ARCHIVE_DIRNAME=$(basename "$ARCHIVE_BASE")
+  ARCHIVE_PARENT=$(dirname "$ARCHIVE_BASE")
+
+  echo "Creating tar archive -> ${ARCHIVE_BASE}.tar"
+  if tar -C "$ARCHIVE_PARENT" -cf "${ARCHIVE_DIRNAME}.tar" "$ARCHIVE_DIRNAME"; then
+    echo "Packaging successful; removing original directory $OUT_ROOT"
+    rm -rf "$OUT_ROOT"
+  else
+    echo "Packaging failed; original directory retained." >&2
+  fi
+fi
 
 end_time=$(date +%s)
 echo "Job ended at: $(date)"
 
 duration=$((end_time - start_time))
-echo "Job duration: $(date -u -d @${duration} +%T)"
+echo "Job duration (including compression): $(date -u -d @${duration} +%T)"
