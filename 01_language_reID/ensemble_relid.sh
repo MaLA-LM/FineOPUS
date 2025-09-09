@@ -8,8 +8,8 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --time=1-00:00:00
 #SBATCH --mem=64G
-#SBATCH --account=project_462000941
-#SBATCH --array=1-1
+#SBATCH --account=project_462000964
+#SBATCH --array=256-383
 
 start_time=$(date +%s)
 echo "Job started at: $(date)"
@@ -61,7 +61,7 @@ else
   ARCHIVE_PARENT=$(dirname "$ARCHIVE_BASE")
 
   echo "Creating tar archive -> ${ARCHIVE_BASE}.tar"
-  if tar -C "$ARCHIVE_PARENT" -cf "${ARCHIVE_DIRNAME}.tar" "$ARCHIVE_DIRNAME"; then
+  if tar -C "$ARCHIVE_PARENT" -cf "$ARCHIVE_PARENT/${ARCHIVE_DIRNAME}.tar" "$ARCHIVE_DIRNAME"; then
     echo "Packaging successful; removing original directory $OUT_ROOT"
     rm -rf "$OUT_ROOT"
   else
