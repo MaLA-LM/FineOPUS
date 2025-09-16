@@ -34,7 +34,7 @@ STAGING_DIR="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/
 srun --cpu-bind=cores python ./aggregate_ensembled_relid_for_mix.py \
     --input_root "$INPUT_ROOT" \
     --output_root "$OUTPUT_ROOT" \
-    --max_rows_per_part 1000000 \
+    --max_rows_per_part 10000 \
     --compression snappy \
     --staging_dir "$STAGING_DIR"
 

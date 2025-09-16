@@ -118,7 +118,11 @@ def split_table_by_pair(tbl: pa.Table) -> List[Tuple[str, pa.Table]]:
         return []
 
     # 生成 pair 键（字符串拼接）
-    pair_arr = pc.binary_join_element_wise(tbl["src_lang"].cast(pa.string()), pa.scalar("-"), tbl["tgt_lang"].cast(pa.string()))
+    src = tbl["src_lang"].cast(pa.string())
+    tgt = tbl["tgt_lang"].cast(pa.string())
+    src = pc.utf8_trim_whitespace(src)
+    tgt = pc.utf8_trim_whitespace(tgt)
+    pair_arr = pa.array([f"{s}-{t}" for s, t in zip(src.to_pylist(), tgt.to_pylist())], type=pa.string())
     tbl = tbl.append_column("___pair_key", pair_arr)
 
     # 找出唯一 pair（使用 Arrow 原生 unique，避免对 ChunkedArray 访问 .dictionary）
