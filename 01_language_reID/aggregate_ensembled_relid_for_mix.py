@@ -121,11 +121,9 @@ def split_table_by_pair(tbl: pa.Table) -> List[Tuple[str, pa.Table]]:
     pair_arr = pc.binary_join_element_wise(tbl["src_lang"].cast(pa.string()), pa.scalar("-"), tbl["tgt_lang"].cast(pa.string()))
     tbl = tbl.append_column("___pair_key", pair_arr)
 
-    # 找出唯一 pair
-    dicted = pc.dictionary_encode(tbl["___pair_key"])
-    uniques = pc.dictionary_decode(pa.Array.from_buffers(dicted.type, dicted.dictionary.length, dicted.dictionary.buffers(), dicted.dictionary.offset))
-    # uniques 直接是 unique 值列表更方便，改用 set 方式：
-    unique_vals = set(map(str, tbl["___pair_key"].to_pylist()))
+    # 找出唯一 pair（使用 Arrow 原生 unique，避免对 ChunkedArray 访问 .dictionary）
+    unique_arr = pc.unique(tbl["___pair_key"])  # pyarrow.Array
+    unique_vals = list(map(str, unique_arr.to_pylist()))
 
     out: List[Tuple[str, pa.Table]] = []
     for val in sorted(unique_vals):
@@ -177,6 +175,7 @@ def process_one_tar_mixed(tar_path: Path, staging_root: Path, writer: PairWriter
 
         if not keep_extracted:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+            logging.info(f"[CLEAN] {tmp_dir}")
 
 def main():
     ap = argparse.ArgumentParser(description="Read all _mixed parquets from tmp_*.tar, group by (src_lang,tgt_lang), and append into output_root with ≤1,000,000 rows per part, continuing indices.")
