@@ -6,9 +6,9 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --time=1-00:00:00
+#SBATCH --time=0-12:00:00
 #SBATCH --mem=64G
-#SBATCH --account=project_462000964
+#SBATCH --account=project_462000941
 
 start_time=$(date +%s)
 echo "Job started at: $(date)"
@@ -18,9 +18,9 @@ module load pytorch/2.5
 source /flash/project_462000941/venv/opus2410_env/bin/activate
 
 
-INPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-tmp"
-OUTPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED"
-EXTRACT_TMP_DIR="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-tmp"
+INPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-tar"
+OUTPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-FIRST"
+EXTRACT_TMP_DIR="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-TMP"
 
 python ./aggregate_ensembled_relid.py \
   --input_root "$INPUT_ROOT" \
