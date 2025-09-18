@@ -6,8 +6,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=1-00:00:00
-#SBATCH --mem=512G
+#SBATCH --time=0-06:00:00
+#SBATCH --mem=256G
 #SBATCH --account=project_462000941
 
 start_time=$(date +%s)
@@ -28,16 +28,23 @@ export NUMEXPR_MAX_THREADS=$CPU
 export ARROW_NUM_THREADS=$CPU         # PyArrow/Parquet 读取与 compute 的线程数
 export MALLOC_ARENA_MAX=2             # 避免多 arena 导致内存碎片上升
 
+# Optional: specify the range of tar files to process
+START_IDX=0
+END_IDX=63
+
 INPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-TAR"
-OUTPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-MIX"
+OUTPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-MIX-${START_IDX}-${END_IDX}"
 STAGING_DIR="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-TMP"
+
 
 srun --cpu-bind=cores python ./aggregate_ensembled_relid_for_mix.py \
     --input_root "$INPUT_ROOT" \
     --output_root "$OUTPUT_ROOT" \
     --max_rows_per_part 5000 \
     --compression snappy \
-    --staging_dir "$STAGING_DIR"
+    --staging_dir "$STAGING_DIR" \
+    --start_idx "$START_IDX" \
+    --end_idx "$END_IDX"
 
 
 end_time=$(date +%s)

@@ -189,7 +189,11 @@ def main():
     ap.add_argument("--compression", default="snappy", choices=["snappy","zstd","gzip","brotli","none"])
     ap.add_argument("--staging_dir", default=None, help="Staging dir for extraction (scratch/local recommended)")
     ap.add_argument("--keep_extracted", action="store_true", help="Keep extracted temp dirs (debug)")
+    ap.add_argument("--start_idx", type=int, default=0, help="Start index (inclusive) in the sorted tmp_*.tar list")
+    ap.add_argument("--end_idx", type=int, default=None, help="End index (inclusive) in the sorted tmp_*.tar list")
     args = ap.parse_args()
+
+    logging.info(f"[ARGS] start_idx={args.start_idx}, end_idx={args.end_idx}")
 
     input_root = Path(args.input_root)
     output_root = Path(args.output_root)
@@ -211,7 +215,17 @@ def main():
         logging.warning(f"[WARN] No tmp_*.tar under {input_root}")
         return
 
-    for tar_path in tars:
+    total = len(tars)
+    start_idx = max(0, args.start_idx or 0)
+    end_idx = total - 1 if args.end_idx is None else min(args.end_idx, total - 1)
+    if start_idx > end_idx:
+        logging.warning(f"[WARN] start_idx ({start_idx}) > end_idx ({end_idx}); nothing to process.")
+        return
+
+    selected = tars[start_idx:end_idx + 1]
+    logging.info(f"[SELECT] total={total}, range=[{start_idx}:{end_idx}] -> {len(selected)} files")
+
+    for tar_path in selected:
         logging.info(f"[TAR] {tar_path}")
         process_one_tar_mixed(tar_path, staging_root, writer, keep_extracted=args.keep_extracted)
         logging.info(f"[TAR] done {tar_path}")
