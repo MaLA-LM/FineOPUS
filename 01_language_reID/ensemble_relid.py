@@ -47,17 +47,17 @@ def decide_final_lang(
     is_valid_g = conf_glotlid > thr_g
     is_valid_c = conf_conlid > thr_c
 
-    adj_g = conf_glotlid - thr_g
-    adj_c = conf_conlid - thr_c
+    # adj_g = conf_glotlid - thr_g
+    # adj_c = conf_conlid - thr_c
 
     if is_valid_g and is_valid_c and (pred_glotlid == pred_conlid):
         return pred_glotlid
-    elif is_valid_g and is_valid_c and (pred_glotlid != pred_conlid):
-        return pred_glotlid if adj_g > adj_c else pred_conlid
-    elif is_valid_g and not is_valid_c:
-        return pred_glotlid
-    elif not is_valid_g and is_valid_c:
-        return pred_conlid
+    # elif is_valid_g and is_valid_c and (pred_glotlid != pred_conlid):
+    #     return pred_glotlid if adj_g > adj_c else pred_conlid
+    # elif is_valid_g and not is_valid_c:
+    #     return pred_glotlid
+    # elif not is_valid_g and is_valid_c:
+    #     return pred_conlid
     else:
         return original_lang
 
