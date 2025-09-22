@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=aggregate_ensembled_relid_for_mix
-#SBATCH --output=../logs/%x_%j.out
-#SBATCH --error=../logs/%x_%j.err
+#SBATCH --output=../logs/aggregate_ensembled_relid_for_mix/%x_%j.out
+#SBATCH --error=../logs/aggregate_ensembled_relid_for_mix/%x_%j.err
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=0-06:00:00
+#SBATCH --time=0-04:00:00
 #SBATCH --mem=256G
 #SBATCH --account=project_462000941
 
@@ -29,11 +29,11 @@ export ARROW_NUM_THREADS=$CPU         # PyArrow/Parquet 读取与 compute 的线
 export MALLOC_ARENA_MAX=2             # 避免多 arena 导致内存碎片上升
 
 # Optional: specify the range of tar files to process
-START_IDX=0
-END_IDX=63
+START_IDX=64
+END_IDX=127
 
-INPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-TAR"
-OUTPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-MIX-${START_IDX}-${END_IDX}"
+INPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-TAR-V2"
+OUTPUT_ROOT="/scratch/project_462001069/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-MIX-${START_IDX}-${END_IDX}"
 STAGING_DIR="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-TMP"
 
 
