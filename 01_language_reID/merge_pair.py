@@ -41,7 +41,7 @@ def build_scanner_for_dirs(dirs: List[Optional[Path]]) -> Tuple[Optional[ds.Scan
 
     dataset = ds.dataset(files, format="parquet")
     schema = dataset.schema
-    scanner = dataset.scanner(batch_size=4096)
+    scanner = dataset.scanner(batch_size=131_072)
     return scanner, schema, files
 
 def write_chunks_from_scanner(
