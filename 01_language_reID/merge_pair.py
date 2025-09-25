@@ -126,6 +126,10 @@ def main():
         out_dir = args.out_root / pair
         out_prefix = pair
 
+        if out_dir.exists():
+            logging.info(f"[PAIR][EXISTS, SKIP] {pair}")
+            continue
+
         # Log whether common or single-sided
         if dir1 and dir2:
             logging.info(f"[PAIR][COMMON] {pair}")

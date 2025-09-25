@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=merge_pair_0_127
+#SBATCH --job-name=merge_pair_all
 #SBATCH --output=../logs/%x_%j.out
 #SBATCH --error=../logs/%x_%j.err
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=0-04:00:00
-#SBATCH --mem=64G
+#SBATCH --time=3-00:00:00
+#SBATCH --mem=128G
 #SBATCH --account=project_462000941
 
 start_time=$(date +%s)
@@ -26,10 +26,10 @@ export ARROW_NUM_THREADS=$CPU
 export MALLOC_ARENA_MAX=2 
 
 
-ROOT1="/scratch/project_462001069/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-MIX-0-63"
-ROOT2="/scratch/project_462001069/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-MIX-64-127"
-OUTPUT_ROOT="/scratch/project_462001069/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-MIX-0-127"
-MAX_ROWS_PER_FILE=100000
+ROOT1="/scratch/project_462001069/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-MIX-0-511"
+ROOT2="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-FIRST-V2"
+OUTPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-V2"
+MAX_ROWS_PER_FILE=100_000_000
 
 
 srun --cpu-bind=cores python ./merge_pair.py \
