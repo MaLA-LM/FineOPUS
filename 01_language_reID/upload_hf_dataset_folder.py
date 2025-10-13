@@ -7,6 +7,7 @@ import argparse
 from pathlib import Path
 from huggingface_hub import HfApi, CommitOperationAdd, create_repo
 import sys
+from tqdm import tqdm
 
 
 logging.basicConfig(
@@ -58,11 +59,9 @@ def main():
 
     # Only upload missing files
     upload_ops = []
-    for local_path, rel_path in local_files:
+    for local_path, rel_path in tqdm(local_files, desc="Checking files"):
         if rel_path not in existing_files:
-            # logging.info(f"Adding {rel_path} to upload ops.")
             upload_ops.append(CommitOperationAdd(path_in_repo=rel_path, path_or_fileobj=str(local_path)))
-        # break
 
     logging.info(f"{len(upload_ops)} new files to upload.")
     if args.dry_run:
