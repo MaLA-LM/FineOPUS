@@ -1,83 +1,61 @@
 #!/bin/bash
 #SBATCH --job-name=embed_eval
-#SBATCH --account=project_462000675
+#SBATCH --output=../logs/%x_%j.out
+#SBATCH --error=../logs/%x_%j.err
 #SBATCH --partition=small-g
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=200G
-#SBATCH --time=72:00:00
-#SBATCH --output=slurmlogs/eval_%j.out.log
-#SBATCH --error=slurmlogs/eval_%j.err.log
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=1
+#SBATCH --mem=64G
+#SBATCH --time=0-02:00:00
+#SBATCH --account=project_462000675
 
-# Print job information
-echo "Job ID: $SLURM_JOB_ID"
-echo "Job Name: $SLURM_JOB_NAME"
-echo "Node: $SLURM_NODELIST"
-echo "Start Time: $(date)"
-echo "Working Directory: $(pwd)"
+start_time=$(date +%s)
+echo "Job started at: $(date)"
 
-# Create necessary directories
-mkdir -p results
-mkdir -p slurmlogs
-
-# Load required modules on LUMI
-module use /appl/local/csc/modulefiles/
-module load pytorch/2.5
-# source /flash/project_462000941/venv/opus2410_env/bin/activate
-
-# Set environment variables for optimal performance
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export NUMBA_NUM_THREADS=$SLURM_CPUS_PER_TASK
-export TOKENIZERS_PARALLELISM=false
-
-
-MODEL="${1:-intfloat/multilingual-e5-large-instruct}"
-DATASET_NAME="${2:-Helsinki-NLP/tatoeba_mt}"
-SPLIT="${3:-test}"
-
-OUTPUT_DIR="./results"
+MODEL="jinaai/jina-embeddings-v3"
+DATASET="Zihao-Li/FLORES-200"
+SPLIT="test"
 BATCH_SIZE=16
-SKIP_PROCESSED=true
+SOURCE_LANG="eng_Latn"
+OUTPUT_DIR="./results"
+# Leave empty for all languages, or specify: TARGET_LANGUAGES="fra_Latn deu_Latn spa_Latn"
+TARGET_LANGUAGES=""
 
-# Print configuration
-echo "Configuration:"
-echo " Dataset: $DATASET_NAME"
-echo " Model: $MODEL"
-echo " Split: $SPLIT"
-echo " Output Directory: $OUTPUT_DIR"
-echo " Batch Size: $BATCH_SIZE"
-echo " Skip Processed: $SKIP_PROCESSED"
-echo " CPUs: $SLURM_CPUS_PER_TASK"
-echo ""
+# Activate virtual environment
+source ../.venv/bin/activate || source .venv/bin/activate
 
-# Function to sanitize model name for display
-sanitize_model_name() {
-    echo "$1" | sed 's/[\/:-]/_/g' | sed 's/__*/_/g' | sed 's/^_\|_$//g'
-}
+# Show GPU info
+if command -v rocm-smi &> /dev/null; then
+    rocm-smi --showproductname
+elif command -v nvidia-smi &> /dev/null; then
+    nvidia-smi --query-gpu=name --format=csv,noheader
+fi
 
-# Get sanitized model name for output file prediction
-SANITIZED_MODEL=$(sanitize_model_name "$MODEL")
-DATASET_BASENAME=$(basename "$DATASET_NAME")
-EXPECTED_OUTPUT_FILE="$OUTPUT_DIR/${DATASET_BASENAME}_${SANITIZED_MODEL}.csv"
+# Run benchmarking
+if [ -n "$TARGET_LANGUAGES" ]; then
+    srun python ./benchmarking.py \
+      --dataset_name "$DATASET" \
+      --model "$MODEL" \
+      --split "$SPLIT" \
+      --source_lang "$SOURCE_LANG" \
+      --output_dir "$OUTPUT_DIR" \
+      --batch_size "$BATCH_SIZE" \
+      --target_languages $TARGET_LANGUAGES \
+      --skip_processed
+else
+    srun python ./benchmarking.py \
+      --dataset_name "$DATASET" \
+      --model "$MODEL" \
+      --split "$SPLIT" \
+      --source_lang "$SOURCE_LANG" \
+      --output_dir "$OUTPUT_DIR" \
+      --batch_size "$BATCH_SIZE" \
+      --skip_processed
+fi
 
-echo "Expected output file: $EXPECTED_OUTPUT_FILE"
-echo ""
 
-# Build command arguments
-CMD_ARGS=(
-    --dataset_name "$DATASET_NAME"
-    --model "$MODEL"
-    --split "$SPLIT"
-    --output_dir "$OUTPUT_DIR"
-    --batch_size "$BATCH_SIZE"
-    --skip_processed
-)
-
-echo "Starting embedding evaluation for model: $MODEL"
-echo "Command: python benchmarking.py ${CMD_ARGS[@]}"
-echo ""
-
-python benchmarking.py "${CMD_ARGS[@]}"
+end_time=$(date +%s)
+duration=$((end_time - start_time))
+echo "Job ended at: $(date)"
+echo "Duration: $(date -u -d @${duration} +%T)"
