@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --job-name=embed_eval
-#SBATCH --output=../logs/%x_%j.out
-#SBATCH --error=../logs/%x_%j.err
-#SBATCH --partition=small-g
+#SBATCH --output=../logs/embed_eval/%x_%j.out
+#SBATCH --error=../logs/embed_eval/%x_%j.err
+#SBATCH --partition=dev-g
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --mem=64G
-#SBATCH --time=0-02:00:00
-#SBATCH --account=project_462000675
+#SBATCH --time=0-01:00:00
+#SBATCH --account=project_462000941
 
 start_time=$(date +%s)
 echo "Job started at: $(date)"
@@ -22,8 +22,11 @@ OUTPUT_DIR="./results"
 # Leave empty for all languages, or specify: TARGET_LANGUAGES="fra_Latn deu_Latn spa_Latn"
 TARGET_LANGUAGES=""
 
-# Activate virtual environment
-source ../.venv/bin/activate || source .venv/bin/activate
+# Activate environment
+module purge
+module use /appl/local/csc/modulefiles/
+module load pytorch/2.5
+# source ../.venv/bin/activate || source .venv/bin/activate
 
 # Show GPU info
 if command -v rocm-smi &> /dev/null; then

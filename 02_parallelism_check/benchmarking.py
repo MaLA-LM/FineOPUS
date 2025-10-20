@@ -10,6 +10,7 @@ from pathlib import Path
 import logging
 import torch
 from datasets import load_dataset
+from transformers import AutoModel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,9 +52,8 @@ def load_model(model_name: str, device: str = "cuda") -> Optional[Any]:
         Loaded model or None if failed
     """
     try:
-        from sentence_transformers import SentenceTransformer
-
-        model = SentenceTransformer(model_name, trust_remote_code=True, device=device)
+        model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+        model = model.to(device)
         logging.info(f"Successfully loaded model: {model_name} on device: {device}")
         return model
     except Exception as e:
