@@ -11,7 +11,6 @@ import logging
 import torch
 from datasets import load_dataset
 from sentence_transformers import SentenceTransformer
-from transformers import AutoModel
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,11 +52,7 @@ def load_model(model_name: str, device: str = "cuda") -> Optional[Any]:
         Loaded model or None if failed
     """
     try:
-        if model_name == "jinaai/jina-embeddings-v3":
-            model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
-            model = model.to(device)
-        else:
-            model = SentenceTransformer(model_name, trust_remote_code=True, device=device)
+        model = SentenceTransformer(model_name, trust_remote_code=True, device=device)
         logging.info(f"Successfully loaded model: {model_name} on device: {device}")
         return model
     except Exception as e:

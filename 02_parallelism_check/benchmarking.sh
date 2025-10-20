@@ -1,8 +1,8 @@
 #!/bin/bash
-#SBATCH --job-name=embed_eval
+#SBATCH --job-name=benchmarking
 #SBATCH --output=../logs/embed_eval/%x_%j.out
 #SBATCH --error=../logs/embed_eval/%x_%j.err
-#SBATCH --partition=dev-g
+#SBATCH --partition=small-g
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
@@ -13,20 +13,20 @@
 start_time=$(date +%s)
 echo "Job started at: $(date)"
 
-MODEL="jinaai/jina-embeddings-v3"
-DATASET="Zihao-Li/FLORES-200"
-SPLIT="test"
-BATCH_SIZE=16
-SOURCE_LANG="eng_Latn"
-OUTPUT_DIR="./results"
-# Leave empty for all languages, or specify: TARGET_LANGUAGES="fra_Latn deu_Latn spa_Latn"
-TARGET_LANGUAGES=""
+
+MODEL="${MODEL}"
+DATASET="${DATASET:-Zihao-Li/FLORES-200}"
+SPLIT="${SPLIT:-test}"
+BATCH_SIZE="${BATCH_SIZE:-16}"
+SOURCE_LANG="${SOURCE_LANG:-eng_Latn}"
+OUTPUT_DIR="${OUTPUT_DIR:-./results}"
+TARGET_LANGUAGES="${TARGET_LANGUAGES:-}"
 
 # Activate environment
 module purge
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.5
-# source ../.venv/bin/activate || source .venv/bin/activate
+source ../.venv/bin/activate
 
 # Show GPU info
 if command -v rocm-smi &> /dev/null; then
