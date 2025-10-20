@@ -10,6 +10,7 @@ from pathlib import Path
 import logging
 import torch
 from datasets import load_dataset
+from sentence_transformers import SentenceTransformer
 from transformers import AutoModel
 
 logging.basicConfig(
@@ -52,8 +53,11 @@ def load_model(model_name: str, device: str = "cuda") -> Optional[Any]:
         Loaded model or None if failed
     """
     try:
-        model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
-        model = model.to(device)
+        if model_name == "jinaai/jina-embeddings-v3":
+            model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
+            model = model.to(device)
+        else:
+            model = SentenceTransformer(model_name, trust_remote_code=True, device=device)
         logging.info(f"Successfully loaded model: {model_name} on device: {device}")
         return model
     except Exception as e:
@@ -109,7 +113,7 @@ def process_dataset(
             logging.error("Could not retrieve available languages. Exiting.")
             return 0, 0, 0
         # Remove source language from target languages
-        target_languages = [lang for lang in all_languages if lang != args.source_lang]
+        target_languages = sorted([lang for lang in all_languages if lang != args.source_lang])
     logging.info(
         f"Found {len(target_languages)} target languages (excluding source language {args.source_lang})"
     )
@@ -197,11 +201,22 @@ def process_dataset(
 
 
 def encode_texts(
-    model: Any, texts: List[str], batch_size: int = 32
+    model: Any, model_name: str, texts: List[str], batch_size: int = 32
 ) -> Optional[np.ndarray]:
     """Encode texts with batch processing for memory efficiency"""
     try:
-        embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True)
+        if model_name == "google/embeddinggemma-300m":
+            embeddings = model.encode_document(texts, batch_size=batch_size, show_progress_bar=True)
+        elif model_name == "jinaai/jina-embeddings-v3":
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, task="text-matching")
+        elif model_name == "Qwen/Qwen3-Embedding-0.6B":
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True)
+        elif model_name == "intfloat/multilingual-e5-large":
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True)            
+        elif model_name == "Alibaba-NLP/gte-multilingual-base":
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True)
+        else:
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True)
 
         logging.info(f"Successfully encoded {len(texts)} texts")
         return embeddings
@@ -242,8 +257,8 @@ def evaluate_model(
     logging.info(f"Evaluating model: {model_name}")
 
     # Encode texts
-    source_emb = encode_texts(model, source_texts, batch_size=batch_size)
-    target_emb = encode_texts(model, target_texts, batch_size=batch_size)
+    source_emb = encode_texts(model, model_name, source_texts, batch_size=batch_size)
+    target_emb = encode_texts(model, model_name, target_texts, batch_size=batch_size)
 
     if source_emb is None or target_emb is None:
         logging.error(f"Failed to encode texts for model: {model_name}")
