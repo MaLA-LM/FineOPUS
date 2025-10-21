@@ -16,6 +16,8 @@ SPLIT="test"
 OUTPUT_DIR="./results"
 # Leave empty for all languages, or specify: TARGET_LANGUAGES="fra_Latn deu_Latn spa_Latn"
 TARGET_LANGUAGES=""
+# Set to "true" to enable embedding normalization, or "false" to disable
+NORMALIZE_EMBEDDINGS="false"
 
 echo "=========================================="
 echo "Submitting benchmarking jobs for ${#MODELS[@]} models"
@@ -35,11 +37,12 @@ for MODEL in "${MODELS[@]}"; do
     echo "    BATCH_SIZE: $BATCH_SIZE"
     echo "    SOURCE_LANG: $SOURCE_LANG"
     echo "    TARGET_LANGUAGES: ${TARGET_LANGUAGES:-all}"
+    echo "    NORMALIZE_EMBEDDINGS: $NORMALIZE_EMBEDDINGS"
     echo "    JOB_NAME: $JOB_NAME"
     
     # Submit the job
     sbatch --job-name="$JOB_NAME" \
-           --export=ALL,MODEL="$MODEL",DATASET="$DATASET",BATCH_SIZE="$BATCH_SIZE",SOURCE_LANG="$SOURCE_LANG",SPLIT="$SPLIT",OUTPUT_DIR="$OUTPUT_DIR",TARGET_LANGUAGES="$TARGET_LANGUAGES" \
+           --export=ALL,MODEL="$MODEL",DATASET="$DATASET",BATCH_SIZE="$BATCH_SIZE",SOURCE_LANG="$SOURCE_LANG",SPLIT="$SPLIT",OUTPUT_DIR="$OUTPUT_DIR",TARGET_LANGUAGES="$TARGET_LANGUAGES",NORMALIZE_EMBEDDINGS="$NORMALIZE_EMBEDDINGS" \
            ./benchmarking.sh
     
     echo ""

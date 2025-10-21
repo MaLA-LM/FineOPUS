@@ -164,7 +164,7 @@ def process_dataset(
 
         # Regular evaluation
         mrr, avg_rank = evaluate_model(
-            model, args.model, source_texts, target_texts, batch_size=args.batch_size
+            model, args.model, source_texts, target_texts, batch_size=args.batch_size, normalize_embeddings=args.normalize_embeddings
         )
 
         results.append(
@@ -196,22 +196,22 @@ def process_dataset(
 
 
 def encode_texts(
-    model: Any, model_name: str, texts: List[str], batch_size: int = 32
+    model: Any, model_name: str, texts: List[str], batch_size: int = 32, normalize_embeddings: bool = False
 ) -> Optional[np.ndarray]:
     """Encode texts with batch processing for memory efficiency"""
     try:
         if model_name == "google/embeddinggemma-300m":
-            embeddings = model.encode_document(texts, batch_size=batch_size, show_progress_bar=True)
+            embeddings = model.encode_document(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
         elif model_name == "jinaai/jina-embeddings-v3":
-            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, task="text-matching")
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, task="text-matching", normalize_embeddings=normalize_embeddings)
         elif model_name == "Qwen/Qwen3-Embedding-0.6B":
-            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True)
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
         elif model_name == "intfloat/multilingual-e5-large":
-            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True)            
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)            
         elif model_name == "Alibaba-NLP/gte-multilingual-base":
-            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True)
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
         else:
-            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True)
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
 
         logging.info(f"Successfully encoded {len(texts)} texts")
         return embeddings
@@ -247,13 +247,14 @@ def evaluate_model(
     source_texts: List[str],
     target_texts: List[str],
     batch_size: int = 32,
+    normalize_embeddings: bool = False,
 ) -> Tuple[Optional[float], Optional[float]]:
     """Evaluate a single model"""
     logging.info(f"Evaluating model: {model_name}")
 
     # Encode texts
-    source_emb = encode_texts(model, model_name, source_texts, batch_size=batch_size)
-    target_emb = encode_texts(model, model_name, target_texts, batch_size=batch_size)
+    source_emb = encode_texts(model, model_name, source_texts, batch_size=batch_size, normalize_embeddings=normalize_embeddings)
+    target_emb = encode_texts(model, model_name, target_texts, batch_size=batch_size, normalize_embeddings=normalize_embeddings)
 
     if source_emb is None or target_emb is None:
         logging.error(f"Failed to encode texts for model: {model_name}")
@@ -379,6 +380,11 @@ def main() -> None:
         nargs="*",
         help="Specific target languages to evaluate (if not provided, evaluates all)",
     )
+    parser.add_argument(
+        "--normalize_embeddings",
+        action="store_true",
+        help="Normalize embeddings (default: False)",
+    )
 
     args = parser.parse_args()
 
@@ -390,6 +396,7 @@ def main() -> None:
     logging.info(f"  Batch Size: {args.batch_size}")
     logging.info(f"  Skip Processed: {args.skip_processed}")
     logging.info(f"  Target Languages: {args.target_languages}")
+    logging.info(f"  Normalize Embeddings: {args.normalize_embeddings}")
 
     # Setup environment
     device = setup_environment()

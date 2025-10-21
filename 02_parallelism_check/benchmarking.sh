@@ -21,6 +21,7 @@ BATCH_SIZE="${BATCH_SIZE:-16}"
 SOURCE_LANG="${SOURCE_LANG:-eng_Latn}"
 OUTPUT_DIR="${OUTPUT_DIR:-./results}"
 TARGET_LANGUAGES="${TARGET_LANGUAGES:-}"
+NORMALIZE_EMBEDDINGS="${NORMALIZE_EMBEDDINGS:-false}"
 
 # Activate environment
 module purge
@@ -35,27 +36,28 @@ elif command -v nvidia-smi &> /dev/null; then
     nvidia-smi --query-gpu=name --format=csv,noheader
 fi
 
-# Run benchmarking
+# Build base command
+BASE_CMD="srun python ./benchmarking.py \
+  --dataset_name \"$DATASET\" \
+  --model \"$MODEL\" \
+  --split \"$SPLIT\" \
+  --source_lang \"$SOURCE_LANG\" \
+  --output_dir \"$OUTPUT_DIR\" \
+  --batch_size \"$BATCH_SIZE\" \
+  --skip_processed"
+
+# Add target languages if specified
 if [ -n "$TARGET_LANGUAGES" ]; then
-    srun python ./benchmarking.py \
-      --dataset_name "$DATASET" \
-      --model "$MODEL" \
-      --split "$SPLIT" \
-      --source_lang "$SOURCE_LANG" \
-      --output_dir "$OUTPUT_DIR" \
-      --batch_size "$BATCH_SIZE" \
-      --target_languages $TARGET_LANGUAGES \
-      --skip_processed
-else
-    srun python ./benchmarking.py \
-      --dataset_name "$DATASET" \
-      --model "$MODEL" \
-      --split "$SPLIT" \
-      --source_lang "$SOURCE_LANG" \
-      --output_dir "$OUTPUT_DIR" \
-      --batch_size "$BATCH_SIZE" \
-      --skip_processed
+    BASE_CMD="$BASE_CMD --target_languages $TARGET_LANGUAGES"
 fi
+
+# Add normalize_embeddings flag if set to true
+if [ "$NORMALIZE_EMBEDDINGS" = "true" ]; then
+    BASE_CMD="$BASE_CMD --normalize_embeddings"
+fi
+
+# Run benchmarking
+eval $BASE_CMD
 
 
 end_time=$(date +%s)
