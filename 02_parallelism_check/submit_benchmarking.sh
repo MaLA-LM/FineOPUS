@@ -8,8 +8,12 @@ MODELS=(
     "Alibaba-NLP/gte-multilingual-base"
 )
 
+DATASETS=(
+    "Zihao-Li/FLORES-200"
+    "Zihao-Li/NTREX-128"
+)
+
 # Fixed parameters
-DATASET="Zihao-Li/FLORES-200"
 BATCH_SIZE=16
 SOURCE_LANG="eng_Latn"
 SPLIT="test"
@@ -25,25 +29,27 @@ echo "=========================================="
 echo ""
 
 # Loop through each model and submit a job
-for MODEL in "${MODELS[@]}"; do
-    echo "Preparing job for model: $MODEL"
-    
-    # Extract model name for job name (replace / with -)
-    JOB_NAME=$(echo "$MODEL" | sed 's/\//-/g')
-    
-    echo "  Submitting job:"
-    echo "    MODEL: $MODEL"
-    echo "    DATASET: $DATASET"
-    echo "    BATCH_SIZE: $BATCH_SIZE"
-    echo "    SOURCE_LANG: $SOURCE_LANG"
-    echo "    TARGET_LANGUAGES: ${TARGET_LANGUAGES:-all}"
-    echo "    NORMALIZE_EMBEDDINGS: $NORMALIZE_EMBEDDINGS"
-    echo "    JOB_NAME: $JOB_NAME"
-    
-    # Submit the job
-    sbatch --job-name="$JOB_NAME" \
-           --export=ALL,MODEL="$MODEL",DATASET="$DATASET",BATCH_SIZE="$BATCH_SIZE",SOURCE_LANG="$SOURCE_LANG",SPLIT="$SPLIT",OUTPUT_DIR="$OUTPUT_DIR",TARGET_LANGUAGES="$TARGET_LANGUAGES",NORMALIZE_EMBEDDINGS="$NORMALIZE_EMBEDDINGS" \
-           ./benchmarking.sh
-    
-    echo ""
+for DATASET in "${DATASETS[@]}"; do
+    for MODEL in "${MODELS[@]}"; do
+        echo "Preparing job for model: $MODEL"
+        
+        # Extract model name for job name (keep only part after /)
+        JOB_NAME="$(echo "$MODEL" | sed 's/.*\///')-$(echo "$DATASET" | sed 's/.*\///')"
+        
+        echo "  Submitting job:"
+        echo "    MODEL: $MODEL"
+        echo "    DATASET: $DATASET"
+        echo "    BATCH_SIZE: $BATCH_SIZE"
+        echo "    SOURCE_LANG: $SOURCE_LANG"
+        echo "    TARGET_LANGUAGES: ${TARGET_LANGUAGES:-all}"
+        echo "    NORMALIZE_EMBEDDINGS: $NORMALIZE_EMBEDDINGS"
+        echo "    JOB_NAME: $JOB_NAME"
+        
+        # Submit the job
+        sbatch --job-name="$JOB_NAME" \
+            --export=ALL,MODEL="$MODEL",DATASET="$DATASET",BATCH_SIZE="$BATCH_SIZE",SOURCE_LANG="$SOURCE_LANG",SPLIT="$SPLIT",OUTPUT_DIR="$OUTPUT_DIR",TARGET_LANGUAGES="$TARGET_LANGUAGES",NORMALIZE_EMBEDDINGS="$NORMALIZE_EMBEDDINGS" \
+            ./benchmarking.sh
+        
+        echo ""
+    done
 done
