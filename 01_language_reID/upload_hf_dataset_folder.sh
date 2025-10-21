@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=upload_hf_dataset
-#SBATCH --output=../logs/%x_%j.out
-#SBATCH --error=../logs/%x_%j.err
+#SBATCH --output=../logs/upload_hf_dataset/%x_%j.out
+#SBATCH --error=../logs/upload_hf_dataset/%x_%j.err
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -16,7 +16,6 @@ echo "Job started at: $(date)"
 module purge
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.5
-source /flash/project_462000941/venv/opus2410_env/bin/activate
 
 export HF_HUB_ENABLE_HF_TRANSFER=1
 
