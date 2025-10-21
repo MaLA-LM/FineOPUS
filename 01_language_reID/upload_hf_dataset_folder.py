@@ -8,6 +8,7 @@ from pathlib import Path
 from huggingface_hub import HfApi, CommitOperationAdd, create_repo
 import sys
 from tqdm import tqdm
+import traceback
 
 
 logging.basicConfig(
@@ -89,6 +90,10 @@ def main():
             logging.info(f"[OK] Batch {i+1}/{total_batches} uploaded successfully.")
         except Exception as e:
             logging.error(f"[ERROR] Batch {i+1} failed: {e}")
+            logging.error(f"Full traceback:\n{traceback.format_exc()}")
+            # Also log the first file in the failed batch for debugging
+            if batch:
+                logging.error(f"First file in failed batch: {batch[0].path_in_repo}")
 
     logging.info("\n✅ Upload complete.")
 
