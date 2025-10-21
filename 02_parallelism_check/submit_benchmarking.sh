@@ -11,6 +11,7 @@ MODELS=(
 DATASETS=(
     "Zihao-Li/FLORES-200"
     "Zihao-Li/NTREX-128"
+    "Zihao-Li/BOUQuET"
 )
 
 # Fixed parameters
