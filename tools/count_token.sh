@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e # Exit immediately if a command fails
 
+rm slurmlog/cnt_tok*.log
+
 # --- Configuration ---
 DATA_DIR="/scratch/project_462000675/MaLA-LM/mala-opus-dedup-2410"
 OUTPUT_FILE="/scratch/project_462000941/members/shaoxion/FineOPUS/statistics/mala-opus-dedup-2410.csv"
@@ -60,7 +62,7 @@ else
     
     # Submit the "worker" script with the correct array size (1 to N)
     # We export the paths as environment variables so the worker can find them.
-    sbatch --array=1-128 \
+    sbatch --array=1-200 \
            --export=ALL,DATA_DIR="$DATA_DIR",COMPLETE_LIST="$COMPLETE_LIST",TASK_LIST_FILE="$TASK_LIST_FILE",OUTPUT_FILE="$OUTPUT_FILE" \
            count_token.slurm
 fi
