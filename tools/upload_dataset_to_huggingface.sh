@@ -16,7 +16,8 @@ echo "Running in directory $(pwd)"
 echo "Job started at $(date)"
 
 module load cray-python
-srun python upload_dataset_to_huggingface.py --repo-id "MaLA-LM/mala-bilingual-translation-corpus" --folder-path "/scratch/project_462001050/MaLA-LM/mala-bilingual-translation-corpus" --clean-repo --squash-history
-# srun python upload_dataset_to_huggingface.py --repo-id "MaLA-LM/mala-opus-dedup-2410-sample" --folder-path "/flash/project_462000675/MaLA-LM/mala-opus-dedup-2410-sample" --squash-history
+srun python upload_dataset_to_huggingface.py --repo-id "MaLA-LM/mala-opus-dedup-2410" --folder-path "/scratch/project_462000675/MaLA-LM/mala-opus-dedup-2410" --squash-history --clean-repo
+# srun python upload_dataset_to_huggingface.py --repo-id "MaLA-LM/mala-bilingual-translation-corpus" --folder-path "/scratch/project_462001050/MaLA-LM/mala-bilingual-translation-corpus" --clean-repo --squash-history
+# srun python upload_dataset_to_huggingface.py --repo-id "MaLA-LM/mala-opus-dedup-2410-sample" --folder-path "/scratch/project_462000675/MaLA-LM/mala-opus-dedup-2410-sample" --squash-history
 # srun python upload_dataset_to_huggingface.py --repo-id "MaLA-LM/mala-monolingual-integration" --folder-path "/scratch/project_462000675/MaLA-LM/mala-monolingual-integration" --squash-history
 # srun python upload_dataset_to_huggingface.py --repo-id "MaLA-LM/mala-monolingual-split" --folder-path "/scratch/project_462000675/MaLA-LM/mala-monolingual-split" --squash-history

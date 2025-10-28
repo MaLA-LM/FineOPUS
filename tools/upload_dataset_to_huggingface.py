@@ -66,7 +66,7 @@ def upload_folder_to_repository(repo_id: str, folder_path: str, clean_repo: bool
     # --- Step 5: Upload the specified folder ---
     print(f"\nUploading the entire folder from '{folder_path}'...")
     try:
-        api.upload_folder(
+        api.upload_large_folder(
             folder_path=folder_path,
             repo_id=repo_id,
             repo_type="dataset",
