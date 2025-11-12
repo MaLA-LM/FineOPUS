@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=16G
+#SBATCH --mem=32G
 #SBATCH --time=72:00:00
 #SBATCH --output=slurmlog/cnt_tok_%A_%a.out.log
 #SBATCH --error=slurmlog/cnt_tok_%A_%a.err.log
