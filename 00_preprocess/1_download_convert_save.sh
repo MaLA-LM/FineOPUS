@@ -18,14 +18,14 @@ echo "Job started at $(date)"
 module load cray-python
 
 
-tmp_dir="/scratch/project_462000675/opus_tmp"
+tmp_dir="/flash/project_462001050/opus_tmp"
 mkdir -p ${tmp_dir}
 trap 'rm -rf ${tmp_dir}/*' EXIT
 
 srun python -u download_convert_save.py \
-        --input_json OPUS_corpus_collection.json \
+        --input_json OPUS_API_collection.json \
         --mapping_file_dir /scratch/project_462000941/members/shaoxion/FineOPUS/00_preprocess/OPUS/corpus \
-        --out_dir /scratch/project_462000675/opus \
+        --out_dir /scratch/project_462001050/FineOPUS/opus-conversion \
         --tmp_dir $tmp_dir \
-        --progress_file dl_cvt_progress.txt \
-        --error_log dl_cvt_log.json
+        --progress_file dl_cvt_progress_fix.txt \
+        --error_log dl_cvt_log_fix.json

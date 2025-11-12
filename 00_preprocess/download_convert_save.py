@@ -123,13 +123,21 @@ def process_parallel_files(
     os.makedirs(lang_pair_dir, exist_ok=True)
 
     # Prepare a clean metadata template *before* the loop for efficiency
-    row_template = metadata.copy()
+    fields_to_copy = ['corpus', 'version', 'url']
+    row_template = {}
+    for key in fields_to_copy:
+        if key in metadata:
+            row_template[key] = metadata[key]
+    
+    if not row_template:
+        print("Warning: No metadata fields were selected. Row template is empty.")
+
     if 'details' in row_template:
         del row_template['details']
     if 'file_size' in row_template:
         del row_template['file_size']
-    row_template['orig_src_lang'] = metadata.get('src_lang')
-    row_template['orig_tgt_lang'] = metadata.get('tgt_lang')
+    row_template['orig_src_lang'] = metadata.get('source')
+    row_template['orig_tgt_lang'] = metadata.get('target')
     row_template['conv_src_lang'] = conv_src_code
     row_template['conv_tgt_lang'] = conv_tgt_code
 
@@ -147,7 +155,7 @@ def process_parallel_files(
             # Check if the shard is full and save it
             if len(collected_rows) >= shard_size:
                 # Define shard path
-                shard_filename = f"{metadata['dataset']}_shard_{shard_index:03d}.parquet"
+                shard_filename = f"{metadata['corpus']}_{metadata['version']}_shard_{shard_index:03d}.parquet"
                 output_parquet_path = os.path.join(lang_pair_dir, shard_filename)
 
                 # Save the shard (assumes save_to_parquet exists)
@@ -162,7 +170,7 @@ def process_parallel_files(
     # Save any remaining rows in the final shard
     if collected_rows:
         print(f"Saving final shard {shard_index} with {len(collected_rows)} rows...")
-        shard_filename = f"{metadata['dataset']}_shard_{shard_index:03d}.parquet"
+        shard_filename = f"{metadata['corpus']}_{metadata['version']}_shard_{shard_index:03d}.parquet"
         output_parquet_path = os.path.join(lang_pair_dir, shard_filename)
 
         save_to_parquet(collected_rows, output_parquet_path)
@@ -244,8 +252,9 @@ if __name__ == "__main__":
         exit
     print(f"Found {len(json_data)} total items to process.")
     
+    json_data = json_data['corpora']  # Adjust based on JSON structure of OPUS API
     for idx, metadata in enumerate(json_data):
-        print(f"Processing dataset: {idx}/{len(json_data)} {metadata.get('dataset')} {metadata.get('version')}")
+        print(f"Processing dataset: {idx}/{len(json_data)} {metadata.get('corpus')} {metadata.get('version')}")
         url = metadata.get('url')
         if not url:
             print(f"Skipping item with no URL: {metadata}")
@@ -270,11 +279,11 @@ if __name__ == "__main__":
             unzip_file(zip_path, extract_dir)
             
             # 3. Find language files and convert codes
-            src_lang = metadata['src_lang']
-            tgt_lang = metadata['tgt_lang']
+            src_lang = metadata['source']
+            tgt_lang = metadata['target']
             
             try:
-                mapping_file = Path(args.mapping_file_dir) / metadata['dataset'] / metadata['version'] / "language_mappings.tsv"
+                mapping_file = Path(args.mapping_file_dir) / metadata['corpus'] / metadata['version'] / "language_mappings.tsv"
                 mapping_dict = {}
                 if mapping_file.is_file():
                     print(f"Using mapping file: {str(mapping_file)}")
@@ -332,7 +341,7 @@ if __name__ == "__main__":
                 shutil.rmtree(extract_dir)
             if os.path.exists(zip_path):
                 os.remove(zip_path)
-            print(f"Dataset complete {metadata['dataset']} {metadata['version']}.")
+            print(f"Dataset complete {metadata['corpus']} {metadata['version']}.")
             print("-" * 89)
 
     print("Script finished.")
