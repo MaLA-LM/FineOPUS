@@ -1,16 +1,24 @@
 #!/bin/bash
 
+# 1024 Dimensionality Models:
+# jinaai/jina-embeddings-v3 Qwen/Qwen3-Embedding-0.6B intfloat/multilingual-e5-large
+# 768 Dimensionality Models:
+# google/embeddinggemma-300m Alibaba-NLP/gte-multilingual-base
 MODELS_LIST=(
-    "jinaai/jina-embeddings-v3 google/embeddinggemma-300m"
     "jinaai/jina-embeddings-v3 Qwen/Qwen3-Embedding-0.6B"
     "jinaai/jina-embeddings-v3 intfloat/multilingual-e5-large"
+    "intfloat/multilingual-e5-large Qwen/Qwen3-Embedding-0.6B"
+
+    "google/embeddinggemma-300m Alibaba-NLP/gte-multilingual-base"
+
+    "jinaai/jina-embeddings-v3 google/embeddinggemma-300m"
     "jinaai/jina-embeddings-v3 Alibaba-NLP/gte-multilingual-base"
     "intfloat/multilingual-e5-large google/embeddinggemma-300m"
-    "intfloat/multilingual-e5-large Qwen/Qwen3-Embedding-0.6B"
     "intfloat/multilingual-e5-large Alibaba-NLP/gte-multilingual-base"
-    "google/embeddinggemma-300m Qwen/Qwen3-Embedding-0.6B"
-    "google/embeddinggemma-300m Alibaba-NLP/gte-multilingual-base"
+    "Qwen/Qwen3-Embedding-0.6B google/embeddinggemma-300m"
     "Qwen/Qwen3-Embedding-0.6B Alibaba-NLP/gte-multilingual-base"
+
+    "jinaai/jina-embeddings-v3 Qwen/Qwen3-Embedding-0.6B intfloat/multilingual-e5-large"
 )
 
 DATASETS=(
