@@ -207,3 +207,5 @@ cython_debug/
 /02_parallelism_check/results
 /02_parallelism_check/results_embedding_norm
 /02_parallelism_check/results_multi
+/*/*/hostfiles/*
+models/*
