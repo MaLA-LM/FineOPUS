@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=64
 #SBATCH --time=3-00:00:00
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH --account=project_462000941
 #SBATCH --array=0-127
 
@@ -18,6 +18,8 @@ module purge
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.5
 source ../.venv/bin/activate
+
+export HF_HOME="/scratch/project_462000964/cache/huggingface"
 
 SOURCE_DIR="/scratch/project_462000941/FineOPUS/fineopus-original"
 
