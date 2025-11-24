@@ -6,7 +6,7 @@ import fasttext
 from conlid import ConLID
 import sys
 import logging
-import gzip
+import pyarrow.parquet as pq
 
 
 logging.basicConfig(
@@ -17,18 +17,15 @@ logging.basicConfig(
 
 
 def count_lines(file_path):
-    def _count_newlines(data):
-        return data.count(b'\n')  # Count newline bytes
-
-    open_fn = gzip.open if file_path.endswith('.gz') else open
-    total_lines = 0
-    with open_fn(file_path, 'rb') as f:  # Read in binary mode
-        while True:
-            chunk = f.read(64*1024*1024)  # Read 64MB chunks
-            if not chunk:
-                break
-            total_lines += _count_newlines(chunk)
-    return total_lines
+    """Count number of rows in parquet file"""
+    if file_path.endswith('.parquet'):
+        parquet_file = pq.ParquetFile(file_path)
+        return parquet_file.metadata.num_rows
+    else:
+        # Fallback for other file types
+        logging.warning(f"Counting lines for non-parquet file: {file_path}")
+        with open(file_path, 'rb') as f:
+            return sum(1 for _ in f)
     
 
 def get_lang_preds(source_text, target_text):
@@ -42,28 +39,28 @@ def get_lang_preds(source_text, target_text):
     }
 
 
-def save_jsonl(dataset, path):
-    dataset.to_json(path, lines=True)
+def save_parquet(dataset, path):
+    dataset.to_parquet(path, compression='zstd')
     logging.info(f"√ Saved to {path}")
 
 def process_file(input_path, output_path, num_proc):
     try:
-        ds = load_dataset("json", data_files=input_path, split="train")
+        ds = load_dataset("parquet", data_files=input_path, split="train")
 
-        required_keys = {"source_text", "target_text", "source_lang", "target_lang"}
+        required_keys = {"source_text", "target_text", "conv_src_lang", "conv_tgt_lang"}
         if not required_keys.issubset(ds.column_names):
             raise ValueError(f"Missing required fields: {required_keys - set(ds.column_names)}")
         
         ds = ds.map(lambda x: get_lang_preds(x["source_text"], x["target_text"]), num_proc=num_proc)
-        save_jsonl(ds, output_path)
+        save_parquet(ds, output_path)
 
     except Exception as e:
         logging.error(f"[Error] Failed to process: {input_path}\n{type(e).__name__}: {e}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source_dir", required=True, help="Directory containing .jsonl.gz files")
-    parser.add_argument("--output_dir", required=True, help="Directory to save output .jsonl files")
+    parser.add_argument("--source_dir", required=True, help="Directory containing .parquet files")
+    parser.add_argument("--output_dir", required=True, help="Directory to save output .parquet files")
     parser.add_argument("--num_proc", type=int, default=8, help="Number of parallel processes")
     parser.add_argument("--model_path", default="model.bin", help="Path to fastText language ID model")
     parser.add_argument("--filelist", type=str, help="Optional: Path to file containing list of files to process")
@@ -90,13 +87,13 @@ if __name__ == "__main__":
         with open(args.filelist, encoding="utf-8") as f:
             all_files = [line.strip() for line in f if line.strip()]
     else:
-        all_files = sorted(glob(f"{args.source_dir}/**/*.jsonl.gz", recursive=True))
+        all_files = sorted(glob(f"{args.source_dir}/**/*.parquet", recursive=True))
 
     for idx, input_path in enumerate(all_files, 1):
         logging.info(f"[{idx}/{len(all_files)}] Processing file: {os.path.basename(input_path)}")
 
-        rel_path = os.path.relpath(input_path, args.source_dir).replace(".jsonl.gz", "")
-        output_path = os.path.join(args.output_dir, rel_path + ".jsonl") 
+        rel_path = os.path.relpath(input_path, args.source_dir)
+        output_path = os.path.join(args.output_dir, rel_path) 
         
         skip = False
         if os.path.exists(output_path):
