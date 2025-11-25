@@ -58,7 +58,7 @@ def quantiles(collect_stats_path, output_file, tmp_dir=None, keep_tmp=False):
         if not os.path.isfile(bin_path):
             logging.info(f"[quantiles] missing bin for {lang}, skip")
             continue
-        arr = np.fromfile(bin_path, dtype=np.float32)
+        arr = np.fromfile(bin_path, dtype=np.float16)
 
         if arr.size >= n:
             arr = arr[:n]

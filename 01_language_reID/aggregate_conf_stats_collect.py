@@ -21,7 +21,7 @@ def lang_to_path(tmp_dir, lang):
     return os.path.join(tmp_dir, f"{safe}.bin")
 
 def append_f32(path, arr):
-    arr = np.asarray(arr, dtype=np.float32)
+    arr = np.asarray(arr, dtype=np.float16)
     with open(path, "ab") as f:
         arr.tofile(f)
 
@@ -62,7 +62,7 @@ def collect(input_dir, tmp_dir, collect_stats_path):
                 continue
             np.clip(x, 0.0, 1.0, out=x)
 
-            append_f32(lang_to_path(tmp_dir, lang), x.astype(np.float32, copy=False))
+            append_f32(lang_to_path(tmp_dir, lang), x.astype(np.float16, copy=False))
 
             n = int(x.size)
             s = float(x.sum())
