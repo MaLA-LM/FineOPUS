@@ -197,6 +197,7 @@ cython_debug/
 /logs/*
 *.jsonl
 /01_language_reID/fineopus-original-filelists/*
+/01_language_reID/filelists/*
 /01_language_reID/mala-opus-dedup-2410-ReLID-by-GlotLID-filelists
 /01_language_reID/mala-opus-dedup-2410-ReLID-by-ConLID-filelists
 /01_language_reID/mala-opus-dedup-2410-ReLID-by-GlotLID-conf-stats

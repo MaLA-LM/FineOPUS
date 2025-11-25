@@ -17,7 +17,7 @@ logging.basicConfig(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source_dir", required=True, help="Directory containing .jsonl files with predictions")
+    parser.add_argument("--source_dir", required=True, help="Directory containing .parquet files with predictions")
     parser.add_argument("--output_dir", required=True, help="Output directory")
     parser.add_argument("--filelist", type=str, help="Optional: Path to file containing list of files to process")
     parser.add_argument("--job_id", type=int, help="Optional: Job ID")
@@ -31,7 +31,7 @@ if __name__ == "__main__":
         with open(args.filelist, encoding="utf-8") as f:
             all_files = [line.strip() for line in f if line.strip()]
     else:
-        all_files = sorted(glob(f"{args.source_dir}/**/*.jsonl", recursive=True))
+        all_files = sorted(glob(f"{args.source_dir}/**/*.parquet", recursive=True))
 
     if not all_files:
         logging.warning("No files found to process.")
@@ -46,7 +46,7 @@ if __name__ == "__main__":
         logging.info(f"[{idx}/{total_files}] Processing file: {os.path.basename(input_path)}")
 
         try:
-            ds = load_dataset("json", data_files=input_path, split="train").select_columns(
+            ds = load_dataset("parquet", data_files=input_path, split="train").select_columns(
                 ["source_predlang_id", "source_predlang_conf", "target_predlang_id", "target_predlang_conf"]
             )
             
