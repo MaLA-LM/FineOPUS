@@ -31,7 +31,7 @@ MODEL_PATH="/scratch/project_462000941/cache/huggingface/hub/models--cis-lmu--gl
 # OUTPUT_DIR="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-by-ConLID"
 # MODEL_PATH="/scratch/project_462000941/cache/huggingface/hub/models--epfl-nlp--ConLID/snapshots/59e1e21e2301cb87f1c244bff71579a17eafaa42"
 
-FILELIST="./fineopus-original-filelists/filelist_${SLURM_ARRAY_TASK_ID}.txt"
+FILELIST="./filelists/fineopus-original-filelists-128-shard/filelist_${SLURM_ARRAY_TASK_ID}.txt"
 
 python ./re_lang_identify.py \
   --source_dir "$SOURCE_DIR" \
