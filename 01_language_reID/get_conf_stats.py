@@ -39,6 +39,17 @@ if __name__ == "__main__":
 
     os.makedirs(args.output_dir, exist_ok=True)
 
+    if args.job_id:
+        stats_filename = f"conf_stats_{args.job_id}.json.gz"
+    else:
+        stats_filename = "conf_stats.json.gz"
+
+    output_file = os.path.join(args.output_dir, stats_filename)
+
+    if os.path.exists(output_file):
+        logging.info(f"Output file {output_file} already exists. Skipping processing.")
+        exit(0)
+
     lang_conf = defaultdict(list)
     total_files = len(all_files)
 
@@ -65,13 +76,6 @@ if __name__ == "__main__":
         except Exception as e:
             logging.error(f"Error processing file {input_path}: {e}")
             continue
-
-    if args.job_id:
-        stats_filename = f"conf_stats_{args.job_id}.json.gz"
-    else:
-        stats_filename = "conf_stats.json.gz"
-
-    output_file = os.path.join(args.output_dir, stats_filename)
 
     with gzip.open(output_file, "wt", encoding="utf-8") as f:
         json.dump(lang_conf, f, ensure_ascii=False)
