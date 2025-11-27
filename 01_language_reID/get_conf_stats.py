@@ -26,6 +26,7 @@ if __name__ == "__main__":
     logging.info("Arguments:")
     logging.info(f"  Source Directory: {args.source_dir}")
     logging.info(f"  Output Directory: {args.output_dir}")
+    logging.info(f"  Filelist: {args.filelist}")
 
     if args.filelist:
         with open(args.filelist, encoding="utf-8") as f:
