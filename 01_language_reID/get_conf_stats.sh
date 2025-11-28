@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --time=3-00:00:00
 #SBATCH --mem=128G
-#SBATCH --account=project_462000941
+#SBATCH --account=project_462000964
 #SBATCH --array=0-127
 
 start_time=$(date +%s)
@@ -23,11 +23,11 @@ export HF_HOME="/scratch/project_462000941/cache/huggingface"
 
 SOURCE_DIR="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-by-GlotLID"
 OUTPUT_DIR="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-by-GlotLID-conf-stats"
-FILELIST="./filelists/fineopus-original-ReLID-by-GlotLID-filelists-128-shard/filelist_${SLURM_ARRAY_TASK_ID}.txt"
+FILELIST="./filelists/fineopus-original-ReLID-by-GlotLID-filelists-256-shard/filelist_${SLURM_ARRAY_TASK_ID}.txt"
 
 # SOURCE_DIR="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-by-ConLID"
 # OUTPUT_DIR="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-by-ConLID-conf-stats"
-# FILELIST="./filelists/fineopus-original-ReLID-by-ConLID-filelists-128-shard/filelist_${SLURM_ARRAY_TASK_ID}.txt"
+# FILELIST="./filelists/fineopus-original-ReLID-by-ConLID-filelists-256-shard/filelist_${SLURM_ARRAY_TASK_ID}.txt"
 
 python ./get_conf_stats.py \
   --source_dir "$SOURCE_DIR" \

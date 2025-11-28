@@ -1,6 +1,6 @@
 import os
 from glob import glob
-import json
+import orjson
 from datasets import load_dataset
 from collections import defaultdict
 import logging
@@ -20,7 +20,7 @@ if __name__ == "__main__":
     parser.add_argument("--source_dir", required=True, help="Directory containing .parquet files with predictions")
     parser.add_argument("--output_dir", required=True, help="Output directory")
     parser.add_argument("--filelist", type=str, help="Optional: Path to file containing list of files to process")
-    parser.add_argument("--job_id", type=int, help="Optional: Job ID")
+    parser.add_argument("--job_id", type=int, default=None, help="Optional: Job ID")
     args = parser.parse_args()
 
     logging.info("Arguments:")
@@ -40,7 +40,7 @@ if __name__ == "__main__":
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    if args.job_id:
+    if args.job_id is not None:
         stats_filename = f"conf_stats_{args.job_id}.json.gz"
     else:
         stats_filename = "conf_stats.json.gz"
@@ -78,7 +78,7 @@ if __name__ == "__main__":
             logging.error(f"Error processing file {input_path}: {e}")
             continue
 
-    with gzip.open(output_file, "wt", encoding="utf-8") as f:
-        json.dump(lang_conf, f, ensure_ascii=False)
+    with gzip.open(output_file, "wb") as f:
+        f.write(orjson.dumps(lang_conf, option=orjson.OPT_INDENT_2))
 
     logging.info(f"Stats saved to {output_file}")

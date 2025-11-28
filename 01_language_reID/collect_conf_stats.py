@@ -20,7 +20,7 @@ def lang_to_path(tmp_dir, lang):
     safe = "".join(c if c.isalnum() or c in ("-", "_") else "_" for c in lang)
     return os.path.join(tmp_dir, f"{safe}.bin")
 
-def append_f32(path, arr):
+def append_f16(path, arr):
     arr = np.asarray(arr, dtype=np.float16)
     with open(path, "ab") as f:
         arr.tofile(f)
@@ -56,13 +56,13 @@ def collect(input_dir, tmp_dir, collect_stats_path):
         for lang, vals in data.items():
             if not isinstance(vals, list) or not vals:
                 continue
-            x = np.asarray(vals, dtype=np.float64)
+            x = np.asarray(vals, dtype=np.float16)
             x = x[np.isfinite(x)]   # remove inf and nan
             if x.size == 0:
                 continue
             np.clip(x, 0.0, 1.0, out=x)
 
-            append_f32(lang_to_path(tmp_dir, lang), x.astype(np.float16, copy=False))
+            append_f16(lang_to_path(tmp_dir, lang), x.astype(np.float16, copy=False))
 
             n = int(x.size)
             s = float(x.sum())
