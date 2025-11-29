@@ -56,17 +56,19 @@ def collect(input_dir, tmp_dir, collect_stats_path):
         for lang, vals in data.items():
             if not isinstance(vals, list) or not vals:
                 continue
-            x = np.asarray(vals, dtype=np.float16)
+            x = np.asarray(vals, dtype=np.float32)  # Use float32 for computation
             x = x[np.isfinite(x)]   # remove inf and nan
             if x.size == 0:
                 continue
             np.clip(x, 0.0, 1.0, out=x)
 
+            # Save as float16 for storage efficiency
             append_f16(lang_to_path(tmp_dir, lang), x.astype(np.float16, copy=False))
 
+            # Compute statistics with float32 to avoid overflow
             n = int(x.size)
-            s = float(x.sum())
-            s2 = float(np.dot(x, x))
+            s = float(np.sum(x, dtype=np.float32))
+            s2 = float(np.dot(x.astype(np.float32), x.astype(np.float32)))
             counts[lang] += n
             sums[lang]   += s
             sums2[lang]  += s2
