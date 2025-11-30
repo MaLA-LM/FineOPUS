@@ -249,7 +249,7 @@ def main():
 
     # --- 5. Write Output ---
     header = [
-        "src_lang", "tgt_lang", "n_lines",
+        "lang_pair", "src_lang", "tgt_lang", "n_lines",
         "n_src_tokens_space", "n_tgt_tokens_space",
         "n_src_tokens_gemma3", "n_tgt_tokens_gemma3",
         "n_src_tokens_o200kbase", "n_tgt_tokens_o200kbase",
@@ -260,7 +260,7 @@ def main():
     ]
     
     data_row = [
-        src_lang, tgt_lang, total_lines,
+        f"{src_lang}-{tgt_lang}", src_lang, tgt_lang, total_lines,
         total_src_tokens_space, total_tgt_tokens_space,
         total_src_tokens_gemma, total_tgt_tokens_gemma,
         total_src_tokens_o200k, total_tgt_tokens_o200k,
