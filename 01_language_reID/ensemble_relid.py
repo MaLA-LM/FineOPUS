@@ -61,7 +61,7 @@ def decide_final_lang(
     else:
         return original_lang
 
-def write_shard(pair: str, out_root: str, shard_idx: int, buffer: list, compression: str = "snappy"):
+def write_shard(pair: str, out_root: str, shard_idx: int, buffer: list, compression: str = "zstd"):
     if not buffer:
         return
     out_dir = os.path.join(out_root, pair)
@@ -83,12 +83,24 @@ def main():
     ap.add_argument("--min_rows_per_pair_shard", type=int, default=100000,
                     help="Min rows per output parquet (default: 100000)")
     ap.add_argument("--filelist", type=str, help="Path to list of relative jsonl paths")
-    ap.add_argument("--compression", default="snappy",
+    ap.add_argument("--compression", default="zstd",
                     choices=["snappy", "zstd", "gzip", "brotli", "none"])
     ap.add_argument("--strict_check", action="store_true",
                     help="Check url/source_text/target_text equality per-line")
     args = ap.parse_args()
 
+    logging.info("Arguments:")
+    logging.info(f"  GLOTLID_DIR: {args.glotlid_dir}")
+    logging.info(f"  CONLID_DIR: {args.conlid_dir}")
+    logging.info(f"  GLOTLID_THR_JSON: {args.glotlid_thr_json}")
+    logging.info(f"  CONLID_THR_JSON: {args.conlid_thr_json}")
+    logging.info(f"  OUT_ROOT: {args.out_root}")
+    logging.info(f"  MAX_ROWS_PER_PAIR_SHARD: {args.max_rows_per_pair_shard}")
+    logging.info(f"  MIN_ROWS_PER_PAIR_SHARD: {args.min_rows_per_pair_shard}")
+    logging.info(f"  FILELIST: {args.filelist}")
+    logging.info(f"  COMPRESSION: {args.compression}")
+
+    
     thr_g = load_thr_json(args.glotlid_thr_json)
     thr_c = load_thr_json(args.conlid_thr_json)
 
@@ -125,8 +137,8 @@ def main():
         path_g = os.path.join(args.glotlid_dir, rel)
         path_c = os.path.join(args.conlid_dir, rel)
 
-        ds_g = load_dataset("json", data_files=path_g, split="train")
-        ds_c = load_dataset("json", data_files=path_c, split="train")
+        ds_g = load_dataset("parquet", data_files=path_g, split="train")
+        ds_c = load_dataset("parquet", data_files=path_c, split="train")
 
         pair_dir = os.path.dirname(rel)  # "{src}-{tgt}" of the original file
         file_row_count = 0
@@ -138,8 +150,8 @@ def main():
                     dg.get("target_text") != dc.get("target_text")):
                     raise ValueError(f"Mismatch at {rel}:{idx}")
 
-            src_orig = dg.get("source_lang") or dc.get("source_lang")
-            tgt_orig = dg.get("target_lang") or dc.get("target_lang")
+            src_orig = dg.get("conv_src_lang") or dc.get("conv_src_lang")
+            tgt_orig = dg.get("conv_tgt_lang") or dc.get("conv_tgt_lang")
 
             # parse confidences as float safely
             def f(x, key):
@@ -153,7 +165,6 @@ def main():
             src_pred_c, src_conf_c = dc.get("source_predlang_id"), f(dc, "source_predlang_conf")
             tgt_pred_g, tgt_conf_g = dg.get("target_predlang_id"), f(dg, "target_predlang_conf")
             tgt_pred_c, tgt_conf_c = dc.get("target_predlang_id"), f(dc, "target_predlang_conf")
-            original_code = dg.get("original_code", dc.get("original_code"))
 
             final_src = decide_final_lang(src_orig, src_pred_g, src_conf_g, thr_g,
                                           src_pred_c, src_conf_c, thr_c)
@@ -167,22 +178,16 @@ def main():
                 written_counts[out_pair] = 0
 
             rec = {
-                # original/basic fields
+                # original fields
+                "corpus": dg.get("corpus", dc.get("corpus")),
+                "version": dg.get("version", dc.get("version")),
                 "url": dg.get("url", dc.get("url")),
-                "collection": dg.get("collection", dc.get("collection")),
-                "source": dg.get("source", dc.get("source")),
-                # "original_code": original_code,
-                "orig_src_lang": original_code.split("-")[0].strip() if original_code else "",
-                "orig_tgt_lang": original_code.split("-")[1].strip() if original_code else "",
-                "source_text": dg.get("source_text", dc.get("source_text")),
-                "target_text": dg.get("target_text", dc.get("target_text")),
+                "orig_src_lang": dg.get("orig_src_lang", dc.get("orig_src_lang")),
+                "orig_tgt_lang": dg.get("orig_tgt_lang", dc.get("orig_tgt_lang")),
                 "conv_src_lang": src_orig,
                 "conv_tgt_lang": tgt_orig,
-
-                # final langs
-                "src_lang": final_src,
-                "tgt_lang": final_tgt,
-
+                "source_text": dg.get("source_text", dc.get("source_text")),
+                "target_text": dg.get("target_text", dc.get("target_text")),
                 # model preds & confs
                 "src_predlang_id_glotlid": src_pred_g,
                 "src_predlang_conf_glotlid": src_conf_g,
@@ -192,11 +197,9 @@ def main():
                 "src_predlang_conf_conlid": src_conf_c,
                 "tgt_predlang_id_conlid": tgt_pred_c,
                 "tgt_predlang_conf_conlid": tgt_conf_c,
-
-                # traceability
-                "original_pair_dir": pair_dir,
-                # "rel_input_file": rel,
-                # "lineno": idx,
+                # final langs
+                "src_lang": final_src,
+                "tgt_lang": final_tgt,
             }
 
             buffers[out_pair].append(rec)

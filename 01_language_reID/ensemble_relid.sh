@@ -1,31 +1,32 @@
 #!/bin/bash
-#SBATCH --job-name=mala-opus-ensemble-relid
-#SBATCH --output=../logs/mala-opus-ensemble-relid/%x_%j.out
-#SBATCH --error=../logs/mala-opus-ensemble-relid/%x_%j.err
+#SBATCH --job-name=fineopus-ensemble-relid
+#SBATCH --output=../logs/fineopus-ensemble-relid/%x_%j.out
+#SBATCH --error=../logs/fineopus-ensemble-relid/%x_%j.err
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
-#SBATCH --time=1-00:00:00
+#SBATCH --time=3-00:00:00
 #SBATCH --mem=64G
 #SBATCH --account=project_462000964
-#SBATCH --array=0-511
+#SBATCH --array=256-383
 
 start_time=$(date +%s)
 echo "Job started at: $(date)"
 
+module purge
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.5
-source /flash/project_462000941/venv/opus2410_env/bin/activate
+source ../.venv/bin/activate
 
-export HF_HOME="/scratch/project_462001069/cache/huggingface"
+export HF_HOME="/scratch/project_462000941/cache/huggingface"
 
-GLOTLID_DIR="/scratch/project_462000964/MaLA-LM/mala-opus-dedup-2410-ReLID-by-GlotLID"
-CONLID_DIR="/scratch/project_462000964/MaLA-LM/mala-opus-dedup-2410-ReLID-by-ConLID"
-GLOTLID_THR_JSON="./mala-opus-dedup-2410-ReLID-by-GlotLID-conf-stats/aggregated_language_confidence_stats_quantiles.json"
-CONLID_THR_JSON="./mala-opus-dedup-2410-ReLID-by-ConLID-conf-stats/aggregated_language_confidence_stats_quantiles.json"
-OUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-TAR-V2/tmp_${SLURM_ARRAY_TASK_ID}"
-FILELIST="./mala-opus-dedup-2410-ReLID-Relpath-filelists/filelist_${SLURM_ARRAY_TASK_ID}.txt"
+GLOTLID_DIR="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-by-GlotLID"
+CONLID_DIR="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-by-ConLID"
+GLOTLID_THR_JSON="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-by-GlotLID-conf-stats/conf_stats_quantiles.json"
+CONLID_THR_JSON="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-by-ConLID-conf-stats/conf_stats_quantiles.json"
+OUT_ROOT="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-ENSEMBLED-TAR/tmp_${SLURM_ARRAY_TASK_ID}"
+FILELIST="./filelists/fineopus-original-ReLID-relpath-filelists-512-shard/filelist_${SLURM_ARRAY_TASK_ID}.txt"
 
 
 python ./ensemble_relid.py \
@@ -34,10 +35,10 @@ python ./ensemble_relid.py \
   --glotlid_thr_json "$GLOTLID_THR_JSON" \
   --conlid_thr_json "$CONLID_THR_JSON" \
   --out_root "$OUT_ROOT" \
-  --max_rows_per_pair_shard 1000000 \
-  --min_rows_per_pair_shard 100000 \
+  --max_rows_per_pair_shard 1_000_000 \
+  --min_rows_per_pair_shard 100_000 \
   --filelist "$FILELIST" \
-  --compression snappy
+  --compression zstd
   # --strict_check
   
 status=$?
