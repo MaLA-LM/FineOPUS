@@ -67,6 +67,10 @@ def write_shard(pair: str, out_root: str, shard_idx: int, buffer: list, compress
     out_dir = os.path.join(out_root, pair)
     safe_mkdir(out_dir)
     out_path = os.path.join(out_dir, f"{pair}_part_{shard_idx:03d}.parquet")
+    # if the shard already exists, skip writing
+    if os.path.exists(out_path):
+        logging.info(f"{out_path} already exists")
+        return out_path
     ds = Dataset.from_list(buffer)
     ds.to_parquet(out_path, compression=compression)
     return out_path
