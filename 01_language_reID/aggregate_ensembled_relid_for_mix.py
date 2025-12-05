@@ -186,7 +186,7 @@ def main():
     ap.add_argument("--input_root", required=True, help="Folder containing tmp_*.tar")
     ap.add_argument("--output_root", required=True, help="Output folder used previously for regrouped pairs")
     ap.add_argument("--max_rows_per_part", type=int, default=1_000_000)
-    ap.add_argument("--compression", default="snappy", choices=["snappy","zstd","gzip","brotli","none"])
+    ap.add_argument("--compression", default="zstd", choices=["snappy","zstd","gzip","brotli","none"])
     ap.add_argument("--staging_dir", default=None, help="Staging dir for extraction (scratch/local recommended)")
     ap.add_argument("--keep_extracted", action="store_true", help="Keep extracted temp dirs (debug)")
     ap.add_argument("--start_idx", type=int, default=0, help="Start index (inclusive) in the sorted tmp_*.tar list")

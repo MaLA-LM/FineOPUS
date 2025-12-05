@@ -1,47 +1,40 @@
 #!/bin/bash
-#SBATCH --job-name=aggregate_ensembled_relid_for_mix
-#SBATCH --output=../logs/aggregate_ensembled_relid_for_mix/%x_%j.out
-#SBATCH --error=../logs/aggregate_ensembled_relid_for_mix/%x_%j.err
+#SBATCH --job-name=fineopus-aggregate-ensembled-relid-for-mix
+#SBATCH --output=../logs/fineopus-aggregate-ensembled-relid-for-mix/%x_%j.out
+#SBATCH --error=../logs/fineopus-aggregate-ensembled-relid-for-mix/%x_%j.err
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=0-04:00:00
-#SBATCH --mem=256G
-#SBATCH --account=project_462000941
+#SBATCH --time=1-00:00:00
+#SBATCH --mem=128G
+#SBATCH --account=project_462000964
 
 start_time=$(date +%s)
 echo "Job started at: $(date)"
 
+module purge
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.5
-source /flash/project_462000941/venv/opus2410_env/bin/activate
+source ../.venv/bin/activate
 
-# tar -cf mala-opus-dedup-2410-ReLID-ENSEMBLED.tar ./mala-opus-dedup-2410-ReLID-ENSEMBLED
-# tar -xf mala-opus-dedup-2410-ReLID-ENSEMBLED.tar
-
-export CPU=${SLURM_CPUS_PER_TASK:-8}
-export OMP_NUM_THREADS=$CPU
-export MKL_NUM_THREADS=$CPU
-export OPENBLAS_NUM_THREADS=$CPU
-export NUMEXPR_MAX_THREADS=$CPU
-export ARROW_NUM_THREADS=$CPU         # PyArrow/Parquet 读取与 compute 的线程数
-export MALLOC_ARENA_MAX=2             # 避免多 arena 导致内存碎片上升
+export NUMEXPR_MAX_THREADS=${SLURM_CPUS_PER_TASK:-1}
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1}
 
 # Optional: specify the range of tar files to process
 START_IDX=64
 END_IDX=127
 
-INPUT_ROOT="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-TAR-V2"
-OUTPUT_ROOT="/scratch/project_462001069/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-MIX-${START_IDX}-${END_IDX}"
-STAGING_DIR="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-TMP"
+INPUT_ROOT="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-ENSEMBLED-TAR"
+OUTPUT_ROOT="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-ENSEMBLED-MIX-${START_IDX}-${END_IDX}"
+STAGING_DIR="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-ENSEMBLED-TMP"
 
 
-srun --cpu-bind=cores python ./aggregate_ensembled_relid_for_mix.py \
+python ./aggregate_ensembled_relid_for_mix.py \
     --input_root "$INPUT_ROOT" \
     --output_root "$OUTPUT_ROOT" \
-    --max_rows_per_part 5000 \
-    --compression snappy \
+    --max_rows_per_part 1_000_000 \
+    --compression zstd \
     --staging_dir "$STAGING_DIR" \
     --start_idx "$START_IDX" \
     --end_idx "$END_IDX"
