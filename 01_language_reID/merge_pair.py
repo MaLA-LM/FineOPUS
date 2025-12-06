@@ -64,7 +64,7 @@ def write_chunks_from_scanner(
             return
         table = pa.concat_tables(buf_tables, promote=True)
         out_path = out_dir / f"{out_prefix}_part_{part_idx:03d}.parquet"
-        pq.write_table(table, out_path, compression="snappy")
+        pq.write_table(table, out_path, compression="zstd")
         logging.info(f"[WRITE] {out_path} rows={table.num_rows}")
         part_idx += 1
         buf_tables.clear()
@@ -107,6 +107,11 @@ def main():
     ap.add_argument("--out-root", required=True, type=Path)
     ap.add_argument("--max-rows-per-file", type=int, default=10_000)
     args = ap.parse_args()
+
+    logging.info(f"[ARGS] root1={args.root1}")
+    logging.info(f"[ARGS] root2={args.root2}")
+    logging.info(f"[ARGS] out-root={args.out_root}")
+    logging.info(f"[ARGS] max-rows-per-file={args.max_rows_per_file}")
 
     pairs1 = find_pair_dirs(args.root1)
     pairs2 = find_pair_dirs(args.root2)
