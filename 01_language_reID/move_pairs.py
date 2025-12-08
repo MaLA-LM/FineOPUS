@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import argparse
-import os
 from pathlib import Path
 import shutil
 import sys
@@ -31,6 +30,13 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="List what would be moved, but do not actually move")
     args = ap.parse_args()
+
+    logging.info("Arguments:")
+    logging.info(f"  Excel File: {args.excel_file}")
+    logging.info(f"  Source Directory: {args.source_dir}")
+    logging.info(f"  Output Directory: {args.output_dir}")
+    logging.info(f"  Threshold: {args.threshold}")
+    logging.info(f"  Dry Run: {args.dry_run}")
 
     src = Path(args.source_dir).resolve()
     dst = Path(args.output_dir).resolve()

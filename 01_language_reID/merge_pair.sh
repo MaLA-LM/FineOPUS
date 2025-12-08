@@ -27,9 +27,9 @@ export ARROW_NUM_THREADS=$CPU
 export MALLOC_ARENA_MAX=2 
 
 
-ROOT1="/scratch/project_462000941/members/zihao/FineOPUS/fineopus-original-ReLID-ENSEMBLED-MIX-64-127"
-ROOT2="/scratch/project_462000964/members/zihao/FineOPUS/fineopus-original-ReLID-ENSEMBLED-MIX-128-191"
-OUTPUT_ROOT="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-ENSEMBLED-MIX-64-191"
+ROOT1=""
+ROOT2=""
+OUTPUT_ROOT=""
 MAX_ROWS_PER_FILE=100_000_000
 
 
