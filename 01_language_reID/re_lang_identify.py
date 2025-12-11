@@ -72,6 +72,7 @@ if __name__ == "__main__":
     logging.info(f"  Number of Processes: {args.num_proc}")
     logging.info(f"  Model Path: {args.model_path}")
     logging.info(f"  Filelist: {args.filelist}")
+    logging.info(f"  HF_HOME: {os.environ.get('HF_HOME', 'default')}")
 
     os.makedirs(args.output_dir, exist_ok=True)
     if "glotlid" in args.model_path:
