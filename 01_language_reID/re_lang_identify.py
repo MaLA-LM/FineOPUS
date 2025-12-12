@@ -90,6 +90,10 @@ if __name__ == "__main__":
     else:
         all_files = sorted(glob(f"{args.source_dir}/**/*.parquet", recursive=True))
 
+    processed_count = 0
+    skipped_count = 0
+    failed_count = 0
+    
     for idx, input_path in enumerate(all_files, 1):
         logging.info(f"[{idx}/{len(all_files)}] Processing file: {os.path.basename(input_path)}")
 
@@ -104,6 +108,7 @@ if __name__ == "__main__":
                 if input_lines == output_lines:
                     logging.info(f"[Skip] {output_path} exists and line count matches ({input_lines})")
                     skip = True
+                    skipped_count += 1
                 else:
                     logging.warning(f"[Reprocess] {output_path} exists but line count mismatch (input={input_lines}, output={output_lines})")
             except Exception as e:
@@ -114,6 +119,20 @@ if __name__ == "__main__":
 
         try:
             process_file(input_path, output_path, args.num_proc)
+            processed_count += 1
         except Exception as e:
             logging.error(f"[Error] Failed during processing: {input_path}\n{e}")
+            failed_count += 1
             continue
+    
+    logging.info("=" * 60)
+    logging.info("Processing Summary:")
+    logging.info(f"  Total files: {len(all_files)}")
+    logging.info(f"  Successfully processed: {processed_count}")
+    logging.info(f"  Skipped (already done): {skipped_count}")
+    logging.info(f"  Failed: {failed_count}")
+    logging.info("=" * 60)
+    
+    # Exit with error code if any files failed
+    if failed_count > 0:
+        sys.exit(1)
