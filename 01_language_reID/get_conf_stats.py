@@ -82,3 +82,4 @@ if __name__ == "__main__":
         f.write(orjson.dumps(lang_conf, option=orjson.OPT_INDENT_2))
 
     logging.info(f"Stats saved to {output_file}")
+    exit(0)
