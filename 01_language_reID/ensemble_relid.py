@@ -154,8 +154,10 @@ def main():
                     dg.get("target_text") != dc.get("target_text")):
                     raise ValueError(f"Mismatch at {rel}:{idx}")
 
-            src_orig = dg.get("conv_src_lang") or dc.get("conv_src_lang")
-            tgt_orig = dg.get("conv_tgt_lang") or dc.get("conv_tgt_lang")
+            # src_orig = dg.get("conv_src_lang") or dc.get("conv_src_lang")
+            # tgt_orig = dg.get("conv_tgt_lang") or dc.get("conv_tgt_lang")
+            src_orig = rel.split("/")[0].split("-")[0]
+            tgt_orig = rel.split("/")[0].split("-")[1]
 
             # parse confidences as float safely
             def f(x, key):
