@@ -31,6 +31,26 @@ total_success=${#success_task_ids[@]}
 # Get task IDs that have failed (from status log)
 mapfile -t failed_task_ids_from_log < <(grep "FAILED" "$STATUS_LOG" 2>/dev/null | grep -oP 'Task \K[0-9]+' | sort -u)
 
+# Get currently running task IDs (STARTED but no SUCCESS/FAILED after it)
+declare -A running_task_ids
+while read -r task_id; do
+    # Check if this task has a SUCCESS or FAILED entry after the last STARTED
+    last_started_line=$(grep -n "STARTED.*Task $task_id " "$STATUS_LOG" 2>/dev/null | tail -1 | cut -d: -f1)
+    if [ -n "$last_started_line" ]; then
+        # Check if there's a SUCCESS or FAILED after this line
+        total_lines=$(wc -l < "$STATUS_LOG")
+        if [ "$last_started_line" -lt "$total_lines" ]; then
+            has_completion=$(tail -n +$((last_started_line + 1)) "$STATUS_LOG" 2>/dev/null | grep -E "Task $task_id .*(SUCCESS|FAILED)" | wc -l)
+            if [ "$has_completion" -eq 0 ]; then
+                running_task_ids["$task_id"]=1
+            fi
+        else
+            # Last line is STARTED, so it's running
+            running_task_ids["$task_id"]=1
+        fi
+    fi
+done < <(grep "STARTED" "$STATUS_LOG" 2>/dev/null | grep -oP 'Task \K[0-9]+' | sort -u)
+
 # Check for OOM errors and timeout by scanning .err files
 declare -A oom_job_to_task    # job_id -> task_id mapping
 declare -A timeout_job_to_task # job_id -> task_id mapping
@@ -69,11 +89,16 @@ if [ -d "$LOG_DIR" ]; then
     shopt -u nullglob  # Restore default behavior
 fi
 
-# Build list of failed task IDs (OOM + Timeout), excluding those that were later successful
+# Build list of failed task IDs (OOM + Timeout), excluding those that were later successful or currently running
 declare -A failed_task_ids_map
+declare -A running_failed_task_ids_map  # Tasks that failed but are now running
+declare -A failed_job_ids  # Track which job IDs have failed
+
 for job_id in "${oom_tasks[@]}"; do
     task_id="${oom_job_to_task[$job_id]}"
     if [ -n "$task_id" ]; then
+        failed_job_ids["$job_id"]="OOM"
+        
         # Check if this task was later successful
         is_success=false
         for success_id in "${success_task_ids[@]}"; do
@@ -82,8 +107,24 @@ for job_id in "${oom_tasks[@]}"; do
                 break
             fi
         done
+        
         if [ "$is_success" = false ]; then
-            failed_task_ids_map["$task_id"]="OOM:$job_id"
+            # Check if there's a newer job for this task (different job ID after the failed one)
+            latest_job_id=$(grep "Task $task_id " "$STATUS_LOG" 2>/dev/null | grep -oP 'JobID: \K[0-9]+' | tail -1)
+            
+            if [ -n "$latest_job_id" ] && [ "$latest_job_id" != "$job_id" ]; then
+                # Task has been resubmitted with a new job ID
+                # Check if the new job is still running
+                if [ -n "${running_task_ids[$task_id]}" ]; then
+                    running_failed_task_ids_map["$task_id"]="OOM:$job_id:$latest_job_id"
+                else
+                    # New job also completed (check if successful was already done above)
+                    failed_task_ids_map["$task_id"]="OOM:$job_id"
+                fi
+            else
+                # No resubmission, task is just failed
+                failed_task_ids_map["$task_id"]="OOM:$job_id"
+            fi
         fi
     fi
 done
@@ -91,6 +132,8 @@ done
 for job_id in "${timeout_tasks[@]}"; do
     task_id="${timeout_job_to_task[$job_id]}"
     if [ -n "$task_id" ]; then
+        failed_job_ids["$job_id"]="Timeout"
+        
         # Check if this task was later successful or already marked as OOM
         is_success=false
         for success_id in "${success_task_ids[@]}"; do
@@ -99,9 +142,25 @@ for job_id in "${timeout_tasks[@]}"; do
                 break
             fi
         done
+        
         # Only add if not successful and not already in failed list (OOM takes priority)
-        if [ "$is_success" = false ] && [ -z "${failed_task_ids_map[$task_id]}" ]; then
-            failed_task_ids_map["$task_id"]="Timeout:$job_id"
+        if [ "$is_success" = false ] && [ -z "${failed_task_ids_map[$task_id]}" ] && [ -z "${running_failed_task_ids_map[$task_id]}" ]; then
+            # Check if there's a newer job for this task (different job ID after the failed one)
+            latest_job_id=$(grep "Task $task_id " "$STATUS_LOG" 2>/dev/null | grep -oP 'JobID: \K[0-9]+' | tail -1)
+            
+            if [ -n "$latest_job_id" ] && [ "$latest_job_id" != "$job_id" ]; then
+                # Task has been resubmitted with a new job ID
+                # Check if the new job is still running
+                if [ -n "${running_task_ids[$task_id]}" ]; then
+                    running_failed_task_ids_map["$task_id"]="Timeout:$job_id:$latest_job_id"
+                else
+                    # New job also completed (check if successful was already done above)
+                    failed_task_ids_map["$task_id"]="Timeout:$job_id"
+                fi
+            else
+                # No resubmission, task is just failed
+                failed_task_ids_map["$task_id"]="Timeout:$job_id"
+            fi
         fi
     fi
 done
@@ -116,21 +175,33 @@ for task_id in "${failed_task_ids_from_log[@]}"; do
             break
         fi
     done
+    
     # Only add if not successful and not already in failed list
-    if [ "$is_success" = false ] && [ -z "${failed_task_ids_map[$task_id]}" ]; then
+    if [ "$is_success" = false ] && [ -z "${failed_task_ids_map[$task_id]}" ] && [ -z "${running_failed_task_ids_map[$task_id]}" ]; then
         # Find the job ID for this task
         job_id=$(grep "FAILED.*Task $task_id " "$STATUS_LOG" 2>/dev/null | grep -oP 'JobID: \K[0-9]+' | tail -1)
-        failed_task_ids_map["$task_id"]="Unknown:$job_id"
+        
+        # Check if currently running
+        if [ -n "${running_task_ids[$task_id]}" ]; then
+            running_failed_task_ids_map["$task_id"]="Unknown:$job_id"
+        else
+            failed_task_ids_map["$task_id"]="Unknown:$job_id"
+        fi
     fi
 done
 
 total_failed=${#failed_task_ids_map[@]}
+total_running_after_failure=${#running_failed_task_ids_map[@]}
 total_oom=${#oom_tasks[@]}
 total_timeout=${#timeout_tasks[@]}
 
 echo "Total tasks started: $total_started"
 echo "Successfully completed: $total_success"
-echo "Failed: $total_failed"
+echo "Currently running: ${#running_task_ids[@]}"
+echo "Failed (need rerun): $total_failed"
+if [ $total_running_after_failure -gt 0 ]; then
+    echo "Failed but rerunning: $total_running_after_failure"
+fi
 echo "  - OOM errors: $total_oom"
 if [ $total_oom -gt 0 ]; then
     echo "    OOM Job IDs: ${oom_tasks[*]}"
@@ -180,41 +251,66 @@ if [ $total_timeout -gt 0 ]; then
 fi
 echo ""
 
+# Display tasks that failed but are now running
+if [ $total_running_after_failure -gt 0 ]; then
+    echo "=================================================="
+    echo "Failed Tasks Currently Rerunning:"
+    echo "=================================================="
+    for task_id in $(printf '%s\n' "${!running_failed_task_ids_map[@]}" | sort -n); do
+        info="${running_failed_task_ids_map[$task_id]}"
+        error_type=$(echo "$info" | cut -d':' -f1)
+        failed_job_id=$(echo "$info" | cut -d':' -f2)
+        current_job_id=$(echo "$info" | cut -d':' -f3)
+        
+        # Find filelist
+        filelist=$(grep "Task $task_id " "$STATUS_LOG" 2>/dev/null | grep -oP 'filelist_\K[0-9]+' | head -1)
+        
+        echo "  Task $task_id (filelist_${filelist}.txt) - Previously failed ($error_type: Job $failed_job_id), now running (Job $current_job_id)"
+    done
+    echo ""
+fi
+echo ""
+
 if [ "$total_failed" -gt 0 ]; then
     echo "=================================================="
-    echo "All Failed Tasks (OOM + Timeout + Other):"
+    echo "Failed Tasks (Need Rerun):"
     echo "=================================================="
     # Sort task IDs numerically
     for task_id in $(printf '%s\n' "${!failed_task_ids_map[@]}" | sort -n); do
         info="${failed_task_ids_map[$task_id]}"
         error_type=$(echo "$info" | cut -d':' -f1)
-        job_id=$(echo "$info" | cut -d':' -f2)
+        failed_job_id=$(echo "$info" | cut -d':' -f2)
         
         # Find filelist from status log
         filelist=$(grep "Task $task_id " "$STATUS_LOG" 2>/dev/null | grep -oP 'filelist_\K[0-9]+' | head -1)
         
         if [ "$error_type" = "Unknown" ]; then
-            echo "  Task $task_id (filelist_${filelist}.txt) - Job $job_id"
+            echo "  Task $task_id (filelist_${filelist}.txt) - Job $failed_job_id"
         else
-            echo "  Task $task_id (filelist_${filelist}.txt) - Job $job_id - $error_type Error"
+            echo "  Task $task_id (filelist_${filelist}.txt) - Job $failed_job_id - $error_type Error"
         fi
     done
     echo ""
     
     echo "=================================================="
-    echo "Tasks to Rerun:"
+    echo "Commands to Rerun Failed Tasks:"
     echo "=================================================="
     echo "You can rerun individual failed tasks with:"
     echo ""
     for task_id in $(printf '%s\n' "${!failed_task_ids_map[@]}" | sort -n); do
-        echo "sbatch --array=$task_id re_lang_identify.sh"
+        echo "sbatch --array=$task_id $JOB_NAME.sh"
     done
     echo ""
     echo "Or rerun all failed tasks at once:"
     failed_tasks_list=$(printf '%s\n' "${!failed_task_ids_map[@]}" | sort -n | tr '\n' ',' | sed 's/,$//')
     if [ -n "$failed_tasks_list" ]; then
-        echo "sbatch --array=$failed_tasks_list re_lang_identify.sh"
+        echo "sbatch --array=$failed_tasks_list $JOB_NAME.sh"
     fi
+elif [ $total_running_after_failure -gt 0 ]; then
+    echo "=================================================="
+    echo "No tasks need rerun"
+    echo "=================================================="
+    echo "All previously failed tasks are currently being rerun."
 fi
 
 # echo ""
