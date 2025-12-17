@@ -31,22 +31,24 @@ total_success=${#success_task_ids[@]}
 # Get task IDs that have failed (from status log)
 mapfile -t failed_task_ids_from_log < <(grep "FAILED" "$STATUS_LOG" 2>/dev/null | grep -oP 'Task \K[0-9]+' | sort -u)
 
-# Get currently running task IDs (STARTED but no SUCCESS/FAILED after it)
-declare -A running_task_ids
+# Get currently running task IDs (will be refined after checking .err files)
+# First pass: tasks that have STARTED but no SUCCESS/FAILED in log
+declare -A potentially_running_task_ids
 while read -r task_id; do
     # Check if this task has a SUCCESS or FAILED entry after the last STARTED
     last_started_line=$(grep -n "STARTED.*Task $task_id " "$STATUS_LOG" 2>/dev/null | tail -1 | cut -d: -f1)
     if [ -n "$last_started_line" ]; then
         # Check if there's a SUCCESS or FAILED after this line
+        # Note: format is "SUCCESS - Task X" or "FAILED - Task X", so SUCCESS/FAILED comes BEFORE Task
         total_lines=$(wc -l < "$STATUS_LOG")
         if [ "$last_started_line" -lt "$total_lines" ]; then
-            has_completion=$(tail -n +$((last_started_line + 1)) "$STATUS_LOG" 2>/dev/null | grep -E "Task $task_id .*(SUCCESS|FAILED)" | wc -l)
+            has_completion=$(tail -n +$((last_started_line + 1)) "$STATUS_LOG" 2>/dev/null | grep -E "(SUCCESS|FAILED).*Task $task_id " | wc -l)
             if [ "$has_completion" -eq 0 ]; then
-                running_task_ids["$task_id"]=1
+                potentially_running_task_ids["$task_id"]=1
             fi
         else
-            # Last line is STARTED, so it's running
-            running_task_ids["$task_id"]=1
+            # Last line is STARTED, so potentially running
+            potentially_running_task_ids["$task_id"]=1
         fi
     fi
 done < <(grep "STARTED" "$STATUS_LOG" 2>/dev/null | grep -oP 'Task \K[0-9]+' | sort -u)
@@ -54,6 +56,7 @@ done < <(grep "STARTED" "$STATUS_LOG" 2>/dev/null | grep -oP 'Task \K[0-9]+' | s
 # Check for OOM errors and timeout by scanning .err files
 declare -A oom_job_to_task    # job_id -> task_id mapping
 declare -A timeout_job_to_task # job_id -> task_id mapping
+declare -A failed_job_ids_set  # Set of all failed job IDs for quick lookup
 oom_tasks=()
 timeout_tasks=()
 
@@ -71,6 +74,7 @@ if [ -d "$LOG_DIR" ]; then
             if tail -20 "$err_file" 2>/dev/null | grep -qi "out of memory\|oom"; then
                 if [ -n "$job_id" ]; then
                     oom_tasks+=("$job_id")
+                    failed_job_ids_set["$job_id"]=1
                     if [ -n "$task_id" ]; then
                         oom_job_to_task["$job_id"]="$task_id"
                     fi
@@ -79,6 +83,7 @@ if [ -d "$LOG_DIR" ]; then
             elif tail -20 "$err_file" 2>/dev/null | grep -qi "TIME LIMIT\|TIMEOUT\|DUE TO TIME"; then
                 if [ -n "$job_id" ]; then
                     timeout_tasks+=("$job_id")
+                    failed_job_ids_set["$job_id"]=1
                     if [ -n "$task_id" ]; then
                         timeout_job_to_task["$job_id"]="$task_id"
                     fi
@@ -88,6 +93,19 @@ if [ -d "$LOG_DIR" ]; then
     done
     shopt -u nullglob  # Restore default behavior
 fi
+
+# Now refine running_task_ids: exclude tasks whose latest job has failed
+declare -A running_task_ids
+for task_id in "${!potentially_running_task_ids[@]}"; do
+    # Get the latest job ID for this task
+    latest_job_id=$(grep "Task $task_id " "$STATUS_LOG" 2>/dev/null | grep -oP 'JobID: \K[0-9]+' | tail -1)
+    
+    # Check if this job ID is in the failed set
+    if [ -z "${failed_job_ids_set[$latest_job_id]}" ]; then
+        # Not failed, so it's running
+        running_task_ids["$task_id"]=1
+    fi
+done
 
 # Build list of failed task IDs (OOM + Timeout), excluding those that were later successful or currently running
 declare -A failed_task_ids_map
