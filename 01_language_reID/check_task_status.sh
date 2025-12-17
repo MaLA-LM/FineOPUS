@@ -114,6 +114,12 @@ declare -A failed_job_ids  # Track which job IDs have failed
 
 for job_id in "${oom_tasks[@]}"; do
     task_id="${oom_job_to_task[$job_id]}"
+    
+    # If task_id not found in cache, try to query it again
+    if [ -z "$task_id" ]; then
+        task_id=$(grep "JobID: $job_id" "$STATUS_LOG" 2>/dev/null | grep -oP 'Task \K[0-9]+' | head -1)
+    fi
+    
     if [ -n "$task_id" ]; then
         failed_job_ids["$job_id"]="OOM"
         
@@ -149,6 +155,12 @@ done
 
 for job_id in "${timeout_tasks[@]}"; do
     task_id="${timeout_job_to_task[$job_id]}"
+    
+    # If task_id not found in cache, try to query it again
+    if [ -z "$task_id" ]; then
+        task_id=$(grep "JobID: $job_id" "$STATUS_LOG" 2>/dev/null | grep -oP 'Task \K[0-9]+' | head -1)
+    fi
+    
     if [ -n "$task_id" ]; then
         failed_job_ids["$job_id"]="Timeout"
         
