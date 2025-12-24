@@ -29,17 +29,17 @@ DATASETS=(
 
 # Fixed parameters
 BATCH_SIZE=16
-SOURCE_LANG="eng_Latn"
 SPLIT="test"
 OUTPUT_DIR="./results_multi"
-# Leave empty for all languages, or specify: TARGET_LANGUAGES="fra_Latn deu_Latn spa_Latn"
-TARGET_LANGUAGES=""
+# Path to the language pairs file (each line: source_lang-target_lang, e.g., zho_Hans-eng_Latn)
+LANGUAGE_PAIRS_FILE="./language_pairs.txt"
 # Set to "true" to enable embedding normalization, or "false" to disable
 NORMALIZE_EMBEDDINGS="false"
 
 echo "=========================================="
 echo "Submitting benchmarking jobs for ${#MODELS_LIST[@]} models"
 echo "=========================================="
+echo "Language pairs file: $LANGUAGE_PAIRS_FILE"
 echo ""
 
 # Loop through each model and submit a job
@@ -55,14 +55,13 @@ for DATASET in "${DATASETS[@]}"; do
         echo "    MODELS: $MODELS"
         echo "    DATASET: $DATASET"
         echo "    BATCH_SIZE: $BATCH_SIZE"
-        echo "    SOURCE_LANG: $SOURCE_LANG"
-        echo "    TARGET_LANGUAGES: ${TARGET_LANGUAGES:-all}"
+        echo "    LANGUAGE_PAIRS_FILE: $LANGUAGE_PAIRS_FILE"
         echo "    NORMALIZE_EMBEDDINGS: $NORMALIZE_EMBEDDINGS"
         echo "    JOB_NAME: $JOB_NAME"
         
         # Submit the job
         sbatch --job-name="$JOB_NAME" \
-            --export=ALL,MODELS="$MODELS",DATASET="$DATASET",BATCH_SIZE="$BATCH_SIZE",SOURCE_LANG="$SOURCE_LANG",SPLIT="$SPLIT",OUTPUT_DIR="$OUTPUT_DIR",TARGET_LANGUAGES="$TARGET_LANGUAGES",NORMALIZE_EMBEDDINGS="$NORMALIZE_EMBEDDINGS" \
+            --export=ALL,MODELS="$MODELS",DATASET="$DATASET",BATCH_SIZE="$BATCH_SIZE",SPLIT="$SPLIT",OUTPUT_DIR="$OUTPUT_DIR",LANGUAGE_PAIRS_FILE="$LANGUAGE_PAIRS_FILE",NORMALIZE_EMBEDDINGS="$NORMALIZE_EMBEDDINGS" \
             ./benchmarking_multi.sh
         
         echo ""

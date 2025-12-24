@@ -89,15 +89,59 @@ def load_datasets(
     try:
         source_ds = ds.filter(lambda x: x["lang"] == source_lang)
         target_ds = ds.filter(lambda x: x["lang"] == target_lang)
-        logging.info(f"Successfully loaded datasets for {source_lang} -> {target_lang}")
-        logging.info(f"Source dataset size: {len(source_ds)}")
-        logging.info(f"Target dataset size: {len(target_ds)}")
+        # logging.info(f"Successfully loaded datasets for {source_lang} -> {target_lang}")
+        # logging.info(f"Source dataset size: {len(source_ds)}")
+        # logging.info(f"Target dataset size: {len(target_ds)}")
 
         return source_ds, target_ds
 
     except Exception as e:
         logging.error(f"Failed to load datasets {source_lang} -> {target_lang}: {e}")
         return None, None
+
+
+def parse_language_pairs_file(file_path: str) -> List[Tuple[str, str]]:
+    """Parse language pairs from a file
+    
+    Each line should be in format: source_lang-target_lang (e.g., zho_Hans-eng_Latn)
+    
+    Args:
+        file_path: Path to the language pairs file
+        
+    Returns:
+        List of (source_lang, target_lang) tuples
+    """
+    language_pairs = []
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):  # Skip empty lines and comments
+                    continue
+                
+                if '-' not in line:
+                    logging.warning(f"Line {line_num}: Invalid format '{line}', expected 'source_lang-target_lang'. Skipping.")
+                    continue
+                
+                parts = line.split('-', 1)  # Split only on first '-' in case lang codes contain '-'
+                if len(parts) != 2:
+                    logging.warning(f"Line {line_num}: Invalid format '{line}'. Skipping.")
+                    continue
+                
+                source_lang, target_lang = parts[0].strip(), parts[1].strip()
+                if source_lang and target_lang:
+                    language_pairs.append((source_lang, target_lang))
+                else:
+                    logging.warning(f"Line {line_num}: Empty language code in '{line}'. Skipping.")
+                    
+        logging.info(f"Loaded {len(language_pairs)} language pairs from {file_path}")
+        return language_pairs
+    except FileNotFoundError:
+        logging.error(f"Language pairs file not found: {file_path}")
+        return []
+    except Exception as e:
+        logging.error(f"Failed to read language pairs file: {e}")
+        return []
 
 
 def process_dataset(
@@ -118,25 +162,35 @@ def process_dataset(
 
     ds = load_dataset(args.dataset_name, split=args.split)
 
-    # Get available languages
-    if args.target_languages:
-        target_languages = args.target_languages
-        logging.info(f"Using specified target languages: {target_languages}")
-    else:
-        all_languages = get_available_languages(ds)
-        if not all_languages:
-            logging.error("Could not retrieve available languages. Exiting.")
-            return 0, 0, 0
-        # Remove source language from target languages
-        target_languages = sorted([lang for lang in all_languages if lang != args.source_lang])
-    logging.info(
-        f"Found {len(target_languages)} target languages (excluding source language {args.source_lang})"
-    )
+    # Get available languages in the dataset
+    available_languages = set(get_available_languages(ds))
+    if not available_languages:
+        logging.error("Could not retrieve available languages. Exiting.")
+        return 0, 0, 0
+    logging.info(f"Dataset has {len(available_languages)} available languages")
 
-    # Generate language pairs
-    language_pairs = [
-        (args.source_lang, target_lang) for target_lang in target_languages
-    ]
+    # Load language pairs from file
+    language_pairs = parse_language_pairs_file(args.language_pairs_file)
+    if not language_pairs:
+        logging.error("No valid language pairs found. Exiting.")
+        return 0, 0, 0
+    
+    # Filter language pairs to only include those available in the dataset
+    valid_language_pairs = []
+    for source_lang, target_lang in language_pairs:
+        if source_lang not in available_languages:
+            logging.warning(f"Source language '{source_lang}' not in dataset. Skipping pair {source_lang}-{target_lang}.")
+            continue
+        if target_lang not in available_languages:
+            logging.warning(f"Target language '{target_lang}' not in dataset. Skipping pair {source_lang}-{target_lang}.")
+            continue
+        valid_language_pairs.append((source_lang, target_lang))
+    
+    logging.info(f"Found {len(valid_language_pairs)} valid language pairs out of {len(language_pairs)} total pairs")
+    
+    if not valid_language_pairs:
+        logging.error("No valid language pairs available in dataset. Exiting.")
+        return 0, 0, 0
 
     # Results storage
     results = []
@@ -145,9 +199,9 @@ def process_dataset(
     failed_count = 0
 
     # Evaluate across all language pairs
-    for source_lang, target_lang in language_pairs:
+    for source_lang, target_lang in valid_language_pairs:
         logging.info(
-            f"Processing language pair: {source_lang} -> {target_lang} ({processed_count + skipped_count + failed_count + 1}/{len(language_pairs)})"
+            f"Processing language pair: {source_lang} -> {target_lang} ({processed_count + skipped_count + failed_count + 1}/{len(valid_language_pairs)})"
         )
 
         # Check if already processed
@@ -561,12 +615,6 @@ def main() -> None:
         help="Dataset split (default: 'devtest')",
     )
     parser.add_argument(
-        "--source_lang",
-        type=str,
-        default="eng_Latn",
-        help="Source language code",
-    )
-    parser.add_argument(
         "--output_dir",
         type=str,
         default="./results",
@@ -579,15 +627,15 @@ def main() -> None:
         help="Batch size for encoding (default: 32)",
     )
     parser.add_argument(
+        "--language_pairs_file",
+        type=str,
+        required=True,
+        help="Path to file containing language pairs (one per line, format: source_lang-target_lang)",
+    )
+    parser.add_argument(
         "--skip_processed",
         action="store_true",
         help="Skip language pairs that have already been processed",
-    )
-    parser.add_argument(
-        "--target_languages",
-        type=str,
-        nargs="*",
-        help="Specific target languages to evaluate (if not provided, evaluates all)",
     )
     parser.add_argument(
         "--normalize_embeddings",
@@ -608,11 +656,10 @@ def main() -> None:
     logging.info(f"  Models: {args.models}")
     logging.info(f"  Ensemble Name: {args.ensemble_name if args.ensemble_name else 'auto-generated'}")
     logging.info(f"  Use CCA: {args.use_cca}")
-    logging.info(f"  Source Language: {args.source_lang}")
     logging.info(f"  Output Directory: {args.output_dir}")
     logging.info(f"  Batch Size: {args.batch_size}")
+    logging.info(f"  Language Pairs File: {args.language_pairs_file}")
     logging.info(f"  Skip Processed: {args.skip_processed}")
-    logging.info(f"  Target Languages: {args.target_languages}")
     logging.info(f"  Normalize Embeddings: {args.normalize_embeddings}")
     logging.info("=" * 80)
 
@@ -662,7 +709,7 @@ def main() -> None:
     logging.info(f"Ensemble with {len(models)} models")
     logging.info(f"Models: {', '.join(models)}")
     logging.info(f"Dataset: {args.dataset_name}")
-    logging.info(f"Source Language: {args.source_lang}")
+    logging.info(f"Language Pairs File: {args.language_pairs_file}")
     logging.info(
         f"Total language pairs: {processed_count + skipped_count + failed_count}"
     )

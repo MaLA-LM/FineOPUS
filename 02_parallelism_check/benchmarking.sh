@@ -7,8 +7,8 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
 #SBATCH --mem=64G
-#SBATCH --time=0-01:00:00
-#SBATCH --account=project_462000941
+#SBATCH --time=1-00:00:00
+#SBATCH --account=project_462000787
 
 start_time=$(date +%s)
 echo "Job started at: $(date)"
@@ -18,9 +18,8 @@ MODEL="${MODEL}"
 DATASET="${DATASET:-Zihao-Li/FLORES-200}"
 SPLIT="${SPLIT:-test}"
 BATCH_SIZE="${BATCH_SIZE:-16}"
-SOURCE_LANG="${SOURCE_LANG:-eng_Latn}"
 OUTPUT_DIR="${OUTPUT_DIR:-./results}"
-TARGET_LANGUAGES="${TARGET_LANGUAGES:-}"
+LANGUAGE_PAIRS_FILE="${LANGUAGE_PAIRS_FILE:-./language_pairs.txt}"
 NORMALIZE_EMBEDDINGS="${NORMALIZE_EMBEDDINGS:-false}"
 
 # Activate environment
@@ -41,15 +40,10 @@ BASE_CMD="srun python ./benchmarking.py \
   --dataset_name \"$DATASET\" \
   --model \"$MODEL\" \
   --split \"$SPLIT\" \
-  --source_lang \"$SOURCE_LANG\" \
   --output_dir \"$OUTPUT_DIR\" \
   --batch_size \"$BATCH_SIZE\" \
+  --language_pairs_file \"$LANGUAGE_PAIRS_FILE\" \
   --skip_processed"
-
-# Add target languages if specified
-if [ -n "$TARGET_LANGUAGES" ]; then
-    BASE_CMD="$BASE_CMD --target_languages $TARGET_LANGUAGES"
-fi
 
 # Add normalize_embeddings flag if set to true
 if [ "$NORMALIZE_EMBEDDINGS" = "true" ]; then
