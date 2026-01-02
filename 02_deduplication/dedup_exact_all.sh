@@ -16,14 +16,14 @@ TMP_DIR="/scratch/project_462000964/FineOPUS/tmp"
 TASK_LIST_FILE="incomplete_folders_dedup.tmp.txt"
 
 # Job Size: How many folders per single Slurm array task?
-#    Deduplication is heavy. Keep this LOW (e.g., 1 to 5) so jobs finish within time limits.
-CHUNK_SIZE=10000 
+#    Deduplication is heavy. Keep this LOW (e.g., 1 to 5) for high-resource languages so jobs finish within time limits.
+CHUNK_SIZE=5 
 # ---------------------
 
 # 1. Find all possible folders from DATA_DIR
 echo "Finding all folders in $DATA_DIR..."
 
-# -printf "%f\n" tells find to print only the folder name (e.g., "en-fr", "de-es")
+# -printf "%f\n" tells find to print only the folder name (e.g., "eng_Latn-fra_Latn")
 find "$DATA_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort > all_folders.tmp
 
 NUM_ALL_FOLDERS=$(wc -l < all_folders.tmp)

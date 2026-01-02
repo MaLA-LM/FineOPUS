@@ -33,17 +33,18 @@ echo "Processing lines $START_LINE to $END_LINE from $TASK_LIST_FILE"
 # Loop through the assigned folders
 for FOLDER_NAME in $FOLDERS_TO_PROCESS; do
     echo "------------------------------------------------"
-    echo "Processing dataset: $FOLDER_NAME"
-    
     FULL_INPUT_PATH="${DATA_DIR}/${FOLDER_NAME}"
-    echo "Deduplicating language pair: $lang_pair"
+    echo "Deduplicating language pair: $FOLDER_NAME"
     ls "$FULL_INPUT_PATH"
     
+    OWN_TMP_DIR="$TMP_DIR/${FOLDER_NAME}"
+    mkdir -p "$OWN_TMP_DIR"
+
     # Run the Python script
     python -u exact_dedup.py \
         --data_dir "$FULL_INPUT_PATH" \
         --out_dir "$OUT_DIR" \
-        --temp_dir "$TMP_DIR" \
+        --temp_dir "$OWN_TMP_DIR" \
         --stats_file "$STATS_FILE" \
         --src_col "source_text" \
         --trg_col "target_text" \
