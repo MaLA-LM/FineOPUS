@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 #SBATCH --job-name=dedup       # A descriptive name for your job
-#SBATCH --account=project_462000964      # IMPORTANT: Replace with your project ID
+#SBATCH --account=project_462001050      # IMPORTANT: Replace with your project ID
 #SBATCH --partition=small           # The partition (queue) to submit to.
 #SBATCH --nodes=1                   # Request 1 node
 #SBATCH --ntasks-per-node=1         # Run 1 main task (your python script)

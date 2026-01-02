@@ -5,78 +5,98 @@ import argparse
 import sys
 import csv
 import time
+import shutil
 
 def deduplicate_with_duckdb(input_files, output_dir, max_lines_per_shard, src_col, trg_col, stats_file_path, compression='SNAPPY', memory_limit="10GB", temp_dir=None):
     """
-    Recommended for massive datasets.
-    DuckDB automatically manages memory, spills to disk, and partitions output.
+    Deduplicates Parquet files using DuckDB with disk-based offloading to prevent OOM.
     """
     print(f"--- Starting DuckDB Deduplication ---")
     print(f"Processing {len(input_files)} input files.")
     print(f"Deduplicating based on columns: '{src_col}' and '{trg_col}'")
     print(f"Output Directory: {output_dir}")
     print(f"Max Lines Per Shard: {max_lines_per_shard:_}")
-    if temp_dir:
-        print(f"Temp Directory: {temp_dir}")
-    
+    print(f"Memory Limit: {memory_limit}")
+
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
+    
+    # Define a path for the temporary DuckDB database file.
+    # Using a physical file instead of :memory: forces DuckDB 
+    # to page to disk immediately, respecting the memory limit strictly.
+    db_file_path = ":memory:"
     if temp_dir:
         os.makedirs(temp_dir, exist_ok=True)
+        # We create a specific file for the DB state
+        db_file_path = os.path.join(temp_dir, "dedup_process.duckdb")
+        print(f"Using Disk-Based Database at: {db_file_path}")
+    else:
+        print("WARNING: No temp_dir provided. Running in-memory (High OOM Risk).")
 
-    # 1. Connect to an in-memory database
-    con = duckdb.connect()
+    con = None
+    try:
+        # 1. Connect to the database (Disk-based if temp_dir is provided)
+        con = duckdb.connect(database=db_file_path)
 
-    # 2. Configure Memory & Performance Limits
-    if temp_dir:
-        # Normalize path for SQL
-        safe_temp_dir = temp_dir.replace(os.sep, '/')
-        con.execute(f"PRAGMA temp_directory='{safe_temp_dir}';")
+        # 2. Configure Memory & Performance Limits
+        if temp_dir:
+            # Also set the temp_directory for intermediate query spilling (sorting/grouping buffers)
+            safe_temp_dir = temp_dir.replace(os.sep, '/')
+            con.execute(f"PRAGMA temp_directory='{safe_temp_dir}';")
+            
+        con.execute(f"PRAGMA memory_limit='{memory_limit}';")
+        # Disabling order preservation speeds up processing significantly
+        con.execute("PRAGMA preserve_insertion_order=FALSE;")
+        # Allow multi-threading
+        con.execute("PRAGMA threads=4;") 
         
-    con.execute(f"PRAGMA memory_limit='{memory_limit}';")
-    con.execute("PRAGMA preserve_insertion_order=FALSE;")
-    
-    # Escape paths for SQL to ensure they work on Windows and inside the query string
-    files_sql = ", ".join([f"'{f.replace(os.sep, '/')}'" for f in input_files])
-    
-    # --- STEP A: Count Lines BEFORE Deduplication ---
-    print("Counting input lines...")
-    try:
-        count_query_before = f"SELECT COUNT(*) FROM read_parquet([{files_sql}])"
-        input_count = con.execute(count_query_before).fetchone()[0]
-        print(f"Total Input Lines: {input_count:_}")
-    except Exception as e:
-        print(f"Warning: Could not count input lines: {e}")
-        input_count = 0
+        # Escape paths for SQL to ensure they work on Windows and inside the query string
+        files_sql = ", ".join([f"'{f.replace(os.sep, '/')}'" for f in input_files])
+        
+        # --- STEP A: Count Lines BEFORE Deduplication ---
+        print("Counting input lines...")
+        try:
+            # Using count(*) on parquet metadata is usually fast
+            count_query_before = f"SELECT COUNT(*) FROM read_parquet([{files_sql}])"
+            # This forces a scan of a specific column to ensure data integrity
+            # SELECT COUNT(1) FROM read_parquet([{files_sql}]) WHERE {src_col} IS NOT NULL AND {trg_col} IS NOT NULL
+            input_count = con.execute(count_query_before).fetchone()[0]
+            print(f"Total Input Lines: {input_count:_}")
+        except Exception as e:
+            print(f"Warning: Could not count input lines: {e}")
+            input_count = 0
 
-    # 3. Construct the Query
-    query = f"""
-        COPY (
-            SELECT 
-                * EXCLUDE (rn),
-                (rn - 1) // {max_lines_per_shard} AS shard_id
-            FROM (
+        # 3. Construct the Query
+        # Note: We calculate shard_id dynamically.
+        # The inner SELECT DISTINCT handles the deduplication.
+        # The middle SELECT adds a Row Number.
+        # The outer COPY writes to Parquet partitions based on that Row Number.
+        query = f"""
+            COPY (
                 SELECT 
-                    *, 
-                    ROW_NUMBER() OVER () AS rn
+                    * EXCLUDE (rn),
+                    (rn - 1) // {max_lines_per_shard} AS shard_id
                 FROM (
-                    SELECT DISTINCT {src_col}, {trg_col} 
-                    FROM read_parquet([{files_sql}])
-                    WHERE {src_col} IS NOT NULL AND {trg_col} IS NOT NULL
+                    SELECT 
+                        *, 
+                        ROW_NUMBER() OVER () AS rn
+                    FROM (
+                        SELECT DISTINCT {src_col}, {trg_col} 
+                        FROM read_parquet([{files_sql}])
+                        WHERE {src_col} IS NOT NULL AND {trg_col} IS NOT NULL
+                    )
                 )
-            )
-        ) TO '{output_dir.replace(os.sep, '/')}' 
-        (FORMAT PARQUET, PARTITION_BY (shard_id), COMPRESSION {compression.upper()}, OVERWRITE_OR_IGNORE);
-    """
-    
-    try:
-        print("Executing Deduplication Query (this may take time)...")
+            ) TO '{output_dir.replace(os.sep, '/')}' 
+            (FORMAT PARQUET, PARTITION_BY (shard_id), COMPRESSION {compression.upper()}, OVERWRITE_OR_IGNORE);
+        """
+        
+        print("Executing Deduplication Query (this may take time, relying on disk spill)...")
         con.execute(query)
         print(f"Success! Sharded output saved to: {output_dir}")
 
         # --- STEP B: Count Lines AFTER Deduplication ---
-        # We query the output directory specifically. 
         print("Counting output lines...")
+        # We query the output directory specifically. 
         output_glob = os.path.join(output_dir, "**", "*.parquet").replace(os.sep, '/')
         count_query_after = f"SELECT COUNT(*) FROM read_parquet('{output_glob}')"
         output_count = con.execute(count_query_after).fetchone()[0]
@@ -113,20 +133,22 @@ def deduplicate_with_duckdb(input_files, output_dir, max_lines_per_shard, src_co
         # --- STEP C: Write Stats to CSV ---
         if stats_file_path:
             print(f"Writing statistics to {stats_file_path}...")
-            # Calculate removed rows
             removed_count = input_count - output_count
             
             # Check if file exists to write header
             file_exists = os.path.isfile(stats_file_path)
             
+            # Ensure stats dir exists
+            stats_dir = os.path.dirname(stats_file_path)
+            if stats_dir:
+                os.makedirs(stats_dir, exist_ok=True)
+
             with open(stats_file_path, mode='a', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
                 
-                # 1. Update Header: Remove src/trg cols, put timestamp last
                 if not file_exists:
                     writer.writerow(['lang_pair', 'input_rows', 'output_rows', 'rows_removed', 'timestamp'])
                 
-                # 2. Update Row: Remove src/trg cols, put timestamp last
                 writer.writerow([
                     base_dir_name,
                     input_count,
@@ -139,22 +161,39 @@ def deduplicate_with_duckdb(input_files, output_dir, max_lines_per_shard, src_co
 
     except Exception as e:
         print(f"Error during DuckDB processing: {e}")
+        # Re-raise to ensure non-zero exit code on failure
+        sys.exit(1)
     finally:
-        con.close()
+        # Close connection explicitly
+        if con:
+            con.close()
+        
+        # CLEANUP: Remove the temporary database file
+        # This is important because the DB file can grow very large during processing
+        if temp_dir and db_file_path != ":memory:" and os.path.exists(db_file_path):
+            print(f"Cleaning up temporary database file: {db_file_path}")
+            try:
+                os.remove(db_file_path)
+                # Optional: Remove WAL (Write Ahead Log) files if they exist
+                wal_path = db_file_path + ".wal"
+                if os.path.exists(wal_path):
+                    os.remove(wal_path)
+            except OSError as e:
+                print(f"Warning: Could not remove temp DB file: {e}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Deduplicate and shard Parquet datasets.")
+    parser = argparse.ArgumentParser(description="Deduplicate and shard Parquet datasets (Disk-Backed).")
     
-    parser.add_argument("--data_dir", required=True, help="Root directory containing input parquet files (searched recursively).")
+    parser.add_argument("--data_dir", required=True, help="Root directory containing input parquet files.")
     parser.add_argument("--out_dir", required=True, help="Root directory for output.")
     parser.add_argument("--stats_file", required=True, help="Path to the CSV file where stats will be saved.")
-    parser.add_argument("--src_col", default="source_text", help="Name of source column (default: source_text)")
-    parser.add_argument("--trg_col", default="target_text", help="Name of target column (default: target_text)")
-    parser.add_argument("--max_lines", type=int, default=100_000_000, help="Maximum lines per output shard (DuckDB only).")
-    parser.add_argument("--temp_dir", help="Directory for DuckDB temporary spill files (default: system tmp).")
-    parser.add_argument("--compression", default="SNAPPY", help="Compression codec (SNAPPY, ZSTD, GZIP).")
-    parser.add_argument("--memory_limit", default="10GB", help="Memory limit for DuckDB (e.g., 10GB, 500MB).")
+    parser.add_argument("--src_col", default="source_text", help="Name of source column.")
+    parser.add_argument("--trg_col", default="target_text", help="Name of target column.")
+    parser.add_argument("--max_lines", type=int, default=100_000_000, help="Maximum lines per output shard.")
+    parser.add_argument("--temp_dir", required=True, help="Directory for DuckDB temp files (REQUIRED for large data).")
+    parser.add_argument("--compression", default="SNAPPY", help="Compression codec (SNAPPY, ZSTD).")
+    parser.add_argument("--memory_limit", default="10GB", help="RAM limit for DuckDB (e.g., 10GB).")
     
     args = parser.parse_args()
 

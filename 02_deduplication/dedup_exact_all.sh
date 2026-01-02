@@ -5,19 +5,19 @@ set -e # Exit immediately if a command fails
 rm -f slurmlog/dedup_*.log 
 
 # --- Configuration ---
-DATA_DIR="/scratch/project_462000941/FineOPUS/fineopus-original"
-OUT_DIR="/scratch/project_462000964/FineOPUS/intermediate/original_dedup_exact"
+DATA_DIR="/scratch/project_462001069/members/zihao/FineOPUS/fineopus-original-ReLID-ENSEMBLED"
+OUT_DIR="/scratch/project_462000941/FineOPUS/FineOPUS-deduplicated"
 STATS_FILE="/scratch/project_462000941/members/shaoxion/FineOPUS/02_deduplication/exact_dedup_stats.csv"
 
 # Temporary Directory for intermediate files during deduplication DUCKDB processing
 TMP_DIR="/scratch/project_462000964/FineOPUS/tmp"
 
 # Task List: Temporary file to store folders that still need processing
-TASK_LIST_FILE="incomplete_folders_dedup.txt"
+TASK_LIST_FILE="incomplete_folders_dedup.tmp.txt"
 
 # Job Size: How many folders per single Slurm array task?
 #    Deduplication is heavy. Keep this LOW (e.g., 1 to 5) so jobs finish within time limits.
-CHUNK_SIZE=80 
+CHUNK_SIZE=10000 
 # ---------------------
 
 # 1. Find all possible folders from DATA_DIR
