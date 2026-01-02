@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --time=1-00:00:00
 #SBATCH --mem=32G
-#SBATCH --account=project_462000941
+#SBATCH --account=project_462001050
 
 start_time=$(date +%s)
 echo "Job started at: $(date)"
@@ -19,8 +19,8 @@ module load pytorch/2.5
 
 export HF_HUB_ENABLE_HF_TRANSFER=1
 
-BASE_PATH="/scratch/project_462000941/members/zihao/OPUS2410/01_language_reID/mala-opus-dedup-2410-ReLID-ENSEMBLED-V2"
-REPO_ID="MaLA-LM/mala-opus-dedup-2410-reLID"
+BASE_PATH="/scratch/project_462000941/FineOPUS/FineOPUS-deduplicated"
+REPO_ID="MaLA-LM/FineOPUS-Deduplicated"
 PATH_IN_REPO=""
 REVISION="main"
 BATCH_SIZE=10
