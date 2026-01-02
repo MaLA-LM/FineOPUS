@@ -1,13 +1,13 @@
 #!/bin/bash
 #
 #SBATCH --job-name=precomp       # A descriptive name for your job
-#SBATCH --account=project_462000964      # IMPORTANT: Replace with your project ID
-#SBATCH --partition=debug           # The partition (queue) to submit to.
+#SBATCH --account=project_462001050      # IMPORTANT: Replace with your project ID
+#SBATCH --partition=small           # The partition (queue) to submit to.
 #SBATCH --nodes=1                   # Request 1 node
 #SBATCH --ntasks-per-node=1         # Run 1 main task (your python script)
 #SBATCH --cpus-per-task=16          # Request 16 CPU cores for this one task
 #SBATCH --mem=64G                   # Total memory for all 16 cores (14G/core)
-#SBATCH --time=00:30:00              # Maximum execution time (HH:MM:SS)
+#SBATCH --time=72:00:00              # Maximum execution time (HH:MM:SS)
 #SBATCH --output=slurmlog/%x_%A_%a.out.log  # Standard output log file
 #SBATCH --error=slurmlog/%x_%A_%a.err.log   # Standard error log file
 
@@ -18,7 +18,6 @@ echo "Job started at $(date)"
 echo "SLURM allocated ${SLURM_CPUS_PER_TASK} CPUs to this task."
 
 module load cray-python
-pip list |grep pyarrow
 
 # Calculate lines to process from the TASK_LIST_FILE
 START_LINE=$(( (SLURM_ARRAY_TASK_ID - 1) * CHUNK_SIZE + 1 ))

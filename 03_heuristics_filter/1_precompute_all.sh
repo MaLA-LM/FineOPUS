@@ -5,16 +5,16 @@ set -e # Exit immediately if a command fails
 rm -f slurmlog/precomp_*.log 
 
 # --- Configuration ---
-DATA_DIR="/scratch/project_462000941/FineOPUS/fineopus-original"
-OUT_DIR="/scratch/project_462000964/FineOPUS/intermediate/original_filter_precompute"
+DATA_DIR="/scratch/project_462000941/FineOPUS/FineOPUS-deduplicated"
+OUT_DIR="/scratch/project_462000941/FineOPUS/intermediate/filter_precompute"
 STATS_FILE="/scratch/project_462000941/members/shaoxion/FineOPUS/03_heuristics_filter/precompute_filter.csv"
 
 
 # Task List: Temporary file to store folders that still need processing
-TASK_LIST_FILE="incomplete_folders_precompute_filter.txt"
+TASK_LIST_FILE="tmp.incomplete_folders_precompute_filter.txt"
 
 # Job Size: How many folders per single Slurm array task?
-CHUNK_SIZE=50000 
+CHUNK_SIZE=100 
 # ---------------------
 
 # 1. Find all possible folders from DATA_DIR
