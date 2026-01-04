@@ -48,7 +48,7 @@ def deduplicate_with_duckdb(input_files, output_dir, max_lines_per_shard, src_co
         # Disabling order preservation speeds up processing significantly
         con.execute("PRAGMA preserve_insertion_order=FALSE;")
         # Allow multi-threading
-        con.execute("PRAGMA threads=4;") 
+        con.execute("PRAGMA threads=16;") 
         
         # Escape paths for SQL to ensure they work on Windows and inside the query string
         files_sql = ", ".join([f"'{f.replace(os.sep, '/')}'" for f in input_files])
@@ -66,35 +66,35 @@ def deduplicate_with_duckdb(input_files, output_dir, max_lines_per_shard, src_co
             print(f"Warning: Could not count input lines: {e}")
             input_count = 0
 
-        # 3. Construct the Query
-        # Note: We calculate shard_id dynamically.
-        # The inner SELECT DISTINCT handles the deduplication.
-        # The middle SELECT adds a Row Number.
-        # The outer COPY writes to Parquet partitions based on that Row Number.
+        # --- STEP B: Construct the Deduplication Query ---
+        # 1. We select everything from the parquet files.
+        # 2. QUALIFY filters the result set: for every unique (src, trg) pair, 
+        #    we only keep the first row (rn_dedup = 1).
+        # 3. We then wrap that to generate a second row number (rn_shard) for sharding.
         query = f"""
             COPY (
                 SELECT 
-                    * EXCLUDE (rn),
-                    (rn - 1) // {max_lines_per_shard} AS shard_id
+                    * EXCLUDE (rn_shard),
+                    (rn_shard - 1) // {max_lines_per_shard} AS shard_id
                 FROM (
                     SELECT 
                         *, 
-                        ROW_NUMBER() OVER () AS rn
+                        ROW_NUMBER() OVER () AS rn_shard
                     FROM (
-                        SELECT DISTINCT {src_col}, {trg_col} 
-                        FROM read_parquet([{files_sql}])
+                        SELECT * FROM read_parquet([{files_sql}])
                         WHERE {src_col} IS NOT NULL AND {trg_col} IS NOT NULL
+                        QUALIFY ROW_NUMBER() OVER (PARTITION BY {src_col}, {trg_col}) = 1
                     )
                 )
             ) TO '{output_dir.replace(os.sep, '/')}' 
             (FORMAT PARQUET, PARTITION_BY (shard_id), COMPRESSION {compression.upper()}, OVERWRITE_OR_IGNORE);
         """
         
-        print("Executing Deduplication Query (this may take time, relying on disk spill)...")
+        print("Executing Deduplication Query (Keeping metadata)...")
         con.execute(query)
         print(f"Success! Sharded output saved to: {output_dir}")
 
-        # --- STEP B: Count Lines AFTER Deduplication ---
+        # --- STEP C: Count Lines AFTER Deduplication ---
         print("Counting output lines...")
         # We query the output directory specifically. 
         output_glob = os.path.join(output_dir, "**", "*.parquet").replace(os.sep, '/')
@@ -130,7 +130,7 @@ def deduplicate_with_duckdb(input_files, output_dir, max_lines_per_shard, src_co
             except Exception as e:
                 print(f"Warning: Could not process partition folder {folder}: {e}")
 
-        # --- STEP C: Write Stats to CSV ---
+        # --- Write Stats to CSV ---
         if stats_file_path:
             print(f"Writing statistics to {stats_file_path}...")
             removed_count = input_count - output_count
