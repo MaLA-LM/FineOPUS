@@ -1,0 +1,19 @@
+# Core data/IO
+pandas
+pyarrow
+pydantic
+
+# Bicleaner scorer
+bicleaner-ai[and-cuda]
+
+# Gemma scorer (vLLM + DSPy)
+dspy-ai
+vLLM
+
+# MetricX-24 scorer
+torch
+transformers
+mbrs
+
+# Comet scorer
+unbabel-comet
