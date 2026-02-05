@@ -16,9 +16,10 @@ if __package__ is None or __package__ == "":
         sys.path.insert(0, str(repo_root))
 
 from dataset.manifest import ManifestEntry
-from dataset.mediator import DEFAULT_DATASET_ID, Example, get_dataset
+from dataset.mediator import Example, get_dataset
 from models.gemma_qe import QEResult
 from prompts.gemma_prompt import render_prompt
+from src.scoring.args import add_common_scoring_args
 from src.scoring.cli import resolve_output_path, validate_args
 from src.scoring.frames import build_frames
 from src.scoring.output_path import sanitize_model_tag
@@ -35,29 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Score a dataset split with Gemma-3 12B via vLLM + DSPy."
     )
-    parser.add_argument(
-        "--dataset",
-        default=DEFAULT_DATASET_ID,
-        help="Dataset id to use.",
-    )
-    parser.add_argument("--src-lang", help="Source language code.")
-    parser.add_argument("--tgt-lang", help="Target language code.")
-    parser.add_argument(
-        "--split",
-        default="devtest",
-        help="Dataset split to score.",
-    )
-    parser.add_argument(
-        "--root",
-        default=None,
-        help="Root directory of the dataset files (defaults to dataset root).",
-    )
-    parser.add_argument("--output", default=None, help="Output Parquet path.")
-    parser.add_argument(
-        "--output-base",
-        default=None,
-        help="Base output directory for partitioned Parquet dataset output.",
-    )
+    add_common_scoring_args(parser)
     parser.add_argument(
         "--model",
         default="gemma-3-12b-it",
@@ -101,46 +80,6 @@ def parse_args() -> argparse.Namespace:
             "Continue scoring when model outputs fail validation; "
             "record NaN scores and report failures."
         ),
-    )
-    parser.add_argument(
-        "--resume",
-        dest="resume",
-        action="store_true",
-        default=True,
-        help="Skip completed outputs when they are valid.",
-    )
-    parser.add_argument(
-        "--no-resume",
-        dest="resume",
-        action="store_false",
-        help="Recompute outputs even if they already exist.",
-    )
-    parser.add_argument(
-        "--manifest",
-        default=None,
-        help="TSV manifest with columns: src_lang, tgt_lang, split.",
-    )
-    parser.add_argument(
-        "--discover-all",
-        action="store_true",
-        help="Discover all directions under --root and score each.",
-    )
-    parser.add_argument(
-        "--worker",
-        action="store_true",
-        help="Continuously claim and score free directions from the manifest.",
-    )
-    parser.add_argument(
-        "--worker-max-files",
-        type=int,
-        default=200,
-        help="Max outputs to write before worker exits (0 for unlimited).",
-    )
-    parser.add_argument(
-        "--max-rows",
-        type=int,
-        default=None,
-        help="Optional cap for number of rows (for debugging).",
     )
     return parser.parse_args()
 
