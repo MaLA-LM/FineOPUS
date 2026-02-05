@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import logging
@@ -30,12 +29,12 @@ def normalize_text(text: str) -> str:
     cleaned = _APOSTROPHE_RE.sub("", cleaned)
     cleaned = _PUNCT_RE.sub(" ", cleaned)
     cleaned = _WHITESPACE_RE.sub(" ", cleaned).strip()
-    
+
     # Extract last word if multiple words present
     words = cleaned.split()
     if len(words) > 1:
         cleaned = words[-1]
-    
+
     return cleaned
 
 
@@ -59,12 +58,16 @@ def base_name_from_model_name(name: str) -> str:
 
 
 def script_preference_from_model_name(name: str) -> Optional[str]:
-    normalized = normalize_text(name)
-    if "romanized" in normalized:
+    cleaned = name.strip().casefold()
+    cleaned = cleaned.replace("&", " and ")
+    cleaned = _APOSTROPHE_RE.sub("", cleaned)
+    cleaned = _PUNCT_RE.sub(" ", cleaned)
+    cleaned = _WHITESPACE_RE.sub(" ", cleaned).strip()
+    if "romanized" in cleaned:
         return "Latn"
-    if "chinese" in normalized and "simplified" in normalized:
+    if "chinese" in cleaned and "simplified" in cleaned:
         return "Hans"
-    if "chinese" in normalized and "traditional" in normalized:
+    if "chinese" in cleaned and "traditional" in cleaned:
         return "Hant"
     return None
 
@@ -94,6 +97,7 @@ def apply_alias(base: str) -> str:
     return NAME_ALIASES.get(base, base)
 
 
+# map languages supported by a model to flores200 codes
 def map_model_names_to_flores_codes(
     supported_names: set[str],
     flores200_langcodes: dict[str, str],
