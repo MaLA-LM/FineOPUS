@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-# export HF
+# export HF cache
 export HF_HOME="/scratch/project_2008161/$USER/hf"
 export HF_HUB_CACHE="$HF_HOME/hub"
 export HF_DATASETS_CACHE="$HF_HOME/datasets"
@@ -36,7 +36,7 @@ OUTPUT_DIR="${OUTPUT_DIR:-/scratch/project_2008161/QE_flores200_scores}"
 OUTPUT_BASE="${OUTPUT_BASE:-$OUTPUT_DIR}"
 DATASET="${DATASET:-flores200}"
 VENV_BASE="${VENV_BASE:-${WORKDIR}/envs}"
-MANIFEST="${MANIFEST:-${WORKDIR}/directions.tsv}"
+MANIFEST="${MANIFEST:-${WORKDIR}/flores200_directions.tsv}"
 
 MODE="${MODE:-single}"
 SRC_LANG="${SRC_LANG:-arb_Arab}"
@@ -48,6 +48,7 @@ MAX_ROWS="${MAX_ROWS-}"
 WORKER_MAX_FILES="${WORKER_MAX_FILES:-200}"
 MODEL=""
 
+# vllm/gemma defaults - can be overridden by env vars or CLI args
 MODEL_REPO="${MODEL_REPO:-google/gemma-3-12b-it}"
 MODEL_NAME="${MODEL_NAME:-}"
 VLLM_HOST="${VLLM_HOST:-127.0.0.1}"
@@ -220,6 +221,7 @@ else
     VENV_PATH="${COMET_VENV:-${VENV_BASE}/comet_venv}"
 fi
 
+# ensure required env vars are set and paths exist
 if [ "$BACKEND" = "bicleaner" ]; then
     if [ ! -d "$BICLEANER_INST" ]; then
         echo "ERROR: bicleaner env not found: $BICLEANER_INST"
@@ -232,6 +234,7 @@ else
     fi
 fi
 
+# worker mode requires a manifest file
 if [ "$MODE" = "worker" ]; then
     if [ -z "${MANIFEST:-}" ]; then
         echo "ERROR: manifest not set (use --manifest or MANIFEST)."
@@ -243,6 +246,8 @@ if [ "$MODE" = "worker" ]; then
     fi
 fi
 
+
+# set up environment and paths based on backend
 if [ "$BACKEND" = "bicleaner" ]; then
     module --force purge
     module load tykky
@@ -256,10 +261,12 @@ if [ "$BACKEND" = "bicleaner" ]; then
 
     export PATH="$BICLEANER_INST/bin:$PATH"
 else
+# all other backends use a Python venv on top of pytorch module
     module load pytorch
     source "${VENV_PATH}/bin/activate"
 fi
 
+# ensure logs directory exists
 mkdir -p "${WORKDIR}/logs"
 cd "$WORKDIR"
 

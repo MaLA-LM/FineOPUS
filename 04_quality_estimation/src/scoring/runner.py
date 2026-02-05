@@ -135,6 +135,7 @@ def _run_worker(
                 args.root, entry.split, entry.src_lang, args.max_rows
             )
             if args.resume and is_complete_parquet(output_path, expected_rows):
+                print(f"SKIP (exists): {output_path}")
                 continue
 
             lock_path = try_acquire_lock(
@@ -146,6 +147,7 @@ def _run_worker(
 
             try:
                 if args.resume and is_complete_parquet(output_path, expected_rows):
+                    print(f"SKIP (exists): {output_path}")
                     continue
 
                 print(f"Scoring {entry.src_lang}->{entry.tgt_lang} split={entry.split}")
