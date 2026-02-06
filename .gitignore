@@ -193,6 +193,13 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+
+
+## AI agents
+.codex
+.github
+
+
 # Logs
 /logs/*
 *.jsonl

@@ -1,0 +1,13 @@
+name: bicleaner
+channels:
+  - conda-forge
+  - nvidia
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - pip:
+    - bicleaner-ai[and-cuda]
+    - pydantic
+    - pandas
+    - pyarrow
