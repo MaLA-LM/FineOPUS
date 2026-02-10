@@ -9,6 +9,7 @@ import math
 import unicodedata
 import regex 
 import numpy as np
+import logging
 
 try:
     import rapidfuzz
@@ -20,6 +21,12 @@ try:
     import Levenshtein
 except ImportError:
     Levenshtein = None 
+
+logging.basicConfig(
+    filename='processing_errors.log',
+    level=logging.ERROR,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # ==========================================
 # 0. Multilingual Regex Patterns
@@ -38,9 +45,20 @@ RE_PUNCT_TERM = regex.compile(r'[\p{STerm}.?!;…¿¡\u3002\u06D4\u0964\u0965]+'
 # 1. Helper: Digit Normalization
 # ==========================================
 
+# def normalize_digits_to_ascii(text):
+#     if not text: return ""
+#     return "".join([str(unicodedata.digit(c)) for c in text if c.isdigit()])
+
 def normalize_digits_to_ascii(text):
     if not text: return ""
-    return "".join([str(unicodedata.digit(c)) for c in text if c.isdigit()])
+    digits = []
+    for c in text:
+        try:
+            # Using digit() specifically, but catching errors
+            digits.append(str(unicodedata.digit(c)))
+        except ValueError:
+            continue
+    return "".join(digits)
 
 # ==========================================
 # Helper: Adaptive Word Statistics
@@ -162,10 +180,24 @@ def compute_non_zero_numerals(src_list, trg_list):
         if not src or not trg:
             scores.append(0.0)
             continue
+        
         src_raw = "".join(RE_NUMERALS.findall(src))
         trg_raw = "".join(RE_NUMERALS.findall(trg))
-        src_norm = "".join([str(unicodedata.digit(c)) for c in src_raw if unicodedata.digit(c) != 0])
-        trg_norm = "".join([str(unicodedata.digit(c)) for c in trg_raw if unicodedata.digit(c) != 0])
+        
+        def get_safe_digits(raw_str):
+            res = []
+            for c in raw_str:
+                try:
+                    d = unicodedata.digit(c)
+                    if d != 0:
+                        res.append(str(d))
+                except ValueError:
+                    # Skip characters that claim to be Nd but lack a digit value
+                    continue
+            return "".join(res)
+
+        src_norm = get_safe_digits(src_raw)
+        trg_norm = get_safe_digits(trg_raw)
         
         if not src_norm and not trg_norm:
             scores.append(1.0)
@@ -266,7 +298,7 @@ def process_dataset(input_dir, output_dir, src_col, trg_col, regex_pattern_str=N
         try:
             user_regex = regex.compile(regex_pattern_str)
         except Exception as e:
-            print(f"Error compiling user regex: {e}")
+            logging.error(f"Error compiling user regex: {e}")
             return
 
     files = glob.glob(os.path.join(input_dir, "**", "*.parquet"), recursive=True)
@@ -356,7 +388,7 @@ def process_dataset(input_dir, output_dir, src_col, trg_col, regex_pattern_str=N
                 writer.close()
                 
         except Exception as e:
-            print(f"Error processing {file_name}: {e}")
+            logging.error(f"Error processing {file_name}: {e}")
             if os.path.exists(out_path):
                 try: os.remove(out_path)
                 except: pass
