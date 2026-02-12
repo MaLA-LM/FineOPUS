@@ -1,4 +1,4 @@
-from .gemma_qe import DimScores, QEResult
+from .llm_qe import DimScores, QEResult
 from .language_support import CometLanguages, MetricX24Languages
 from .metricx_spec import ModelSpec, ScoreAdjuster
 

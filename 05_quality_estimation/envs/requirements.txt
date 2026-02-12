@@ -6,7 +6,7 @@ pydantic
 # Bicleaner scorer
 bicleaner-ai[and-cuda]
 
-# Gemma scorer (vLLM + DSPy)
+# LLM scorer (vLLM + DSPy)
 dspy-ai
 vLLM
 

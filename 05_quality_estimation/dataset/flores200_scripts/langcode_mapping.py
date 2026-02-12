@@ -6,15 +6,7 @@ from typing import Optional
 
 LOGGER = logging.getLogger(__name__)
 
-NAME_ALIASES: dict[str, str] = {
-    "oriya": "odia",
-    "persian": "western persian",
-    "western frisian": "frisian",
-    "burmese": "myanmar",
-    "filipino": "tagalog",
-    "scottish gaelic": "gaelic",
-    "uyghur": "uighur",
-}
+NAME_ALIASES: dict[str, str] = {"oriya": "odia"}
 
 _PUNCT_RE = re.compile(r"[-_/.,:;]+")
 _APOSTROPHE_RE = re.compile(r"[']+")
@@ -25,7 +17,6 @@ _ROMANIZED_RE = re.compile(r"\s+romanized\s*$", re.IGNORECASE)
 
 def normalize_text(text: str) -> str:
     cleaned = text.strip().casefold()
-    cleaned = cleaned.replace("&", " and ")
     cleaned = _APOSTROPHE_RE.sub("", cleaned)
     cleaned = _PUNCT_RE.sub(" ", cleaned)
     cleaned = _WHITESPACE_RE.sub(" ", cleaned).strip()
@@ -59,7 +50,6 @@ def base_name_from_model_name(name: str) -> str:
 
 def script_preference_from_model_name(name: str) -> Optional[str]:
     cleaned = name.strip().casefold()
-    cleaned = cleaned.replace("&", " and ")
     cleaned = _APOSTROPHE_RE.sub("", cleaned)
     cleaned = _PUNCT_RE.sub(" ", cleaned)
     cleaned = _WHITESPACE_RE.sub(" ", cleaned).strip()
@@ -99,7 +89,7 @@ def apply_alias(base: str) -> str:
 
 # map languages supported by a model to flores200 codes
 def map_model_names_to_flores_codes(
-    supported_names: set[str],
+    model_supported_names: set[str],
     flores200_langcodes: dict[str, str],
 ) -> tuple[dict[str, set[str]], set[str], list[str]]:
     flores_index = build_flores_index(flores200_langcodes)
@@ -107,18 +97,18 @@ def map_model_names_to_flores_codes(
     supported_codes: set[str] = set()
     unmatched: list[str] = []
 
-    for model_name in sorted(supported_names):
-        base = base_name_from_model_name(model_name)
+    for model_lang_name in sorted(model_supported_names):
+        base = base_name_from_model_name(model_lang_name)
         aliased = apply_alias(base)
         candidates = flores_index.get(aliased, [])
         if not candidates and aliased != base:
             candidates = flores_index.get(base, [])
         if not candidates:
-            unmatched.append(model_name)
-            name_to_codes[model_name] = set()
+            unmatched.append(model_lang_name)
+            name_to_codes[model_lang_name] = set()
             continue
 
-        preferred_script = script_preference_from_model_name(model_name)
+        preferred_script = script_preference_from_model_name(model_lang_name)
         if preferred_script is not None:
             chosen = {
                 code
@@ -134,11 +124,11 @@ def map_model_names_to_flores_codes(
             if len(scripts) > 1:
                 LOGGER.info(
                     "No script preference for %s; mapping to %s",
-                    model_name,
+                    model_lang_name,
                     sorted(chosen),
                 )
 
-        name_to_codes[model_name] = chosen
+        name_to_codes[model_lang_name] = chosen
         supported_codes.update(chosen)
 
     return name_to_codes, supported_codes, unmatched

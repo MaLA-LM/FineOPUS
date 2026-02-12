@@ -53,12 +53,12 @@ class _BaseLanguageSupport:
     ) -> None:
         dataset = _resolve_dataset(dataset)
         self._supported_languages = supported_languages
-        mapping = _resolve_language_codes(language_codes, dataset)
+        langcode = _resolve_language_codes(language_codes, dataset)
         mapper = _resolve_name_to_code_mapper(name_to_code_mapper, dataset)
         self._code_normalizer = (
             code_normalizer or dataset.code_normalizer or _default_code_normalizer
         )
-        self._support_known = mapping is not None and mapper is not None
+        self._support_known = langcode is not None and mapper is not None
         if not self._support_known:
             self._name_to_codes = {}
             self._supported_codes = set()
@@ -68,7 +68,7 @@ class _BaseLanguageSupport:
             self._name_to_codes,
             self._supported_codes,
             unmatched,
-        ) = mapper(self._supported_languages, mapping)
+        ) = mapper(self._supported_languages, langcode)
         self._unmatched_supported_names = sorted(unmatched)
 
         if self._unmatched_supported_names:
@@ -80,6 +80,7 @@ class _BaseLanguageSupport:
     def get_all_languages(self) -> list[str]:
         return sorted(self._supported_languages)
 
+    # model supported codes of a dataset
     def get_supported_codes(self) -> set[str]:
         return set(self._supported_codes)
 
@@ -221,6 +222,139 @@ class CometLanguages(_BaseLanguageSupport):
             supported_languages,
             language_codes,
             "COMET",
+            dataset=dataset,
+            name_to_code_mapper=name_to_code_mapper,
+            code_normalizer=code_normalizer,
+        )
+
+
+class QwenLanguages(_BaseLanguageSupport):
+    """Class representing languages supported by Qwen model."""
+
+    def __init__(
+        self,
+        language_codes: Optional[dict[str, str]] = None,
+        *,
+        dataset: DatasetAdapter | str | None = None,
+        name_to_code_mapper: Optional[LanguageCodeMapper] = None,
+        code_normalizer: Optional[CodeNormalizer] = None,
+    ) -> None:
+        supported_languages = {
+            "Afrikaans",
+            "Arabic (Standard, Najdi, Levantine, Egyptian, Moroccan, Mesopotamian, Ta'izzi-Adeni, Tunisian)",
+            "Armenian",
+            "Assamese",
+            "Asturian",
+            "Awadhi",
+            "Balinese",
+            "Banjar",
+            "Bashkir",
+            "Basque",
+            "Belarusian",
+            "Bengali",
+            "Bhojpuri",
+            "Bosnian",
+            "Bulgarian",
+            "Burmese",
+            "Catalan",
+            "Cebuano",
+            "Chhattisgarhi",
+            "Chinese (Simplified Chinese, Traditional Chinese, Cantonese)",
+            "Croatian",
+            "Czech",
+            "Danish",
+            "Dari",
+            "Dutch",
+            "Eastern Yiddish",
+            "English",
+            "Estonian",
+            "Faroese",
+            "Finnish",
+            "French",
+            "Friulian",
+            "Galician",
+            "Georgian",
+            "German",
+            "Greek",
+            "Gujarati",
+            "Haitian",
+            "Hebrew",
+            "Hindi",
+            "Hungarian",
+            "Icelandic",
+            "Iloko",
+            "Indonesian",
+            "Irish",
+            "Italian",
+            "Japanese",
+            "Javanese",
+            "Kabuverdianu",
+            "Kannada",
+            "Kazakh",
+            "Khmer",
+            "Korean",
+            "Lao",
+            "Latvian",
+            "Ligurian",
+            "Limburgish",
+            "Lithuanian",
+            "Lombard",
+            "Luxembourgish",
+            "Macedonian",
+            "Magahi",
+            "Maithili",
+            "Malay",
+            "Malayalam",
+            "Maltese",
+            "Marathi",
+            "Minangkabau",
+            "Nepali",
+            "North Azerbaijani",
+            "Northern Uzbek",
+            "Norwegian (Bokmål)",
+            "Norwegian (Nynorsk)",
+            "Occitan",
+            "Oriya",
+            "Pangasinan",
+            "Papiamento",
+            "Persian",
+            "Polish",
+            "Portuguese",
+            "Punjabi",
+            "Romanian",
+            "Russian",
+            "Sardinian",
+            "Serbian",
+            "Sicilian",
+            "Silesian",
+            "Sindhi",
+            "Sinhala",
+            "Slovak",
+            "Slovenian",
+            "Spanish",
+            "Sundanese",
+            "Swahili",
+            "Swedish",
+            "Tagalog",
+            "Tajik",
+            "Tamil",
+            "Tatar",
+            "Telugu",
+            "Thai",
+            "Tok Pisin",
+            "Tosk Albanian",
+            "Turkish",
+            "Ukrainian",
+            "Urdu",
+            "Venetian",
+            "Vietnamese",
+            "Waray (Philippines)",
+            "Welsh",
+        }
+        super().__init__(
+            supported_languages,
+            language_codes,
+            "qwen3-14b",
             dataset=dataset,
             name_to_code_mapper=name_to_code_mapper,
             code_normalizer=code_normalizer,

@@ -48,8 +48,9 @@ MAX_ROWS="${MAX_ROWS-}"
 WORKER_MAX_FILES="${WORKER_MAX_FILES:-200}"
 MODEL=""
 
-# vllm/gemma defaults - can be overridden by env vars or CLI args
-MODEL_REPO="${MODEL_REPO:-google/gemma-3-12b-it}"
+# vllm/llm defaults - can be overridden by env vars or CLI args
+LLM_DEFAULT_MODEL="${LLM_DEFAULT_MODEL:-Qwen/Qwen3-14B}"
+MODEL_REPO="${MODEL_REPO:-}"
 MODEL_NAME="${MODEL_NAME:-}"
 VLLM_HOST="${VLLM_HOST:-127.0.0.1}"
 VLLM_PORT="${VLLM_PORT:-8000}"
@@ -74,24 +75,25 @@ print_usage() {
     echo "  VENV_BASE    (default: ${VENV_BASE})"
     echo "  METRIC_VENV  (default: ${METRIC_VENV:-${VENV_BASE}/metric_venv})"
     echo "  COMET_VENV   (default: ${COMET_VENV:-${VENV_BASE}/comet_venv})"
-    echo "  GEMMA_VENV   (default: ${GEMMA_VENV:-${VENV_BASE}/gemma_venv})"
+    echo "  LLM_VENV     (default: ${LLM_VENV:-${VENV_BASE}/llm_venv})"
     echo "  BICLEANER_INST (default: ${BICLEANER_INST:-${VENV_BASE}/bicleaner_venv})"
-    echo "  MODEL_REPO   (gemma, default: ${MODEL_REPO})"
-    echo "  MODEL_NAME   (gemma, default: ${MODEL_NAME:-<model>})"
-    echo "  VLLM_HOST    (gemma, default: ${VLLM_HOST})"
-    echo "  VLLM_PORT    (gemma, default: ${VLLM_PORT})"
-    echo "  VLLM_DTYPE   (gemma, default: ${VLLM_DTYPE})"
-    echo "  VLLM_GPU_UTIL (gemma, default: ${VLLM_GPU_UTIL})"
-    echo "  VLLM_EXTRA_ARGS (gemma, default: ${VLLM_EXTRA_ARGS})"
-    echo "  API_BASE     (gemma, default: ${API_BASE})"
-    echo "  MAX_RETRIES  (gemma, default: ${MAX_RETRIES})"
-    echo "  TEMPERATURE  (gemma, default: ${TEMPERATURE})"
-    echo "  MAX_TOKENS   (gemma, default: ${MAX_TOKENS})"
-    echo "  CONTINUE_ON_ERROR (gemma, default: ${CONTINUE_ON_ERROR})"
+    echo "  LLM_DEFAULT_MODEL (default: ${LLM_DEFAULT_MODEL})"
+    echo "  MODEL_REPO   (llm, default: <MODEL_NAME>)"
+    echo "  MODEL_NAME   (llm, default: --model value)"
+    echo "  VLLM_HOST    (llm, default: ${VLLM_HOST})"
+    echo "  VLLM_PORT    (llm, default: ${VLLM_PORT})"
+    echo "  VLLM_DTYPE   (llm, default: ${VLLM_DTYPE})"
+    echo "  VLLM_GPU_UTIL (llm, default: ${VLLM_GPU_UTIL})"
+    echo "  VLLM_EXTRA_ARGS (llm, default: ${VLLM_EXTRA_ARGS})"
+    echo "  API_BASE     (llm, default: ${API_BASE})"
+    echo "  MAX_RETRIES  (llm, default: ${MAX_RETRIES})"
+    echo "  TEMPERATURE  (llm, default: ${TEMPERATURE})"
+    echo "  MAX_TOKENS   (llm, default: ${MAX_TOKENS})"
+    echo "  CONTINUE_ON_ERROR (llm, default: ${CONTINUE_ON_ERROR})"
     echo "Examples:"
     echo "  $0 --mode single --src-lang arb_Arab --tgt-lang eng_Latn --split devtest --model wmt22-cometkiwi-da"
     echo "  $0 --mode worker --manifest /path/to/directions.tsv --model wmt22-cometkiwi-da --worker-max-files 0"
-    echo "  $0 --mode single --src-lang arb_Arab --tgt-lang eng_Latn --split devtest --model gemma-3-12b-it"
+    echo "  $0 --mode single --src-lang arb_Arab --tgt-lang eng_Latn --split devtest --model Qwen/Qwen3-14B"
 }
 
 is_metricx_model() {
@@ -116,9 +118,11 @@ is_bicleaner_model() {
     esac
 }
 
-is_gemma_model() {
-    case "$1" in
-        *gemma*)
+is_llm_model() {
+    local model_lower
+    model_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$model_lower" in
+        llm|*qwen*|*gemma*|*llama*|*mistral*|*deepseek*|*gpt*|*claude*|*phi*)
             return 0
             ;;
         *)
@@ -201,16 +205,20 @@ done
 if [ -z "$MODEL" ]; then
     MODEL="wmt22-cometkiwi-da"
 fi
+if [ "$MODEL" = "llm" ]; then
+    MODEL="$LLM_DEFAULT_MODEL"
+fi
 
 if is_bicleaner_model "$MODEL"; then
     BACKEND="bicleaner"
     MODULE="src.scorers.score_bicleaner"
     BICLEANER_INST="${BICLEANER_INST:-${VENV_BASE}/bicleaner_venv}"
-elif is_gemma_model "$MODEL"; then
-    BACKEND="gemma"
-    MODULE="src.scorers.score_gemma"
+elif is_llm_model "$MODEL"; then
+    BACKEND="llm"
+    MODULE="src.scorers.score_llm"
     MODEL_NAME="${MODEL_NAME:-$MODEL}"
-    VENV_PATH="${GEMMA_VENV:-${VENV_BASE}/gemma_venv}"
+    MODEL_REPO="${MODEL_REPO:-$MODEL_NAME}"
+    VENV_PATH="${LLM_VENV:-${VENV_BASE}/gemma_venv}" # llm_venv later
 elif is_metricx_model "$MODEL"; then
     BACKEND="metricx"
     MODULE="src.scorers.score_metricx"
@@ -299,7 +307,7 @@ fi
 # score_bicleaner ignores --batch-size/--gpus; kept for CLI consistency.
 COMMON_ARGS=(--model "$MODEL" --batch-size "$BATCH_SIZE" --gpus "$GPUS")
 
-if [ "$BACKEND" = "gemma" ]; then
+if [ "$BACKEND" = "llm" ]; then
     MODEL_TAG=$(echo "$MODEL_NAME" | tr '[:upper:]' '[:lower:]' | sed 's|[^a-z0-9._-]|-|g')
     VLLM_LOG="${WORKDIR}/logs/vllm_${MODEL_TAG}_${SLURM_JOB_ID}.log"
 
@@ -344,7 +352,7 @@ if [ "$BACKEND" = "gemma" ]; then
 fi
 
 if [ "$MODE" = "worker" ]; then
-    if [ "$BACKEND" = "gemma" ]; then
+    if [ "$BACKEND" = "llm" ]; then
         CONTINUE_FLAG=""
         if [ "$CONTINUE_ON_ERROR" = "1" ]; then
             CONTINUE_FLAG="--continue-on-error"
@@ -380,7 +388,7 @@ if [ "$MODE" = "worker" ]; then
 else
     OUTPUT_PATH="${MODEL_DIR}/${SRC_LANG}-${TGT_LANG}-${SPLIT}.parquet"
     mkdir -p "$MODEL_DIR"
-    if [ "$BACKEND" = "gemma" ]; then
+    if [ "$BACKEND" = "llm" ]; then
         CONTINUE_FLAG=""
         if [ "$CONTINUE_ON_ERROR" = "1" ]; then
             CONTINUE_FLAG="--continue-on-error"

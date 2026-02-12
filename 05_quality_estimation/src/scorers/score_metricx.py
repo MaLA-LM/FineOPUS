@@ -35,7 +35,7 @@ METRICX_MODELS = {
     "metricx24": ModelSpec(
         model_id="google/metricx-24-hybrid-xl-v2p6",
         tokenizer_id="google/mt5-xl",
-        max_length=1536,
+        max_length=1536,  # metricx24 was trained with max_length=1536, which is the max for mt5-xl
         score_adjuster=metricx_adjust,
     )
 }

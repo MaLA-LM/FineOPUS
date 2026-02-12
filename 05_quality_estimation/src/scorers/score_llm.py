@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -17,33 +18,33 @@ if __package__ is None or __package__ == "":
 
 from dataset.manifest import ManifestEntry
 from dataset.mediator import Example, get_dataset
-from models.gemma_qe import QEResult
-from prompts.gemma_prompt import render_prompt
+from models.llm_qe import QEResult
+from prompts.llm_prompt import render_prompt
 from src.scoring.args import add_common_scoring_args
 from src.scoring.cli import resolve_output_path, validate_args
 from src.scoring.frames import build_frames
 from src.scoring.output_path import sanitize_model_tag
 from src.scoring.runner import collect_directions, run_scoring
 
-GEMMA_MODELS = {"gemma-3-12b-it": "gemma-3-12b-it"}
+LOGGER = logging.getLogger(__name__)
 
-ALIASES = {
-    "openai/gemma-3-12b-it": "gemma-3-12b-it",
+DEFAULT_LLM_MODEL = "Qwen/Qwen3-14B"
+LLM_MODEL_ALIASES = {
+    "qwen3-14b": DEFAULT_LLM_MODEL,
+    "qwen/qwen3-14b": DEFAULT_LLM_MODEL,
+    "openai/qwen3-14b": DEFAULT_LLM_MODEL,
 }
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Score a dataset split with Gemma-3 12B via vLLM + DSPy."
+        description="Score a dataset split with an LLM via vLLM + DSPy."
     )
     add_common_scoring_args(parser)
     parser.add_argument(
         "--model",
-        default="gemma-3-12b-it",
-        help=(
-            "Served model name. "
-            f"Supported: {', '.join(sorted(GEMMA_MODELS.keys()))}."
-        ),
+        default=DEFAULT_LLM_MODEL,
+        help=f"Served model name (default: {DEFAULT_LLM_MODEL}).",
     )
     parser.add_argument(
         "--api-base",
@@ -85,11 +86,22 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_model(name: str) -> tuple[str, str]:
-    key = ALIASES.get(name, name)
-    if key in GEMMA_MODELS:
-        return GEMMA_MODELS[key], name
-    supported = ", ".join(sorted(GEMMA_MODELS.keys()))
-    raise ValueError(f"Unknown Gemma model '{name}'. Supported: {supported}.")
+    normalized = name.strip()
+    if not normalized:
+        raise ValueError("--model cannot be empty.")
+    canonical = LLM_MODEL_ALIASES.get(normalized.lower(), normalized)
+    request_name = (
+        canonical[len("openai/") :] if canonical.startswith("openai/") else canonical
+    )
+    return canonical, request_name
+
+
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
+def strip_thinking(text: str) -> str:
+    """Remove Qwen3-style <think>…</think> reasoning blocks."""
+    return _THINK_RE.sub("", text).strip()
 
 
 def overall_to_unit(score_0_to_100: int) -> float:
@@ -110,10 +122,11 @@ def build_lm(
         temperature=temperature,
         max_tokens=max_tokens,
         response_format={"type": "json_object"},
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
 
-def score_gemma(
+def score_llm(
     examples: list[Example],
     lm,
     max_retries: int,
@@ -128,22 +141,10 @@ def score_gemma(
         last_error: Exception | None = None
         for _attempt in range(max_retries + 1):
             try:
-                raw = lm(messages=[{"role": "user", "content": prompt}])
-                # Extract text content from DSPy response
-                if isinstance(raw, str):
-                    text = raw
-                elif isinstance(raw, (list, tuple)) and raw:  # List of responses
-                    text = (
-                        str(raw[0])
-                        if not isinstance(raw[0], dict)
-                        else raw[0].get("content", str(raw[0]))
-                    )
-                elif isinstance(raw, dict):  # Dict with content field
-                    text = raw.get("content", json.dumps(raw))
-                else:  # Fallback
-                    text = str(raw)
-                # Parse and validate JSON
-                payload = json.loads(text.strip())
+                # dspy.LM.__call__(messages=...) always returns list[str]
+                completions = lm(messages=[{"role": "user", "content": prompt}])
+                text = strip_thinking(completions[0])
+                payload = json.loads(text)
                 parsed = QEResult.model_validate(payload)
                 scores.append(overall_to_unit(int(parsed.overall_0to100)))
                 last_error = None
@@ -163,10 +164,7 @@ def score_gemma(
     if continue_on_error and invalid_rows:
         sample = ", ".join(str(idx) for idx in invalid_rows[:5])
         suffix = f" Example indices: {sample}." if sample else ""
-        LOGGER.info(
-            f"Invalid JSON rows: {len(invalid_rows)}.{suffix}",
-            file=sys.stderr,
-        )
+        LOGGER.info("Invalid JSON rows: %s.%s", len(invalid_rows), suffix)
     return scores
 
 
@@ -187,7 +185,7 @@ def score_entry(
         entry.src_lang, entry.tgt_lang, split=entry.split, root=args.root
     )
     examples = dataset.limit_rows(examples, args.max_rows)
-    scores = score_gemma(
+    scores = score_llm(
         examples,
         lm,
         args.max_retries,
@@ -258,4 +256,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-LOGGER = logging.getLogger(__name__)

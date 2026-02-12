@@ -42,7 +42,7 @@ ISO639_1_BY_BASE_NAME = {
     "german": "de",
 }
 
-# Fixed bicleaner-ai settings
+# bicleaner-ai settings
 BICLEANER_COMMAND = "bicleaner-ai-classify"
 BICLEANER_PROCESSES: int | None = None
 BICLEANER_DISABLE_HARDRULES = True

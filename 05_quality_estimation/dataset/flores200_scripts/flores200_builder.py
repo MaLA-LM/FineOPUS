@@ -11,7 +11,7 @@ DEFAULT_FLORES_ROOT = "/scratch/project_2008161/downstream_benchmarks/flores200"
 def load_flores200_parallel(
     src_lang: str,
     tgt_lang: str,
-    *, # keyword-only arguments
+    *,  # keyword-only arguments
     split: str = "devtest",
     root: str | Path = DEFAULT_FLORES_ROOT,
     include_metadata: bool = False,
