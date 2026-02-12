@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import dspy
+from models.language_support import QwenLanguages
 from pydantic import ValidationError
 
 if __package__ is None or __package__ == "":
@@ -179,6 +180,7 @@ def score_entry(
     args: argparse.Namespace,
     lm,
     model_id: str,
+    language_support: QwenLanguages,
     dataset,
 ):
     examples = dataset.load_parallel(
@@ -193,6 +195,8 @@ def score_entry(
         entry.tgt_lang,
         continue_on_error=args.continue_on_error,
     )
+    src_lang_seen = language_support.support_status(entry.src_lang)
+    tgt_lang_seen = language_support.support_status(entry.tgt_lang)
     mean_score, median_score = summarize_scores(scores)
 
     return build_frames(
@@ -203,8 +207,8 @@ def score_entry(
         entry.tgt_lang,
         scores,
         examples,
-        src_lang_seen="unknown",
-        tgt_lang_seen="unknown",
+        src_lang_seen=src_lang_seen,
+        tgt_lang_seen=tgt_lang_seen,
         mean=mean_score,
         median=median_score,
     )
@@ -243,14 +247,14 @@ def main() -> None:
     )
 
     model_tag = sanitize_model_tag(model_id)
-
+    language_support = QwenLanguages(dataset=dataset)
     run_scoring(
         args,
         dataset,
         directions,
         model_tag,
         resolve_output_path,
-        lambda entry: score_entry(entry, args, lm, model_id, dataset),
+        lambda entry: score_entry(entry, args, lm, model_id, language_support, dataset),
     )
 
 
