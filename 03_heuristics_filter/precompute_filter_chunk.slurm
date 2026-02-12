@@ -7,7 +7,7 @@
 #SBATCH --ntasks-per-node=1         # Run 1 main task (your python script)
 #SBATCH --cpus-per-task=16          # Request 16 CPU cores for this one task
 #SBATCH --mem=64G                   # Total memory for all 16 cores (14G/core)
-#SBATCH --time=72:00:00              # Maximum execution time (HH:MM:SS)
+#SBATCH --time=36:00:00              # Maximum execution time (HH:MM:SS)
 #SBATCH --output=slurmlog/%x_%A_%a.out.log  # Standard output log file
 #SBATCH --error=slurmlog/%x_%A_%a.err.log   # Standard error log file
 
