@@ -94,5 +94,6 @@ This portal utilizes **Streamlit Session State**. Your progress is stored in the
 ---
 
 ## 🚧 TODO
-[] Fix dataset config and loading language pairs
-[] Improve efficiency 
+- [ ] Fix dataset config and loading language pairs
+
+- [ ] Improve efficiency (e.g., it takes a long time to load samples and save session)
