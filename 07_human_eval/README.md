@@ -94,6 +94,7 @@ This portal utilizes **Streamlit Session State**. Your progress is stored in the
 ---
 
 ## 🚧 TODO
+- [ ] Choose the version of FineOPUS to annotate
 - [ ] Fix dataset config and loading language pairs
-
 - [ ] Improve efficiency (e.g., it takes a long time to load samples and save session)
+- [ ] Use Cloud to submit annotations
