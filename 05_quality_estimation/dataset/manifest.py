@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import csv
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+
+from utils.hashing import compute_shard_id, direction_key
 
 
 @dataclass(frozen=True)
@@ -12,25 +13,10 @@ class ManifestEntry:
     src_lang: str
     tgt_lang: str
     split: str
-    lock_id: str
+    shard_id: int | None = None
 
 
-def _sanitize_lock_id(value: str) -> str:
-    safe = value.strip()
-    safe = safe.replace("/", "_").replace("\\", "_")
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", safe)
-    safe = safe.strip("_")
-    return safe or "direction"
-
-
-def make_lock_id(src_lang: str, tgt_lang: str, split: str) -> str:
-    raw = f"{split}__{src_lang}__{tgt_lang}"
-    return _sanitize_lock_id(raw)
-
-
-def read_manifest_entries(
-    manifest_path: str | Path,
-) -> list[ManifestEntry]:
+def read_manifest_entries(manifest_path: str | Path) -> list[ManifestEntry]:
     path = Path(manifest_path)
     if not path.exists():
         raise FileNotFoundError(f"Manifest not found: {path}")
@@ -42,6 +28,7 @@ def read_manifest_entries(
         missing = required - set(reader.fieldnames)
         if missing:
             raise ValueError(f"Manifest missing columns {sorted(missing)}: {path}")
+
         directions: list[ManifestEntry] = []
         for idx, row in enumerate(reader, start=2):
             src = (row.get("src_lang") or "").strip()
@@ -49,17 +36,11 @@ def read_manifest_entries(
             split = (row.get("split") or "").strip()
             if not src or not tgt or not split:
                 raise ValueError(f"Manifest row {idx} missing values: {path}")
-            lock_id = (row.get("lock_id") or "").strip()
-            if not lock_id:
-                lock_id = make_lock_id(src, tgt, split)
-            else:
-                lock_id = _sanitize_lock_id(lock_id)
+            shard_id = int(row.get("shard_id"))
+
             directions.append(
                 ManifestEntry(
-                    src_lang=src,
-                    tgt_lang=tgt,
-                    split=split,
-                    lock_id=lock_id,
+                    src_lang=src, tgt_lang=tgt, split=split, shard_id=shard_id
                 )
             )
     return directions
@@ -73,21 +54,25 @@ def read_manifest(manifest_path: str | Path) -> list[tuple[str, str, str]]:
 
 
 def write_manifest(
-    directions: Iterable[tuple[str, str, str] | ManifestEntry],
+    directions: Iterable[tuple[str, str, str]],
     output_path: str | Path,
+    *,
+    num_shards: int,
 ) -> None:
+    if num_shards <= 0:
+        raise ValueError("num_shards must be > 0.")
+
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-        writer.writerow(["src_lang", "tgt_lang", "split", "lock_id"])
+        writer.writerow(["src_lang", "tgt_lang", "split", "shard_id"])
         for item in directions:
-            if isinstance(item, ManifestEntry):
-                src_lang = item.src_lang
-                tgt_lang = item.tgt_lang
-                split = item.split
-                lock_id = item.lock_id
-            else:
-                src_lang, tgt_lang, split = item
-                lock_id = make_lock_id(src_lang, tgt_lang, split)
-            writer.writerow([src_lang, tgt_lang, split, lock_id])
+            src_lang, tgt_lang, split = item
+            shard_id = compute_shard_id(direction_key(src_lang, tgt_lang), num_shards)
+            if shard_id < 0 or shard_id >= num_shards:
+                raise ValueError(
+                    f"shard_id out of range for row {src_lang}->{tgt_lang} split={split}: "
+                    f"{shard_id} not in [0, {num_shards - 1}]"
+                )
+            writer.writerow([src_lang, tgt_lang, split, shard_id])

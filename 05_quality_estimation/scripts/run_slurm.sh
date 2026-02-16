@@ -23,7 +23,6 @@ export HUGGINGFACE_HUB_CACHE="$HF_HUB_CACHE"
 export HUGGINGFACE_ASSETS_CACHE="$HF_ASSETS_CACHE"
 export TRANSFORMERS_CACHE="$HF_HUB_CACHE"
 
-
 echo "=================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
@@ -38,15 +37,17 @@ DATASET="${DATASET:-flores200}"
 VENV_BASE="${VENV_BASE:-${WORKDIR}/envs}"
 MANIFEST="${MANIFEST:-${WORKDIR}/flores200_directions.tsv}"
 
-MODE="${MODE:-single}"
-SRC_LANG="${SRC_LANG:-arb_Arab}"
-TGT_LANG="${TGT_LANG:-eng_Latn}"
-SPLIT="${SPLIT:-devtest}"
 BATCH_SIZE="${BATCH_SIZE:-8}"
 GPUS="${GPUS:-1}"
 MAX_ROWS="${MAX_ROWS-}"
-WORKER_MAX_FILES="${WORKER_MAX_FILES:-200}"
 MODEL=""
+
+NUM_SHARDS="${NUM_SHARDS:-}"
+SHARD_ID="${SHARD_ID:-}"
+MAX_DIRECTIONS_PER_PART="${MAX_DIRECTIONS_PER_PART:-25}"
+MAX_SECONDS_PER_PART="${MAX_SECONDS_PER_PART:-600}"
+TARGET_PART_BYTES="${TARGET_PART_BYTES:-67108864}"
+RUN_ID="${RUN_ID:-}"
 
 # vllm/llm defaults - can be overridden by env vars or CLI args
 LLM_DEFAULT_MODEL="${LLM_DEFAULT_MODEL:-Qwen/Qwen3-14B}"
@@ -64,36 +65,27 @@ MAX_TOKENS="${MAX_TOKENS:-256}"
 CONTINUE_ON_ERROR="${CONTINUE_ON_ERROR:-1}"
 
 print_usage() {
-    echo "Usage: $0 [--mode single|worker] [--manifest PATH] [--src-lang SRC] [--tgt-lang TGT] [--split SPLIT] [--model MODEL]"
+    echo "Usage: $0 --manifest PATH [--model MODEL] [shard flags]"
+    echo ""
+    echo "This script is worker-only."
     echo ""
     echo "Key env vars:"
     echo "  WORKDIR      (default: ${WORKDIR})"
     echo "  DATA_DIR     (default: ${DATA_DIR})"
-    echo "  OUTPUT_DIR   (default: ${OUTPUT_DIR})"
     echo "  OUTPUT_BASE  (default: ${OUTPUT_BASE})"
     echo "  DATASET      (default: ${DATASET})"
     echo "  VENV_BASE    (default: ${VENV_BASE})"
-    echo "  METRIC_VENV  (default: ${METRIC_VENV:-${VENV_BASE}/metric_venv})"
-    echo "  COMET_VENV   (default: ${COMET_VENV:-${VENV_BASE}/comet_venv})"
-    echo "  LLM_VENV     (default: ${LLM_VENV:-${VENV_BASE}/llm_venv})"
-    echo "  BICLEANER_INST (default: ${BICLEANER_INST:-${VENV_BASE}/bicleaner_venv})"
-    echo "  LLM_DEFAULT_MODEL (default: ${LLM_DEFAULT_MODEL})"
-    echo "  MODEL_REPO   (llm, default: <MODEL_NAME>)"
-    echo "  MODEL_NAME   (llm, default: --model value)"
-    echo "  VLLM_HOST    (llm, default: ${VLLM_HOST})"
-    echo "  VLLM_PORT    (llm, default: ${VLLM_PORT})"
-    echo "  VLLM_DTYPE   (llm, default: ${VLLM_DTYPE})"
-    echo "  VLLM_GPU_UTIL (llm, default: ${VLLM_GPU_UTIL})"
-    echo "  VLLM_EXTRA_ARGS (llm, default: ${VLLM_EXTRA_ARGS})"
-    echo "  API_BASE     (llm, default: ${API_BASE})"
-    echo "  MAX_RETRIES  (llm, default: ${MAX_RETRIES})"
-    echo "  TEMPERATURE  (llm, default: ${TEMPERATURE})"
-    echo "  MAX_TOKENS   (llm, default: ${MAX_TOKENS})"
-    echo "  CONTINUE_ON_ERROR (llm, default: ${CONTINUE_ON_ERROR})"
+    echo "  MANIFEST     (default: ${MANIFEST})"
+    echo "  MODEL        (default: ${MODEL:-wmt22-cometkiwi-da})"
+    echo "  NUM_SHARDS, SHARD_ID (optional fallback when Slurm array env is absent)"
+    echo "  MAX_DIRECTIONS_PER_PART (default: ${MAX_DIRECTIONS_PER_PART})"
+    echo "  MAX_SECONDS_PER_PART (default: ${MAX_SECONDS_PER_PART})"
+    echo "  TARGET_PART_BYTES (default: ${TARGET_PART_BYTES})"
+    echo "  RUN_ID (optional)"
+    echo ""
     echo "Examples:"
-    echo "  $0 --mode single --src-lang arb_Arab --tgt-lang eng_Latn --split devtest --model wmt22-cometkiwi-da"
-    echo "  $0 --mode worker --manifest /path/to/directions.tsv --model wmt22-cometkiwi-da --worker-max-files 0"
-    echo "  $0 --mode single --src-lang arb_Arab --tgt-lang eng_Latn --split devtest --model Qwen/Qwen3-14B"
+    echo "  $0 --manifest /path/to/directions.tsv --model xcomet"
+    echo "  $0 --manifest /path/to/directions.tsv --model xcomet --num-shards 8 --shard-id 0"
 }
 
 is_metricx_model() {
@@ -134,19 +126,22 @@ is_llm_model() {
 while [ $# -gt 0 ]; do
     case "$1" in
         --mode)
-            MODE="${2:-}"
+            MODE_ARG="${2:-}"
             shift 2
+            if [ "$MODE_ARG" != "worker" ]; then
+                echo "ERROR: only worker mode is supported (got: $MODE_ARG)"
+                exit 1
+            fi
             ;;
         --mode=*)
-            MODE="${1#*=}"
+            MODE_ARG="${1#*=}"
             shift 1
+            if [ "$MODE_ARG" != "worker" ]; then
+                echo "ERROR: only worker mode is supported (got: $MODE_ARG)"
+                exit 1
+            fi
             ;;
         --worker)
-            MODE="worker"
-            shift 1
-            ;;
-        --single)
-            MODE="single"
             shift 1
             ;;
         --manifest)
@@ -157,18 +152,6 @@ while [ $# -gt 0 ]; do
             MANIFEST="${1#*=}"
             shift 1
             ;;
-        --src-lang)
-            SRC_LANG="${2:-}"
-            shift 2
-            ;;
-        --tgt-lang)
-            TGT_LANG="${2:-}"
-            shift 2
-            ;;
-        --split)
-            SPLIT="${2:-}"
-            shift 2
-            ;;
         --model)
             MODEL="${2:-}"
             shift 2
@@ -177,12 +160,76 @@ while [ $# -gt 0 ]; do
             MODEL="${1#*=}"
             shift 1
             ;;
-        --worker-max-files)
-            WORKER_MAX_FILES="${2:-}"
+        --num-shards)
+            NUM_SHARDS="${2:-}"
             shift 2
             ;;
-        --worker-max-files=*)
-            WORKER_MAX_FILES="${1#*=}"
+        --num-shards=*)
+            NUM_SHARDS="${1#*=}"
+            shift 1
+            ;;
+        --shard-id)
+            SHARD_ID="${2:-}"
+            shift 2
+            ;;
+        --shard-id=*)
+            SHARD_ID="${1#*=}"
+            shift 1
+            ;;
+        --max-directions-per-part)
+            MAX_DIRECTIONS_PER_PART="${2:-}"
+            shift 2
+            ;;
+        --max-directions-per-part=*)
+            MAX_DIRECTIONS_PER_PART="${1#*=}"
+            shift 1
+            ;;
+        --max-seconds-per-part)
+            MAX_SECONDS_PER_PART="${2:-}"
+            shift 2
+            ;;
+        --max-seconds-per-part=*)
+            MAX_SECONDS_PER_PART="${1#*=}"
+            shift 1
+            ;;
+        --target-part-bytes)
+            TARGET_PART_BYTES="${2:-}"
+            shift 2
+            ;;
+        --target-part-bytes=*)
+            TARGET_PART_BYTES="${1#*=}"
+            shift 1
+            ;;
+        --run-id)
+            RUN_ID="${2:-}"
+            shift 2
+            ;;
+        --run-id=*)
+            RUN_ID="${1#*=}"
+            shift 1
+            ;;
+        --batch-size)
+            BATCH_SIZE="${2:-}"
+            shift 2
+            ;;
+        --batch-size=*)
+            BATCH_SIZE="${1#*=}"
+            shift 1
+            ;;
+        --gpus)
+            GPUS="${2:-}"
+            shift 2
+            ;;
+        --gpus=*)
+            GPUS="${1#*=}"
+            shift 1
+            ;;
+        --max-rows)
+            MAX_ROWS="${2:-}"
+            shift 2
+            ;;
+        --max-rows=*)
+            MAX_ROWS="${1#*=}"
             shift 1
             ;;
         -h|--help)
@@ -211,52 +258,45 @@ fi
 
 if is_bicleaner_model "$MODEL"; then
     BACKEND="bicleaner"
-    MODULE="src.scorers.score_bicleaner"
+    MODULE="src.score_bicleaner"
     BICLEANER_INST="${BICLEANER_INST:-${VENV_BASE}/bicleaner_venv}"
 elif is_llm_model "$MODEL"; then
     BACKEND="llm"
-    MODULE="src.scorers.score_llm"
+    MODULE="src.score_llm"
     MODEL_NAME="${MODEL_NAME:-$MODEL}"
     MODEL_REPO="${MODEL_REPO:-$MODEL_NAME}"
-    VENV_PATH="${LLM_VENV:-${VENV_BASE}/gemma_venv}" # llm_venv later
+    VENV_PATH="${LLM_VENV:-${VENV_BASE}/gemma_venv}"
 elif is_metricx_model "$MODEL"; then
     BACKEND="metricx"
-    MODULE="src.scorers.score_metricx"
+    MODULE="src.score_metricx"
     VENV_PATH="${METRIC_VENV:-${VENV_BASE}/metric_venv}"
 else
     BACKEND="comet"
-    MODULE="src.scorers.score_comet"
+    MODULE="src.score_comet"
     VENV_PATH="${COMET_VENV:-${VENV_BASE}/comet_venv}"
 fi
 
-# ensure required env vars are set and paths exist
+if [ ! -f "$MANIFEST" ]; then
+    echo "ERROR: manifest not found: $MANIFEST"
+    exit 1
+fi
+
+if [ -n "$NUM_SHARDS" ] && [ -z "$SHARD_ID" ]; then
+    echo "ERROR: SHARD_ID/--shard-id is required when NUM_SHARDS/--num-shards is set"
+    exit 1
+fi
+if [ -n "$SHARD_ID" ] && [ -z "$NUM_SHARDS" ]; then
+    echo "ERROR: NUM_SHARDS/--num-shards is required when SHARD_ID/--shard-id is set"
+    exit 1
+fi
+
+# set up environment and paths based on backend
 if [ "$BACKEND" = "bicleaner" ]; then
     if [ ! -d "$BICLEANER_INST" ]; then
         echo "ERROR: bicleaner env not found: $BICLEANER_INST"
         exit 1
     fi
-else
-    if [ ! -d "$VENV_PATH" ]; then
-        echo "ERROR: venv not found: $VENV_PATH"
-        exit 1
-    fi
-fi
 
-# worker mode requires a manifest file
-if [ "$MODE" = "worker" ]; then
-    if [ -z "${MANIFEST:-}" ]; then
-        echo "ERROR: manifest not set (use --manifest or MANIFEST)."
-        exit 1
-    fi
-    if [ ! -f "$MANIFEST" ]; then
-        echo "ERROR: manifest not found: $MANIFEST"
-        exit 1
-    fi
-fi
-
-
-# set up environment and paths based on backend
-if [ "$BACKEND" = "bicleaner" ]; then
     module --force purge
     module load tykky
     module load gcc/10.4.0
@@ -269,16 +309,18 @@ if [ "$BACKEND" = "bicleaner" ]; then
 
     export PATH="$BICLEANER_INST/bin:$PATH"
 else
-# all other backends use a Python venv on top of pytorch module
+    if [ ! -d "$VENV_PATH" ]; then
+        echo "ERROR: venv not found: $VENV_PATH"
+        exit 1
+    fi
+
     module load pytorch
     source "${VENV_PATH}/bin/activate"
 fi
 
-# ensure logs directory exists
 mkdir -p "${WORKDIR}/logs"
 cd "$WORKDIR"
 
-# Optional HF_TOKEN for model download
 if [ -n "${HF_TOKEN:-}" ]; then
     export HF_TOKEN
     echo "HuggingFace token found - using authentication"
@@ -286,26 +328,39 @@ else
     echo "WARNING: No HF_TOKEN set - may encounter rate limits"
 fi
 
-MODEL_TAG=$(echo "$MODEL" | tr '[:upper:]' '[:lower:]' | sed 's|[^a-z0-9._-]|-|g')
-DATASET_TAG="${DATASET}"
-MODEL_DIR="${OUTPUT_DIR}/${MODEL_TAG}_${DATASET_TAG}"
-
 echo "Backend: $BACKEND"
 echo "Model: $MODEL"
-if [ "$BACKEND" = "bicleaner" ]; then
-    echo "Bicleaner env: $BICLEANER_INST"
-else
-    echo "Venv: $VENV_PATH"
-fi
-echo "Mode: $MODE"
+echo "Manifest: $MANIFEST"
+echo "Output base: $OUTPUT_BASE"
 
 MAX_ROWS_ARG=()
 if [ -n "${MAX_ROWS:-}" ]; then
     MAX_ROWS_ARG=(--max-rows "$MAX_ROWS")
 fi
 
-# score_bicleaner ignores --batch-size/--gpus; kept for CLI consistency.
-COMMON_ARGS=(--model "$MODEL" --batch-size "$BATCH_SIZE" --gpus "$GPUS")
+SHARD_ARGS=()
+if [ -n "${NUM_SHARDS:-}" ]; then
+    SHARD_ARGS=(--num-shards "$NUM_SHARDS" --shard-id "$SHARD_ID")
+fi
+
+RUN_ID_ARG=()
+if [ -n "${RUN_ID:-}" ]; then
+    RUN_ID_ARG=(--run-id "$RUN_ID")
+fi
+
+COMMON_ARGS=(
+    --dataset "$DATASET"
+    --root "$DATA_DIR"
+    --manifest "$MANIFEST"
+    --worker
+    --resume
+    --output-base "$OUTPUT_BASE"
+    --batch-size "$BATCH_SIZE"
+    --gpus "$GPUS"
+    --max-directions-per-part "$MAX_DIRECTIONS_PER_PART"
+    --max-seconds-per-part "$MAX_SECONDS_PER_PART"
+    --target-part-bytes "$TARGET_PART_BYTES"
+)
 
 if [ "$BACKEND" = "llm" ]; then
     MODEL_TAG=$(echo "$MODEL_NAME" | tr '[:upper:]' '[:lower:]' | sed 's|[^a-z0-9._-]|-|g')
@@ -349,78 +404,31 @@ if [ "$BACKEND" = "llm" ]; then
         echo "ERROR: vLLM did not become ready in time. Check $VLLM_LOG"
         exit 1
     fi
-fi
 
-if [ "$MODE" = "worker" ]; then
-    if [ "$BACKEND" = "llm" ]; then
-        CONTINUE_FLAG=""
-        if [ "$CONTINUE_ON_ERROR" = "1" ]; then
-            CONTINUE_FLAG="--continue-on-error"
-        fi
-        python3 -m "$MODULE" \
-            --dataset "$DATASET" \
-            --root "$DATA_DIR" \
-            --manifest "$MANIFEST" \
-            --worker \
-            --worker-max-files "$WORKER_MAX_FILES" \
-            --resume \
-            --output-base "$OUTPUT_BASE" \
-            --model "$MODEL_NAME" \
-            --api-base "$API_BASE" \
-            --api-key "${OPENAI_API_KEY:-}" \
-            --temperature "$TEMPERATURE" \
-            --max-tokens "$MAX_TOKENS" \
-            --max-retries "$MAX_RETRIES" \
-            "${MAX_ROWS_ARG[@]}" \
-            $CONTINUE_FLAG
-    else
-        python3 -m "$MODULE" \
-            --dataset "$DATASET" \
-            --root "$DATA_DIR" \
-            --manifest "$MANIFEST" \
-            --worker \
-            --worker-max-files "$WORKER_MAX_FILES" \
-            --resume \
-            --output-base "$OUTPUT_BASE" \
-            "${COMMON_ARGS[@]}" \
-            "${MAX_ROWS_ARG[@]}"
+    CONTINUE_FLAG=()
+    if [ "$CONTINUE_ON_ERROR" = "1" ]; then
+        CONTINUE_FLAG=(--continue-on-error)
     fi
+
+    python3 -m "$MODULE" \
+        "${COMMON_ARGS[@]}" \
+        "${SHARD_ARGS[@]}" \
+        "${RUN_ID_ARG[@]}" \
+        --model "$MODEL_NAME" \
+        --api-base "$API_BASE" \
+        --api-key "${OPENAI_API_KEY:-}" \
+        --temperature "$TEMPERATURE" \
+        --max-tokens "$MAX_TOKENS" \
+        --max-retries "$MAX_RETRIES" \
+        "${MAX_ROWS_ARG[@]}" \
+        "${CONTINUE_FLAG[@]}"
 else
-    OUTPUT_PATH="${MODEL_DIR}/${SRC_LANG}-${TGT_LANG}-${SPLIT}.parquet"
-    mkdir -p "$MODEL_DIR"
-    if [ "$BACKEND" = "llm" ]; then
-        CONTINUE_FLAG=""
-        if [ "$CONTINUE_ON_ERROR" = "1" ]; then
-            CONTINUE_FLAG="--continue-on-error"
-        fi
-        python3 -m "$MODULE" \
-            --dataset "$DATASET" \
-            --src-lang "$SRC_LANG" \
-            --tgt-lang "$TGT_LANG" \
-            --split "$SPLIT" \
-            --root "$DATA_DIR" \
-            --output "$OUTPUT_PATH" \
-            --resume \
-            --model "$MODEL_NAME" \
-            --api-base "$API_BASE" \
-            --api-key "${OPENAI_API_KEY:-}" \
-            --temperature "$TEMPERATURE" \
-            --max-tokens "$MAX_TOKENS" \
-            --max-retries "$MAX_RETRIES" \
-            "${MAX_ROWS_ARG[@]}" \
-            $CONTINUE_FLAG
-    else
-        python3 -m "$MODULE" \
-            --dataset "$DATASET" \
-            --src-lang "$SRC_LANG" \
-            --tgt-lang "$TGT_LANG" \
-            --split "$SPLIT" \
-            --root "$DATA_DIR" \
-            --output "$OUTPUT_PATH" \
-            --resume \
-            "${COMMON_ARGS[@]}" \
-            "${MAX_ROWS_ARG[@]}"
-    fi
+    python3 -m "$MODULE" \
+        "${COMMON_ARGS[@]}" \
+        "${SHARD_ARGS[@]}" \
+        "${RUN_ID_ARG[@]}" \
+        --model "$MODEL" \
+        "${MAX_ROWS_ARG[@]}"
 fi
 
 EXIT_CODE=$?
@@ -429,9 +437,6 @@ echo "=================================="
 echo "End time: $(date)"
 if [ $EXIT_CODE -eq 0 ]; then
     echo "$MODEL scoring completed successfully"
-    if [ "$MODE" = "single" ]; then
-        echo "Output: $OUTPUT_PATH"
-    fi
 else
     echo "$MODEL scoring failed with exit code $EXIT_CODE"
 fi

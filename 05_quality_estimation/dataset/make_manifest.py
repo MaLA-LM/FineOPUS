@@ -1,13 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
-
-if __package__ is None or __package__ == "":
-    repo_root = Path(__file__).resolve().parents[1]
-    if str(repo_root) not in sys.path:
-        sys.path.insert(0, str(repo_root))
 
 from dataset.mediator import DEFAULT_DATASET_ID, get_dataset
 from dataset.manifest import write_manifest
@@ -32,12 +26,21 @@ def parse_args() -> argparse.Namespace:
         default="devtest",
         help="Split to include in the manifest (or 'all').",
     )
+    parser.add_argument(
+        "--num-shards",
+        type=int,
+        required=True,
+        help="Number of deterministic shards used to precompute shard_id.",
+    )
     parser.add_argument("--out", required=True, help="Output TSV path.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    if args.num_shards <= 0:
+        raise SystemExit("--num-shards must be > 0.")
+
     dataset = get_dataset(args.dataset)
     root = args.root or dataset.default_root
 
@@ -51,7 +54,11 @@ def main() -> None:
 
     directions = dataset.discover_directions(root, split=split)
     rows = sorted(directions, key=lambda item: (item[2], item[0], item[1]))
-    write_manifest(((src, tgt, split) for src, tgt, split, _path in rows), args.out)
+    write_manifest(
+        ((src, tgt, split) for src, tgt, split, _path in rows),
+        args.out,
+        num_shards=args.num_shards,
+    )
     print(f"Wrote manifest: {Path(args.out)}")
 
 

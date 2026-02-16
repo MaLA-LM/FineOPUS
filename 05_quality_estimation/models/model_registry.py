@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable, Literal
+
+ScoreAdjuster = Callable[[float], float]
+Backend = Literal["comet", "metricx", "llm", "bicleaner"]
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    key: str
+    backend: Backend
+    model_id: str
+    aliases: tuple[str, ...] = ()
+    tokenizer_id: str | None = None
+    max_length: int | None = None
+    score_adjuster: ScoreAdjuster | None = None
+
+
+def metricx_adjust(score: float) -> float:
+    return 1.0 - (score / 25.0)
+
+
+_SPECS: dict[Backend, dict[str, ModelSpec]] = {
+    "comet": {
+        "wmt22-cometkiwi-da": ModelSpec(
+            key="wmt22-cometkiwi-da",
+            backend="comet",
+            model_id="Unbabel/wmt22-cometkiwi-da",
+            aliases=("wmt22-comet", "Unbabel/wmt22-cometkiwi-da"),
+        ),
+        "wmt23-cometkiwi-da-xl": ModelSpec(
+            key="wmt23-cometkiwi-da-xl",
+            backend="comet",
+            model_id="Unbabel/wmt23-cometkiwi-da-xl",
+            aliases=("wmt23-comet", "Unbabel/wmt23-cometkiwi-da-xl"),
+        ),
+        "xcomet-xl": ModelSpec(
+            key="xcomet-xl",
+            backend="comet",
+            model_id="Unbabel/XCOMET-XL",
+            aliases=("xcomet", "Unbabel/XCOMET-XL"),
+        ),
+    },
+    "metricx": {
+        "metricx24": ModelSpec(
+            key="metricx24",
+            backend="metricx",
+            model_id="google/metricx-24-hybrid-xl-v2p6",
+            aliases=(
+                "metricx",
+                "metricx-24",
+                "metricx-24-hybrid-xl-v2p6",
+                "google/metricx-24-hybrid-xl-v2p6",
+            ),
+            tokenizer_id="google/mt5-xl",
+            max_length=1536,
+            score_adjuster=metricx_adjust,
+        ),
+    },
+    "llm": {
+        "qwen3-14b": ModelSpec(
+            key="qwen3-14b",
+            backend="llm",
+            model_id="Qwen/Qwen3-14B",
+            aliases=("qwen/qwen3-14b", "openai/qwen3-14b"),
+        ),
+    },
+    "bicleaner": {
+        "auto": ModelSpec(
+            key="auto",
+            backend="bicleaner",
+            model_id="auto",
+            aliases=("bicleaner", "bicleaner-ai"),
+        ),
+        "en-xx": ModelSpec(
+            key="en-xx",
+            backend="bicleaner",
+            model_id="bitextor/bicleaner-ai-full-en-xx",
+            aliases=("bitextor/bicleaner-ai-full-en-xx",),
+        ),
+        "es-xx": ModelSpec(
+            key="es-xx",
+            backend="bicleaner",
+            model_id="bitextor/bicleaner-ai-full-es-xx",
+            aliases=("bitextor/bicleaner-ai-full-es-xx",),
+        ),
+        "de-xx": ModelSpec(
+            key="de-xx",
+            backend="bicleaner",
+            model_id="bitextor/bicleaner-ai-full-de-xx",
+            aliases=("bitextor/bicleaner-ai-full-de-xx",),
+        ),
+    },
+}
+
+
+def _normalize(name: str) -> str:
+    return name.strip().lower()
+
+
+def _build_lookup(specs: dict[str, ModelSpec]) -> dict[str, str]:
+    lookup: dict[str, str] = {}
+    for key, spec in specs.items():
+        lookup[_normalize(key)] = key
+        lookup[_normalize(spec.model_id)] = key
+        for alias in spec.aliases:
+            lookup[_normalize(alias)] = key
+    return lookup
+
+
+_LOOKUP: dict[Backend, dict[str, str]] = {
+    backend: _build_lookup(specs) for backend, specs in _SPECS.items()
+}
+
+
+def supported_model_keys(backend: Backend) -> list[str]:
+    return sorted(_SPECS[backend].keys())
+
+
+def resolve_model_spec(name: str, backend: Backend) -> tuple[ModelSpec, str]:
+    normalized = _normalize(name)
+    if not normalized:
+        raise ValueError("--model cannot be empty.")
+    key = _LOOKUP[backend].get(normalized)
+    if key is None:
+        supported = ", ".join(supported_model_keys(backend))
+        raise ValueError(
+            f"Unknown {backend} model '{name}'. Supported: {supported}."
+        )
+    return _SPECS[backend][key], key
