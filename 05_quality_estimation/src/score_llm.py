@@ -25,7 +25,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Score a dataset split with an LLM via vLLM + DSPy."
     )
-    add_common_scoring_args(parser)
+    add_common_scoring_args(
+        parser,
+        batch_size_default=8,
+        gpus_default=1,
+    )
     parser.add_argument(
         "--model",
         default=DEFAULT_LLM_MODEL,
