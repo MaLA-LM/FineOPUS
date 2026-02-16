@@ -14,11 +14,11 @@ sbatch --array=1-3 \
   --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=20,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 \
   scripts/run_slurm.sh --manifest flores200_directions.tsv --model xcomet
 
-sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=20,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model metricx24
+sbatch --array=1-3 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=10,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model metricx24
 
-sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=1,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model Qwen/Qwen3-14B
+sbatch --array=1-3 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=1,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model Qwen/Qwen3-14B
 
-sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=20,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model bicleaner-ai
+sbatch --array=1-3 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=10,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model bicleaner-ai
 
 
 
@@ -34,10 +34,10 @@ python -m src.score_comet \
   --shard-id 0
 
 # 4) compact stage into bucketed final output
-python -m compact \
-  --output-base /scratch/project_2008161/QE_flores200_scores \
-  --dataset flores200 \
-  --model-tag xcomet-xl \
-  --split devtest \
+python -m compact 
+  --output-base /scratch/project_2008161/QE_flores200_scores 
+  --dataset flores200 
+  --model-tag xcomet-xl 
+  --split devtest 
   --num-buckets 32
 ```

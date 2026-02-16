@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Callable
 
 from dataset.manifest import ManifestEntry, read_manifest_entries
@@ -20,7 +20,9 @@ class ShardContext:
 
 
 def generate_run_id() -> str:
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    from datetime import datetime, timezone
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{timestamp}-pid{os.getpid()}"
 
 
@@ -126,7 +128,9 @@ def run_scoring(
     try:
         for entry in directions:
             key = direction_key(entry.src_lang, entry.tgt_lang)
-            entry_shard_id = _resolve_entry_shard_id(entry, shard_context.num_shards, key)
+            entry_shard_id = _resolve_entry_shard_id(
+                entry, shard_context.num_shards, key
+            )
             if entry_shard_id != shard_context.shard_id:
                 continue
             assigned_rows += 1

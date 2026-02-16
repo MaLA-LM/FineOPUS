@@ -265,7 +265,7 @@ elif is_llm_model "$MODEL"; then
     MODULE="src.score_llm"
     MODEL_NAME="${MODEL_NAME:-$MODEL}"
     MODEL_REPO="${MODEL_REPO:-$MODEL_NAME}"
-    VENV_PATH="${LLM_VENV:-${VENV_BASE}/gemma_venv}"
+    VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
 elif is_metricx_model "$MODEL"; then
     BACKEND="metricx"
     MODULE="src.score_metricx"
