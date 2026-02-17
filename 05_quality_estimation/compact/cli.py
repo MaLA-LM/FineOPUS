@@ -9,8 +9,6 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-base", required=True, help="Base output directory.")
     parser.add_argument("--dataset", required=True, help="Dataset id.")
-    parser.add_argument("--model-tag", required=True, help="Sanitized model tag.")
-    parser.add_argument("--split", required=True, help="Split to compact from stage.")
     parser.add_argument(
         "--num-buckets",
         type=int,
@@ -29,4 +27,3 @@ def parse_args() -> argparse.Namespace:
         help="Optional run id for compacted output filenames.",
     )
     return parser.parse_args()
-
