@@ -110,11 +110,32 @@ is_bicleaner_model() {
     esac
 }
 
-is_llm_model() {
+normalize_llm_model() {
     local model_lower
     model_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
     case "$model_lower" in
-        llm|*qwen*|*gemma*|*llama*|*mistral*|*deepseek*|*gpt*|*claude*|*phi*)
+        qwen/qwen3-14b|qwen3-14b|openai/qwen3-14b)
+            printf '%s\n' "Qwen/Qwen3-14B"
+            return 0
+            ;;
+        unbabel/m-prometheus-7b|m-prometheus-7b|mprometheus-7b|mprometheus|openai/unbabel/m-prometheus-7b|openai/m-prometheus-7b)
+            printf '%s\n' "Unbabel/M-Prometheus-7B"
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+is_llm_model() {
+    local model_lower
+    if normalize_llm_model "$1" >/dev/null; then
+        return 0
+    fi
+    model_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$model_lower" in
+        llm|*qwen*)
             return 0
             ;;
         *)
@@ -263,8 +284,12 @@ if is_bicleaner_model "$MODEL"; then
 elif is_llm_model "$MODEL"; then
     BACKEND="llm"
     MODULE="src.score_llm"
-    MODEL_NAME="${MODEL_NAME:-$MODEL}"
-    MODEL_REPO="${MODEL_REPO:-$MODEL_NAME}"
+    CANONICAL_LLM_MODEL="$(normalize_llm_model "$MODEL" || true)"
+    if [ -z "$CANONICAL_LLM_MODEL" ]; then
+        CANONICAL_LLM_MODEL="$MODEL"
+    fi
+    MODEL_NAME="${MODEL_NAME:-$CANONICAL_LLM_MODEL}"
+    MODEL_REPO="${MODEL_REPO:-$CANONICAL_LLM_MODEL}"
     VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
 elif is_metricx_model "$MODEL"; then
     BACKEND="metricx"

@@ -66,6 +66,19 @@ _SPECS: dict[Backend, dict[str, ModelSpec]] = {
             model_id="Qwen/Qwen3-14B",
             aliases=("qwen/qwen3-14b", "openai/qwen3-14b"),
         ),
+        "m-prometheus-7b": ModelSpec(
+            key="m-prometheus-7b",
+            backend="llm",
+            model_id="Unbabel/M-Prometheus-7B",
+            aliases=(
+                "unbabel/m-prometheus-7b",
+                "m-prometheus-7b",
+                "mprometheus-7b",
+                "mprometheus",
+                "openai/unbabel/m-prometheus-7b",
+                "openai/m-prometheus-7b",
+            ),
+        ),
     },
     "bicleaner": {
         "auto": ModelSpec(
@@ -126,7 +139,5 @@ def resolve_model_spec(name: str, backend: Backend) -> tuple[ModelSpec, str]:
     key = _LOOKUP[backend].get(normalized)
     if key is None:
         supported = ", ".join(supported_model_keys(backend))
-        raise ValueError(
-            f"Unknown {backend} model '{name}'. Supported: {supported}."
-        )
+        raise ValueError(f"Unknown {backend} model '{name}'. Supported: {supported}.")
     return _SPECS[backend][key], key

@@ -20,7 +20,7 @@ sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=1,MAX
 
 sbatch --array=1-3 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=10,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model bicleaner-ai
 
-
+sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=1,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model unbabel/m-prometheus-7b
 
 # 3) optional manual non-array run
 python -m src.score_comet 
@@ -37,7 +37,5 @@ python -m src.score_comet
 python -m compact 
   --output-base /scratch/project_2008161/QE_flores200_scores 
   --dataset flores200 
-  --model-tag xcomet-xl 
-  --split devtest 
-  --num-buckets 32
+  --num-buckets 2
 ```

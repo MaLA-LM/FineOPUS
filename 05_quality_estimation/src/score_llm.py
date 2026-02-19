@@ -19,6 +19,7 @@ from utils.frames import build_frames
 from utils.runner import collect_directions, run_scoring
 
 DEFAULT_LLM_MODEL = "Qwen/Qwen3-14B"
+LLM_LANGUAGE_SUPPORT = QwenLanguages
 
 
 def parse_args() -> argparse.Namespace:
@@ -158,7 +159,7 @@ def main() -> None:
     )
 
     model_tag = sanitize_model_tag(model_key)
-    language_support = QwenLanguages(dataset=dataset)
+    language_support = LLM_LANGUAGE_SUPPORT(dataset=dataset)
     run_scoring(
         args,
         dataset,
