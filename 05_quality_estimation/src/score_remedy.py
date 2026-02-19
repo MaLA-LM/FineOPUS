@@ -1,0 +1,184 @@
+from __future__ import annotations
+
+import argparse
+import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from dataset.manifest import ManifestEntry
+from dataset.mediator import get_dataset
+from models.language_support import RemedyLanguages
+from models.model_registry import resolve_model_spec, supported_model_keys
+from src.common import (
+    ensure_dataset_ready,
+    load_examples,
+    sanitize_model_tag,
+    summarize_scores,
+)
+from src.remedy_backend import (
+    DEFAULT_GPU_MEMORY_UTILIZATION,
+    DEFAULT_REMEDY_COMMAND,
+    read_calibration_scores,
+    resolve_calibration_scores_path,
+    run_remedy,
+    write_parallel_files,
+)
+from utils.args import add_common_scoring_args
+from utils.cli import validate_args
+from utils.frames import build_frames
+from utils.runner import collect_directions, run_scoring
+
+DEFAULT_REMEDY_MODEL = "remedy"
+
+
+def default_cache_dir() -> Path:
+    for key in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE"):
+        value = os.getenv(key)
+        if value:
+            return Path(value)
+    return Path(".cache") / "huggingface" / "hub"
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Score a dataset split with ReMedy via remedy-score CLI."
+    )
+    add_common_scoring_args(
+        parser,
+        batch_size_default=None,
+        batch_size_help="Ignored (kept for CLI compatibility).",
+        gpus_default=1,
+        gpus_help="Number of GPUs to pass to remedy-score (--num_gpus).",
+    )
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_REMEDY_MODEL,
+        help=(
+            "Model name or HF repo id. "
+            f"Supported: {', '.join(supported_model_keys('remedy'))}."
+        ),
+    )
+    parser.add_argument(
+        "--remedy-command",
+        default=DEFAULT_REMEDY_COMMAND,
+        help="Path to remedy-score CLI.",
+    )
+    parser.add_argument(
+        "--cache-dir",
+        default=str(default_cache_dir()),
+        help=(
+            "Cache directory passed to remedy-score --cache_dir. "
+            "Defaults to HF_HUB_CACHE/HUGGINGFACE_HUB_CACHE, then .cache/huggingface/hub."
+        ),
+    )
+    parser.add_argument(
+        "--gpu-memory-utilization",
+        type=float,
+        default=DEFAULT_GPU_MEMORY_UTILIZATION,
+        help="Value passed to remedy-score --gpu_memory_utilization.",
+    )
+    return parser.parse_args()
+
+
+def resolve_model(name: str):
+    return resolve_model_spec(name, "remedy")
+
+
+def score_entry(
+    entry: ManifestEntry,
+    args: argparse.Namespace,
+    spec,
+    dataset,
+    language_support: RemedyLanguages,
+    cache_dir: Path,
+):
+    examples = load_examples(entry, args, dataset)
+
+    src_lang_seen = language_support.support_status(entry.src_lang)
+    tgt_lang_seen = language_support.support_status(entry.tgt_lang)
+    remedy_src_lang = language_support.effective_code(entry.src_lang)
+    remedy_tgt_lang = language_support.effective_code(entry.tgt_lang)
+
+    with TemporaryDirectory() as tmp_dir:
+        tmp_root = Path(tmp_dir)
+        src_file, mt_file = write_parallel_files(
+            examples, tmp_root, remedy_src_lang, remedy_tgt_lang
+        )
+        run_remedy(
+            command=args.remedy_command,
+            model_id=spec.model_id,
+            src_file=src_file,
+            mt_file=mt_file,
+            src_lang=remedy_src_lang,
+            tgt_lang=remedy_tgt_lang,
+            cache_dir=cache_dir,
+            save_dir=tmp_root,
+            num_gpus=args.gpus,
+            gpu_memory_utilization=args.gpu_memory_utilization,
+        )
+        scores_path = resolve_calibration_scores_path(
+            save_dir=tmp_root,
+            model_id=spec.model_id,
+            src_lang=remedy_src_lang,
+            tgt_lang=remedy_tgt_lang,
+        )
+        scores = read_calibration_scores(scores_path)
+
+    if len(scores) != len(examples):
+        raise RuntimeError(
+            f"remedy-score returned {len(scores)} scores for {len(examples)} rows."
+        )
+
+    mean_score, median_score = summarize_scores(scores)
+    return build_frames(
+        spec.model_id,
+        dataset.id,
+        entry.split,
+        entry.src_lang,
+        entry.tgt_lang,
+        scores,
+        examples,
+        src_lang_seen=src_lang_seen,
+        tgt_lang_seen=tgt_lang_seen,
+        mean=mean_score,
+        median=median_score,
+    )
+
+
+def main() -> None:
+    args = parse_args()
+    if args.gpus <= 0:
+        raise SystemExit("--gpus must be >= 1 for remedy-score.")
+    if args.gpu_memory_utilization <= 0 or args.gpu_memory_utilization > 1:
+        raise SystemExit("--gpu-memory-utilization must be in (0, 1].")
+    try:
+        spec, model_key = resolve_model(args.model)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    dataset = get_dataset(args.dataset)
+    ensure_dataset_ready(args, dataset)
+    validate_args(args)
+
+    directions = collect_directions(args, dataset)
+    if not directions:
+        print("No directions found.")
+        return
+
+    model_tag = sanitize_model_tag(model_key)
+    language_support = RemedyLanguages()
+    cache_dir = Path(args.cache_dir)
+
+    run_scoring(
+        args,
+        dataset,
+        directions,
+        model_tag,
+        lambda entry: score_entry(
+            entry, args, spec, dataset, language_support, cache_dir
+        ),
+    )
+
+
+if __name__ == "__main__":
+    main()

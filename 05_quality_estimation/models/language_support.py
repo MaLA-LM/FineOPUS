@@ -6,6 +6,7 @@ from dataset.mediator import DatasetAdapter, DEFAULT_DATASET_ID, get_dataset
 from models.language_data.comet import COMET_SUPPORTED_LANGUAGES
 from models.language_data.metricx24 import METRICX24_SUPPORTED_LANGUAGES
 from models.language_data.qwen import QWEN_SUPPORTED_LANGUAGES
+from models.language_data.remedy import REMEDY_SUPPORTED_LANGUAGES
 
 LanguageCodeMapper = Callable[
     [set[str], dict[str, str]],
@@ -169,3 +170,70 @@ class MetricX24Languages(_BaseLanguageSupport):
             name_to_code_mapper=name_to_code_mapper,
             code_normalizer=code_normalizer,
         )
+
+
+class RemedyLanguages:
+    """Language helper for ReMedy, which expects ISO 639-1 codes."""
+
+    _FLORES_ISO3_TO_ISO1: dict[str, str] = {
+        "eng": "en",
+        "zho": "zh",
+        "fra": "fr",
+        "deu": "de",
+        "spa": "es",
+        "rus": "ru",
+        "arb": "ar",
+        "kor": "ko",
+        "jpn": "ja",
+        "ces": "cs",
+        "lvs": "lv",
+        "fin": "fi",
+        "tur": "tr",
+        "est": "et",
+        "lit": "lt",
+        "kaz": "kk",
+        "pol": "pl",
+        "tam": "ta",
+        "ben": "bn",
+        "hin": "hi",
+        "mar": "mr",
+        "npi": "ne",
+        "ron": "ro",
+        "sin": "si",
+        "ukr": "uk",
+        "hrv": "hr",
+        "heb": "he",
+        "guj": "gu",
+        "khm": "km",
+        "pbt": "ps",
+        "hau": "ha",
+        "isl": "is",
+        "xho": "xh",
+        "zul": "zu",
+    }
+
+    def __init__(self, fallback_lang: str = "en") -> None:
+        self._supported_iso639_1 = set(REMEDY_SUPPORTED_LANGUAGES.keys())
+        self._fallback_lang = fallback_lang
+
+    @classmethod
+    def iso639_1_from_code(cls, code: str) -> str | None:
+        cleaned = code.strip()
+        if not cleaned:
+            return None
+        iso3 = cleaned.split("_", 1)[0].lower()
+        if len(iso3) != 3 or not iso3.isalpha():
+            return None
+        return cls._FLORES_ISO3_TO_ISO1.get(iso3)
+
+    def is_iso639_1_supported(self, code: str | None) -> bool:
+        return bool(code and code in self._supported_iso639_1)
+
+    def support_status(self, code: str) -> bool:
+        return self.is_iso639_1_supported(self.iso639_1_from_code(code))
+
+    def effective_code(self, code: str) -> str:
+        mapped = self.iso639_1_from_code(code)
+        if self.is_iso639_1_supported(mapped):
+            return mapped
+        return self._fallback_lang

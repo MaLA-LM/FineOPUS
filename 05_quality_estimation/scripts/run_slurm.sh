@@ -110,6 +110,19 @@ is_bicleaner_model() {
     esac
 }
 
+is_remedy_model() {
+    local model_lower
+    model_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+    case "$model_lower" in
+        remedy|remedy-9b-22|shaomutan/remedy-9b-22)
+            return 0
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 normalize_llm_model() {
     local model_lower
     model_lower="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
@@ -281,6 +294,10 @@ if is_bicleaner_model "$MODEL"; then
     BACKEND="bicleaner"
     MODULE="src.score_bicleaner"
     BICLEANER_INST="${BICLEANER_INST:-${VENV_BASE}/bicleaner_venv}"
+elif is_remedy_model "$MODEL"; then
+    BACKEND="remedy"
+    MODULE="src.score_remedy"
+    REMEDY_INST="${REMEDY_VENV:-${VENV_BASE}/remedy_venv}"
 elif is_llm_model "$MODEL"; then
     BACKEND="llm"
     MODULE="src.score_llm"
@@ -333,6 +350,17 @@ if [ "$BACKEND" = "bicleaner" ]; then
     export SINGULARITYENV_LD_LIBRARY_PATH="/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/lib64:${LD_LIBRARY_PATH:-}"
 
     export PATH="$BICLEANER_INST/bin:$PATH"
+elif [ "$BACKEND" = "remedy" ]; then
+    if [ ! -d "$REMEDY_INST" ]; then
+        echo "ERROR: remedy env not found: $REMEDY_INST"
+        exit 1
+    fi
+
+    export PYTHONNOUSERSITE=1
+    module --force purge
+    module load tykky
+
+    export PATH="$REMEDY_INST/bin:$PATH"
 else
     if [ ! -d "$VENV_PATH" ]; then
         echo "ERROR: venv not found: $VENV_PATH"

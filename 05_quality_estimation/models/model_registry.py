@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Callable, Literal
 
 ScoreAdjuster = Callable[[float], float]
-Backend = Literal["comet", "metricx", "llm", "bicleaner"]
+Backend = Literal["comet", "metricx", "llm", "bicleaner", "remedy"]
 
 
 @dataclass(frozen=True)
@@ -104,6 +104,19 @@ _SPECS: dict[Backend, dict[str, ModelSpec]] = {
             backend="bicleaner",
             model_id="bitextor/bicleaner-ai-full-de-xx",
             aliases=("bitextor/bicleaner-ai-full-de-xx",),
+        ),
+    },
+    "remedy": {
+        "remedy": ModelSpec(
+            key="remedy",
+            backend="remedy",
+            model_id="ShaomuTan/ReMedy-9B-22",
+            aliases=(
+                "remedy",
+                "remedy-9b-22",
+                "shaomutan/remedy-9b-22",
+                "ShaomuTan/ReMedy-9B-22",
+            ),
         ),
     },
 }

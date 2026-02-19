@@ -6,6 +6,7 @@ __all__ = [
     "CometLanguages",
     "QwenLanguages",
     "MetricX24Languages",
+    "RemedyLanguages",
     "ModelSpec",
     "ScoreAdjuster",
     "resolve_model_spec",
@@ -18,13 +19,19 @@ def __getattr__(name: str):
         from models.llm_qe import DimScores, QEResult
 
         return {"DimScores": DimScores, "QEResult": QEResult}[name]
-    if name in {"CometLanguages", "QwenLanguages", "MetricX24Languages"}:
-        from models.language_support import CometLanguages, MetricX24Languages, QwenLanguages
+    if name in {"CometLanguages", "QwenLanguages", "MetricX24Languages", "RemedyLanguages"}:
+        from models.language_support import (
+            CometLanguages,
+            MetricX24Languages,
+            QwenLanguages,
+            RemedyLanguages,
+        )
 
         return {
             "CometLanguages": CometLanguages,
             "QwenLanguages": QwenLanguages,
             "MetricX24Languages": MetricX24Languages,
+            "RemedyLanguages": RemedyLanguages,
         }[name]
     if name in {
         "ModelSpec",
