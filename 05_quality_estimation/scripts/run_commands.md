@@ -14,9 +14,9 @@ sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=20,MA
 
 sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=10,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model metricx24
 
-sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=1,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model Qwen/Qwen3-14B
+sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=1,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model qwen
 
-sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=10,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model bicleaner-ai
+sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=10,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model bicleaner
 
 sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=1,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model unbabel/m-prometheus-7b
 

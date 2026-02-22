@@ -32,7 +32,7 @@ def main() -> None:
     if not stage_files:
         raise SystemExit(f"No stage parquet files found under: {dataset_root}")
 
-    run_id = args.run_id or generate_run_id()
+    run_id = generate_run_id()
     writer = BucketPartWriter(
         output_base=args.output_base,
         dataset=args.dataset,

@@ -17,7 +17,6 @@ from src.common import (
 )
 from src.remedy_backend import (
     DEFAULT_GPU_MEMORY_UTILIZATION,
-    DEFAULT_REMEDY_COMMAND,
     read_calibration_scores,
     resolve_calibration_scores_path,
     run_remedy,
@@ -58,11 +57,6 @@ def parse_args() -> argparse.Namespace:
             "Model name or HF repo id. "
             f"Supported: {', '.join(supported_model_keys('remedy'))}."
         ),
-    )
-    parser.add_argument(
-        "--remedy-command",
-        default=DEFAULT_REMEDY_COMMAND,
-        help="Path to remedy-score CLI.",
     )
     parser.add_argument(
         "--cache-dir",
@@ -123,7 +117,6 @@ def score_entry(
             examples, tmp_root, remedy_src_lang, remedy_tgt_lang
         )
         run_remedy(
-            command=args.remedy_command,
             model_id=spec.model_id,
             src_file=src_file,
             mt_file=mt_file,

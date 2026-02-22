@@ -47,13 +47,7 @@ def resolve_shard_context(args) -> ShardContext:
         shard_id = task_id - min_task_id
         num_shards = task_count
     else:
-        if args.num_shards is None or args.shard_id is None:
-            raise SystemExit(
-                "Missing shard info. Provide --num-shards and --shard-id, "
-                "or run inside a Slurm array with SLURM_ARRAY_TASK_ID/COUNT."
-            )
-        shard_id = args.shard_id
-        num_shards = args.num_shards
+        raise SystemExit("run inside a Slurm array with SLURM_ARRAY_TASK_ID/COUNT.")
 
     if num_shards <= 0:
         raise SystemExit("num_shards must be > 0.")
@@ -101,7 +95,7 @@ def run_scoring(
     score_entry: ScoreEntry,
 ) -> None:
     shard_context = resolve_shard_context(args)
-    run_id = args.run_id or generate_run_id()
+    run_id = generate_run_id()
     writers: dict[str, ShardStageWriter] = {}
 
     total_rows = len(directions)

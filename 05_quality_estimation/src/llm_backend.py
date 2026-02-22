@@ -44,7 +44,7 @@ def score_llm(
     max_retries: int,
     src_lang: str,
     tgt_lang: str,
-    continue_on_error: bool = False,
+    continue_on_error: bool = True,
 ) -> list[float]:
     from models.llm_qe import QEResult
     from pydantic import ValidationError

@@ -10,12 +10,6 @@ from dataset.mediator import DatasetAdapter
 def ensure_dataset_ready(args: argparse.Namespace, dataset: DatasetAdapter) -> None:
     if args.root is None:
         args.root = dataset.default_root
-    if args.split not in dataset.split_values:
-        supported = ", ".join(dataset.split_values)
-        raise SystemExit(
-            f"Unsupported split '{args.split}' for dataset '{dataset.id}'. "
-            f"Supported: {supported}."
-        )
 
 
 def summarize_scores(scores: list[float]) -> tuple[float | None, float | None]:

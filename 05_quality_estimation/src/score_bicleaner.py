@@ -9,9 +9,6 @@ from dataset.mediator import get_dataset
 from models.language_support import CometLanguages
 from models.model_registry import resolve_model_spec, supported_model_keys
 from src.bicleaner_backend import (
-    DEFAULT_BICLEANER_COMMAND,
-    DEFAULT_BICLEANER_PROCESSES,
-    DEFAULT_DISABLE_HARDRULES,
     ISO639_1_BY_BASE_NAME,
     iso639_1_from_dataset,
     read_scores,
@@ -56,25 +53,6 @@ def parse_args() -> argparse.Namespace:
             f"Supported: {', '.join(supported_model_keys('bicleaner'))}."
         ),
     )
-    parser.add_argument(
-        "--bicleaner-command",
-        default=DEFAULT_BICLEANER_COMMAND,
-        help="Path to bicleaner-ai-classify CLI.",
-    )
-    parser.add_argument(
-        "--processes",
-        type=int,
-        default=DEFAULT_BICLEANER_PROCESSES,
-        help="Number of bicleaner-ai worker processes (optional).",
-    )
-    parser.add_argument(
-        "--disable-hardrules",
-        "--disable_hardrules",
-        dest="disable_hardrules",
-        action="store_true",
-        default=DEFAULT_DISABLE_HARDRULES,
-        help="Disable bicleaner-ai hardrules.",
-    )
     return parser.parse_args()
 
 
@@ -108,9 +86,6 @@ def score_entry(
             model_id,
             src_iso,
             tgt_iso,
-            args.bicleaner_command,
-            args.processes,
-            args.disable_hardrules,
         )
         scores = read_scores(output_path)
 

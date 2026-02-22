@@ -68,14 +68,6 @@ def parse_args() -> argparse.Namespace:
         default=2,
         help="Retries per segment if the output fails validation.",
     )
-    parser.add_argument(
-        "--continue-on-error",
-        action="store_true",
-        help=(
-            "Continue scoring when model outputs fail validation; "
-            "record NaN scores and report failures."
-        ),
-    )
     return parser.parse_args()
 
 
@@ -116,7 +108,6 @@ def score_entry(
         args.max_retries,
         src_lang_name,
         tgt_lang_name,
-        continue_on_error=args.continue_on_error,
     )
     src_lang_seen = language_support.support_status(entry.src_lang)
     tgt_lang_seen = language_support.support_status(entry.tgt_lang)

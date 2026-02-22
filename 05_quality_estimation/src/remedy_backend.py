@@ -39,7 +39,6 @@ def _write_lines(path: Path, lines: list[str]) -> None:
 
 
 def build_remedy_command(
-    command: str,
     model_id: str,
     src_file: Path,
     mt_file: Path,
@@ -51,7 +50,7 @@ def build_remedy_command(
     gpu_memory_utilization: float,
 ) -> list[str]:
     return [
-        command,
+        DEFAULT_REMEDY_COMMAND,
         "--model",
         model_id,
         "--src_file",
@@ -77,7 +76,6 @@ def build_remedy_command(
 
 def run_remedy(
     *,
-    command: str,
     model_id: str,
     src_file: Path,
     mt_file: Path,
@@ -91,7 +89,6 @@ def run_remedy(
     if num_gpus <= 0:
         raise ValueError("--gpus/--num_gpus must be >= 1 for remedy-score.")
     args = build_remedy_command(
-        command=command,
         model_id=model_id,
         src_file=src_file,
         mt_file=mt_file,
@@ -104,7 +101,7 @@ def run_remedy(
     )
     logger.warning(
         "[remedy-score] Running '%s' model='%s' src_lang=%s tgt_lang=%s num_gpus=%s",
-        command,
+        DEFAULT_REMEDY_COMMAND,
         model_id,
         src_lang,
         tgt_lang,

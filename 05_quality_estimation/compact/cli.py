@@ -21,9 +21,4 @@ def parse_args() -> argparse.Namespace:
         default=268_435_456,
         help="Best-effort target size per compacted output file.",
     )
-    parser.add_argument(
-        "--run-id",
-        default=None,
-        help="Optional run id for compacted output filenames.",
-    )
     return parser.parse_args()

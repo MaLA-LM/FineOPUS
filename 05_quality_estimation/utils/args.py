@@ -21,11 +21,6 @@ def add_common_scoring_args(
         help="Dataset id to use.",
     )
     parser.add_argument(
-        "--split",
-        default="devtest",
-        help="Default dataset split (manifest rows can override this).",
-    )
-    parser.add_argument(
         "--root",
         default=None,
         help="Root directory of the dataset files (defaults to dataset root).",
@@ -50,39 +45,9 @@ def add_common_scoring_args(
             help=gpus_help or "Number of GPUs to use (set 0 for CPU).",
         )
     parser.add_argument(
-        "--resume",
-        dest="resume",
-        action="store_true",
-        default=True,
-        help="Skip directions already present in checkpoint.done.",
-    )
-    parser.add_argument(
-        "--no-resume",
-        dest="resume",
-        action="store_false",
-        help="Ignore checkpoint.done and recompute assigned directions.",
-    )
-    parser.add_argument(
         "--manifest",
         required=True,
         help="TSV manifest with columns: src_lang, tgt_lang, split[, shard_id].",
-    )
-    parser.add_argument(
-        "--worker",
-        action="store_true",
-        help="Run worker mode (required).",
-    )
-    parser.add_argument(
-        "--num-shards",
-        type=int,
-        default=None,
-        help="Fallback shard count when Slurm array variables are absent.",
-    )
-    parser.add_argument(
-        "--shard-id",
-        type=int,
-        default=None,
-        help="Fallback shard id when Slurm array variables are absent.",
     )
     parser.add_argument(
         "--max-directions-per-part",
@@ -93,19 +58,14 @@ def add_common_scoring_args(
     parser.add_argument(
         "--max-seconds-per-part",
         type=int,
-        default=600,
+        default=3600,  # 1 hour
         help="Close and commit a part after this many seconds.",
     )
     parser.add_argument(
         "--target-part-bytes",
         type=int,
-        default=67_108_864,
+        default=67_108_864,  # 64 MiB
         help="Best-effort target bytes before rotating a part file.",
-    )
-    parser.add_argument(
-        "--run-id",
-        default=None,
-        help="Optional run id for naming stage part files.",
     )
     parser.add_argument(
         "--max-rows",

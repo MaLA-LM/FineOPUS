@@ -14,8 +14,7 @@ ISO639_1_BY_BASE_NAME = {
 }
 
 DEFAULT_BICLEANER_COMMAND = "bicleaner-ai-classify"
-DEFAULT_BICLEANER_PROCESSES: int | None = None
-DEFAULT_DISABLE_HARDRULES = True
+
 
 def iso639_1_from_dataset(code: str, dataset, iso_map: dict[str, str]) -> str | None:
     name = dataset.language_codes.get(code)
@@ -77,11 +76,8 @@ def run_bicleaner(
     model_id: str,
     src_iso: str | None,
     tgt_iso: str | None,
-    command: str,
-    processes: int | None,
-    disable_hardrules: bool,
 ) -> None:
-    args = [command, "--scol", "1", "--tcol", "2"]
+    args = [DEFAULT_BICLEANER_COMMAND, "--scol", "1", "--tcol", "2"]
     if src_iso and tgt_iso:
         args.extend(["-s", src_iso, "-t", tgt_iso])
     else:
@@ -89,12 +85,7 @@ def run_bicleaner(
             "[bicleaner-ai] Missing ISO 639-1 mapping for one or both languages; "
             "running bicleaner-ai without -s/-t."
         )
-    if processes is not None:
-        if processes <= 0:
-            raise ValueError("processes must be >= 1 when set.")
-        args.extend(["--processes", str(processes)])
-    if disable_hardrules:
-        args.append("--disable_hardrules")
+    args.append("--disable_hardrules")
     args.extend([str(input_path), str(output_path), model_id])
     logger.warning(
         "[bicleaner-ai] Running bicleaner-ai with model '%s' (src_iso=%s, tgt_iso=%s)...",
