@@ -21,6 +21,7 @@ from src.metricx_backend import (
 from utils.args import add_common_scoring_args
 from utils.cli import validate_args
 from utils.frames import build_frames
+from utils.logger import logger
 from utils.runner import collect_directions, run_scoring
 
 
@@ -94,7 +95,7 @@ def main() -> None:
 
     directions = collect_directions(args, dataset)
     if not directions:
-        print("No directions found.")
+        logger.info("No directions found.")
         return
 
     model_tag = sanitize_model_tag(model_key)

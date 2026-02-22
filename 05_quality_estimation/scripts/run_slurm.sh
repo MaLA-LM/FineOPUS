@@ -359,8 +359,12 @@ elif [ "$BACKEND" = "remedy" ]; then
     export PYTHONNOUSERSITE=1
     module --force purge
     module load tykky
+    REPO=/projappl/project_2008161/members/$USER/Remedy
 
     export PATH="$REMEDY_INST/bin:$PATH"
+    
+    unset PYTHONPATH
+    export PYTHONPATH="$REPO"
 else
     if [ ! -d "$VENV_PATH" ]; then
         echo "ERROR: venv not found: $VENV_PATH"

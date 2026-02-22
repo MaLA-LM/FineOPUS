@@ -12,6 +12,7 @@ from compact.buckets import (
 )
 from compact.cli import parse_args
 from compact.writer import BucketPartWriter
+from utils.logger import logger
 
 
 def generate_run_id() -> str:
@@ -41,9 +42,9 @@ def main() -> None:
     )
 
     if writer.committed_keys:
-        print(
-            f"Resuming: {len(writer.committed_keys)} direction/model/split "
-            "combos already committed — will be skipped."
+        logger.info(
+            "Resuming: %s direction/model/split combos already committed - will be skipped.",
+            len(writer.committed_keys),
         )
 
     rows_read = 0
@@ -69,8 +70,10 @@ def main() -> None:
                 writer.append(bucket_id, bucket_table, summary_keys=summary_keys)
 
     writer.flush_all()
-    print(
-        "Compaction complete: "
-        f"stage_files={len(stage_files)} rows={rows_read} "
-        f"skipped={rows_skipped} buckets={args.num_buckets}"
+    logger.info(
+        "Compaction complete: stage_files=%s rows=%s skipped=%s buckets=%s",
+        len(stage_files),
+        rows_read,
+        rows_skipped,
+        args.num_buckets,
     )

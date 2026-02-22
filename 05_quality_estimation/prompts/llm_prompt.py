@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-PROMPT_TEMPLATE = """{source_lang} Source:
+PROMPT_TEMPLATE = """Source language:{source_lang} , Source text:
 ```{source_seg}```
 
-{target_lang} Machine Translation:
+Target language: {target_lang} , Machine Translation text:
 ```{target_seg}```
 
 Evaluate the quality of a machine translation for a given segment, using the provided source text,

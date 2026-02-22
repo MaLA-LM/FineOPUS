@@ -22,7 +22,7 @@ def _iter_stage_files(dataset_root: Path) -> list[Path]:
     return sorted(
         path
         for path in dataset_root.rglob("*.parquet")
-        if path.is_file() and "stage" in path.parts
+        if path.is_file() and any(part.startswith("split=") for part in path.parts)
     )
 
 

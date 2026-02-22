@@ -7,17 +7,11 @@ from typing import Callable
 Example = dict[str, str]
 DirectionSpec = tuple[str, str, str, Path]
 
-LanguageCodeMapper = Callable[
-    [set[str], dict[str, str]],
-    tuple[dict[str, set[str]], set[str], list[str]],
-]
-CodeNormalizer = Callable[[str], str]
-Iso639Mapper = Callable[[str, dict[str, str]], str | None]
-
-LoadParallel = Callable[..., list[Example]]
+LoadParallel = Callable[[str | Path, str, str], list[Example]]
 LimitRows = Callable[[list[Example], int | None], list[Example]]
 DiscoverDirections = Callable[[str | Path, str | None], list[DirectionSpec]]
 ExpectedDetailRows = Callable[[str | Path, str, str, int | None], int | None]
+LanguageCodeMapper = Callable[[set[str]], dict[str, list[object]]]
 
 
 @dataclass(frozen=True)
@@ -29,10 +23,8 @@ class DatasetAdapter:
     limit_rows: LimitRows
     discover_directions: DiscoverDirections
     expected_detail_rows: ExpectedDetailRows
-    language_codes: dict[str, str] | None = None
-    name_to_code_mapper: LanguageCodeMapper | None = None
-    code_normalizer: CodeNormalizer | None = None
-    iso639_1_from_code: Iso639Mapper | None = None
+    language_codes: dict[str, str]
+    langcode_to_name: LanguageCodeMapper
 
 
 DEFAULT_DATASET_ID = "flores200"

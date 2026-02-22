@@ -20,6 +20,7 @@ def read_manifest_entries(manifest_path: str | Path) -> list[ManifestEntry]:
     path = Path(manifest_path)
     if not path.exists():
         raise FileNotFoundError(f"Manifest not found: {path}")
+
     with path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         if not reader.fieldnames:

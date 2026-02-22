@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Literal
 
+
 ScoreAdjuster = Callable[[float], float]
 Backend = Literal["comet", "metricx", "llm", "bicleaner", "remedy"]
 

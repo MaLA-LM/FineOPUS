@@ -5,6 +5,7 @@ from pathlib import Path
 
 from dataset.mediator import DEFAULT_DATASET_ID, get_dataset
 from dataset.manifest import write_manifest
+from utils.logger import logger
 
 
 def parse_args() -> argparse.Namespace:
@@ -17,13 +18,8 @@ def parse_args() -> argparse.Namespace:
         help="Dataset id to use.",
     )
     parser.add_argument(
-        "--root",
-        default=None,
-        help="Root directory of the dataset files (defaults to dataset root).",
-    )
-    parser.add_argument(
         "--split",
-        default="devtest",
+        default="all",
         help="Split to include in the manifest (or 'all').",
     )
     parser.add_argument(
@@ -42,7 +38,7 @@ def main() -> None:
         raise SystemExit("--num-shards must be > 0.")
 
     dataset = get_dataset(args.dataset)
-    root = args.root or dataset.default_root
+    root = dataset.default_root
 
     split = None if args.split == "all" else args.split
     if split is not None and split not in dataset.split_values:
@@ -59,7 +55,7 @@ def main() -> None:
         args.out,
         num_shards=args.num_shards,
     )
-    print(f"Wrote manifest: {Path(args.out)}")
+    logger.info("Wrote manifest: %s", Path(args.out))
 
 
 if __name__ == "__main__":

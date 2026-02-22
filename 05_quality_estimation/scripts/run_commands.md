@@ -10,15 +10,13 @@ python -m dataset.make_manifest
 
 # 20 translation direction, 40 minutes, 64 MB
 # 2) run slurm array workers (shard is inferred from Slurm env)
-sbatch --array=1-3 \
-  --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=20,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 \
-  scripts/run_slurm.sh --manifest flores200_directions.tsv --model xcomet
+sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=20,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model xcomet
 
-sbatch --array=1-3 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=10,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model metricx24
+sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=10,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model metricx24
 
 sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=1,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model Qwen/Qwen3-14B
 
-sbatch --array=1-3 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=10,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model bicleaner-ai
+sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=10,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model bicleaner-ai
 
 sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=1,MAX_SECONDS_PER_PART=2400,TARGET_PART_BYTES=67108864 scripts/run_slurm.sh --manifest flores200_directions.tsv --model unbabel/m-prometheus-7b
 

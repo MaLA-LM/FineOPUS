@@ -28,7 +28,6 @@ class ShardStageWriter:
             / f"dataset={dataset}"
             / f"model={model_tag}"
             / f"split={split}"
-            / "stage"
             / f"shard={shard_id:03d}"
         )
         self.output_dir.mkdir(parents=True, exist_ok=True)

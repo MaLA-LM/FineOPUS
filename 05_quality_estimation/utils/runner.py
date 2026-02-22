@@ -8,6 +8,7 @@ from typing import Callable
 from dataset.manifest import ManifestEntry, read_manifest_entries
 from dataset.mediator import DatasetAdapter
 from utils.hashing import compute_shard_id, direction_key
+from utils.logger import logger
 from utils.stage_writer import ShardStageWriter
 
 ScoreEntry = Callable[[ManifestEntry], object]
@@ -136,15 +137,17 @@ def run_scoring(
             assigned_rows += 1
 
             writer = get_writer(entry.split)
-            if args.resume and key in writer.committed_direction_keys:
-                print(f"SKIP (checkpoint): {key} split={entry.split}")
+            if key in writer.committed_direction_keys:
+                logger.info("SKIP (checkpoint): %s split=%s", key, entry.split)
                 skipped_rows += 1
                 continue
 
-            print(
-                "Scoring "
-                f"{key} split={entry.split} "
-                f"shard={shard_context.shard_id}/{shard_context.num_shards}"
+            logger.info(
+                "Scoring %s split=%s shard=%s/%s",
+                key,
+                entry.split,
+                shard_context.shard_id,
+                shard_context.num_shards,
             )
             frame = score_entry(entry)
             frame = frame.copy()
@@ -156,8 +159,10 @@ def run_scoring(
         for writer in writers.values():
             writer.close()
 
-    print(
-        "Worker complete: "
-        f"total={total_rows} assigned={assigned_rows} "
-        f"processed={processed_rows} skipped={skipped_rows}"
+    logger.info(
+        "Worker complete: total=%s assigned=%s processed=%s skipped=%s",
+        total_rows,
+        assigned_rows,
+        processed_rows,
+        skipped_rows,
     )

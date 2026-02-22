@@ -19,7 +19,12 @@ def __getattr__(name: str):
         from models.llm_qe import DimScores, QEResult
 
         return {"DimScores": DimScores, "QEResult": QEResult}[name]
-    if name in {"CometLanguages", "QwenLanguages", "MetricX24Languages", "RemedyLanguages"}:
+    if name in {
+        "CometLanguages",
+        "QwenLanguages",
+        "MetricX24Languages",
+        "RemedyLanguages",
+    }:
         from models.language_support import (
             CometLanguages,
             MetricX24Languages,

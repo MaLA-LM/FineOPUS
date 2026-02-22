@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import subprocess
-import sys
 from pathlib import Path
 
 from dataset.mediator import Example
+from utils.logger import logger
 
 DEFAULT_REMEDY_COMMAND = "remedy-score"
 DEFAULT_GPU_MEMORY_UTILIZATION = 0.9
-
-
-def _log(message: str) -> None:
-    print(f"[remedy-score] {message}", file=sys.stderr)
 
 
 def _model_output_dir_name(model_id: str) -> str:
@@ -106,9 +102,13 @@ def run_remedy(
         num_gpus=num_gpus,
         gpu_memory_utilization=gpu_memory_utilization,
     )
-    _log(
-        f"Running '{command}' model='{model_id}' src_lang={src_lang} tgt_lang={tgt_lang} "
-        f"num_gpus={num_gpus}"
+    logger.warning(
+        "[remedy-score] Running '%s' model='%s' src_lang=%s tgt_lang=%s num_gpus=%s",
+        command,
+        model_id,
+        src_lang,
+        tgt_lang,
+        num_gpus,
     )
     subprocess.run(args, check=True)
 
@@ -127,19 +127,14 @@ def resolve_calibration_scores_path(
             f"{model_output_dir} (expected from --save_dir {save_dir})."
         )
 
-    prefix = f"{src_lang}-{tgt_lang}"
-    candidates = [
-        model_output_dir / f"{prefix}_calibration_scores.txt",
-        model_output_dir / f"{prefix}_callibration_scores.txt",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
+    scores_path = model_output_dir / f"{src_lang}-{tgt_lang}_calibration_scores.txt"
+    if scores_path.exists():
+        return scores_path
 
     available = sorted(path.name for path in model_output_dir.iterdir())
     raise RuntimeError(
         "Calibration score file not found in remedy output directory. "
-        f"Checked: {[path.name for path in candidates]}. "
+        f"Checked: {scores_path.name}. "
         f"Available: {available}."
     )
 

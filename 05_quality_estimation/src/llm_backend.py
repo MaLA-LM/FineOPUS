@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import json
-import logging
 import re
 
 from dataset.mediator import Example
 from prompts.llm_prompt import render_prompt
+from utils.logger import logger
 
-LOGGER = logging.getLogger(__name__)
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
@@ -72,9 +71,11 @@ def score_llm(
                 scores.append(float("nan"))
                 invalid_rows.append(idx)
                 continue
-            raise RuntimeError(f"Row {idx} failed validation: {last_error}") from last_error
+            raise RuntimeError(
+                f"Row {idx} failed validation: {last_error}"
+            ) from last_error
     if continue_on_error and invalid_rows:
         sample = ", ".join(str(idx) for idx in invalid_rows[:5])
         suffix = f" Example indices: {sample}." if sample else ""
-        LOGGER.info("Invalid JSON rows: %s.%s", len(invalid_rows), suffix)
+        logger.info("Invalid JSON rows: %s.%s", len(invalid_rows), suffix)
     return scores

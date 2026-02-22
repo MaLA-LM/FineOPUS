@@ -26,6 +26,7 @@ from src.remedy_backend import (
 from utils.args import add_common_scoring_args
 from utils.cli import validate_args
 from utils.frames import build_frames
+from utils.logger import logger
 from utils.runner import collect_directions, run_scoring
 
 DEFAULT_REMEDY_MODEL = "remedy"
@@ -96,8 +97,25 @@ def score_entry(
 
     src_lang_seen = language_support.support_status(entry.src_lang)
     tgt_lang_seen = language_support.support_status(entry.tgt_lang)
-    remedy_src_lang = language_support.effective_code(entry.src_lang)
-    remedy_tgt_lang = language_support.effective_code(entry.tgt_lang)
+
+    src_lang_name = language_support.get_full_language_name(entry.src_lang)
+    tgt_lang_name = language_support.get_full_language_name(entry.tgt_lang)
+    remedy_src_lang = language_support._iso639_1_from_language(src_lang_name)
+    remedy_tgt_lang = language_support._iso639_1_from_language(tgt_lang_name)
+
+    # default to 'en' if language not recognized by ReMedy
+    if not remedy_src_lang:
+        logger.warning(
+            f"Source language '{entry.src_lang}' not recognized by ReMedy. "
+            "Defaulting to 'en' for scoring. Scores may be inaccurate."
+        )
+        remedy_src_lang = "en"
+    if not remedy_tgt_lang:
+        logger.warning(
+            f"Target language '{entry.tgt_lang}' not recognized by ReMedy. "
+            "Defaulting to 'en' for scoring. Scores may be inaccurate."
+        )
+        remedy_tgt_lang = "en"
 
     with TemporaryDirectory() as tmp_dir:
         tmp_root = Path(tmp_dir)
@@ -162,7 +180,7 @@ def main() -> None:
 
     directions = collect_directions(args, dataset)
     if not directions:
-        print("No directions found.")
+        logger.info("No directions found.")
         return
 
     model_tag = sanitize_model_tag(model_key)

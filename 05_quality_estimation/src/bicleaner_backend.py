@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import csv
 import subprocess
-import sys
 from pathlib import Path
 
 from dataset.mediator import Example
+from utils.logger import logger
 
 ISO639_1_BY_BASE_NAME = {
     "english": "en",
@@ -17,23 +17,12 @@ DEFAULT_BICLEANER_COMMAND = "bicleaner-ai-classify"
 DEFAULT_BICLEANER_PROCESSES: int | None = None
 DEFAULT_DISABLE_HARDRULES = True
 
-
-def _log(message: str) -> None:
-    print(f"[bicleaner-ai] {message}", file=sys.stderr)
-
-
 def iso639_1_from_dataset(code: str, dataset, iso_map: dict[str, str]) -> str | None:
-    if not code:
-        _log("Missing dataset language code.")
+    name = dataset.language_codes.get(code)
+    if not name:
         return None
-    if dataset.iso639_1_from_code is None:
-        _log(f"Dataset '{dataset.id}' does not provide ISO mapping.")
-        return None
-    alpha2 = dataset.iso639_1_from_code(code, iso_map)
-    if not alpha2:
-        _log(f"No ISO 639-1 mapping for {dataset.id} '{code}'.")
-        return None
-    return alpha2
+    base_name = name.split()[0].lower()
+    return iso_map.get(base_name)
 
 
 def _model_for_iso(alpha2: str, model_ids: dict[str, str]) -> str:
@@ -96,8 +85,8 @@ def run_bicleaner(
     if src_iso and tgt_iso:
         args.extend(["-s", src_iso, "-t", tgt_iso])
     else:
-        _log(
-            "Missing ISO 639-1 mapping for one or both languages; "
+        logger.warning(
+            "[bicleaner-ai] Missing ISO 639-1 mapping for one or both languages; "
             "running bicleaner-ai without -s/-t."
         )
     if processes is not None:
@@ -107,8 +96,10 @@ def run_bicleaner(
     if disable_hardrules:
         args.append("--disable_hardrules")
     args.extend([str(input_path), str(output_path), model_id])
-    _log(
-        f"Running bicleaner-ai with model '{model_id}' "
-        f"(src_iso={src_iso}, tgt_iso={tgt_iso})..."
+    logger.warning(
+        "[bicleaner-ai] Running bicleaner-ai with model '%s' (src_iso=%s, tgt_iso=%s)...",
+        model_id,
+        src_iso,
+        tgt_iso,
     )
     subprocess.run(args, check=True)

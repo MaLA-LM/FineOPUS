@@ -3,7 +3,7 @@
 import argparse
 
 from dataset.manifest import ManifestEntry
-from dataset.mediator import get_dataset
+from dataset.mediator import get_dataset, DatasetAdapter
 from models.language_support import QwenLanguages
 from models.model_registry import resolve_model_spec, supported_model_keys
 from src.common import (
@@ -16,6 +16,7 @@ from src.llm_backend import build_lm, score_llm
 from utils.args import add_common_scoring_args
 from utils.cli import validate_args
 from utils.frames import build_frames
+from utils.logger import logger
 from utils.runner import collect_directions, run_scoring
 
 DEFAULT_LLM_MODEL = "Qwen/Qwen3-14B"
@@ -106,12 +107,15 @@ def score_entry(
     dataset,
 ):
     examples = load_examples(entry, args, dataset)
+    src_lang_name = language_support.get_full_language_name(entry.src_lang)
+    tgt_lang_name = language_support.get_full_language_name(entry.tgt_lang)
+
     scores = score_llm(
         examples,
         lm,
         args.max_retries,
-        entry.src_lang,
-        entry.tgt_lang,
+        src_lang_name,
+        tgt_lang_name,
         continue_on_error=args.continue_on_error,
     )
     src_lang_seen = language_support.support_status(entry.src_lang)
@@ -147,7 +151,7 @@ def main() -> None:
 
     directions = collect_directions(args, dataset)
     if not directions:
-        print("No directions found.")
+        logger.info("No directions found.")
         return
 
     lm = build_lm(

@@ -1,134 +1,94 @@
 from __future__ import annotations
 
-import logging
 import re
 from typing import Optional
+from dataset.flores200_scripts.langcodes import flores200_langcodes
 
-LOGGER = logging.getLogger(__name__)
-
-NAME_ALIASES: dict[str, str] = {"oriya": "odia"}
-
-_PUNCT_RE = re.compile(r"[-_/.,:;]+")
-_APOSTROPHE_RE = re.compile(r"[']+")
-_WHITESPACE_RE = re.compile(r"\s+")
-_PAREN_RE = re.compile(r"\s*\([^)]*\)\s*$")
-_ROMANIZED_RE = re.compile(r"\s+romanized\s*$", re.IGNORECASE)
-
-
-def normalize_text(text: str) -> str:
-    cleaned = text.strip().casefold()
-    cleaned = _APOSTROPHE_RE.sub("", cleaned)
-    cleaned = _PUNCT_RE.sub(" ", cleaned)
-    cleaned = _WHITESPACE_RE.sub(" ", cleaned).strip()
-
-    # Extract last word if multiple words present
-    words = cleaned.split()
-    if len(words) > 1:
-        cleaned = words[-1]
-
-    return cleaned
+# Hard-coded aliases for FLORES-200 names that cannot be resolved
+# by the generic algorithm (different root word, not just a qualifier).
+SPECIAL_ALIASES: dict[str, list[str]] = {
+    "Odia": ["Oriya"],
+    "Northern Kurdish": ["Kurdish (Kurmanji)"],
+    "Yue Chinese": ["Cantonese"],
+    "Eastern Panjabi": ["Punjabi"],
+}
 
 
-def _strip_trailing_parentheticals(text: str) -> str:
-    cleaned = text.strip()
-    while True:
-        updated = _PAREN_RE.sub("", cleaned).strip()
-        if updated == cleaned:
-            return cleaned
-        cleaned = updated
-
-
-def base_name_from_flores_display(display: str) -> str:
-    return normalize_text(_strip_trailing_parentheticals(display))
-
-
-def base_name_from_model_name(name: str) -> str:
-    cleaned = _ROMANIZED_RE.sub("", name.strip()).strip()
-    cleaned = _strip_trailing_parentheticals(cleaned)
-    return normalize_text(cleaned)
-
-
-def script_preference_from_model_name(name: str) -> Optional[str]:
-    cleaned = name.strip().casefold()
-    cleaned = _APOSTROPHE_RE.sub("", cleaned)
-    cleaned = _PUNCT_RE.sub(" ", cleaned)
-    cleaned = _WHITESPACE_RE.sub(" ", cleaned).strip()
-    if "romanized" in cleaned:
-        return "Latn"
-    if "chinese" in cleaned and "simplified" in cleaned:
-        return "Hans"
-    if "chinese" in cleaned and "traditional" in cleaned:
-        return "Hant"
+def _find_in_set(candidate: str, model_languages: set[str]) -> str | None:
+    """Case-insensitive lookup. Returns the actual model-language string."""
+    candidate_lower = candidate.lower()
+    for lang in model_languages:
+        if lang.lower() == candidate_lower:
+            return lang
     return None
 
 
-def script_from_flores_code(code: str) -> Optional[str]:
-    cleaned = code.strip()
-    if "_" not in cleaned:
+def _match_exact(name: str, model_languages: set[str]) -> str | None:
+    """Step 1: exact match (case-insensitive)."""
+    return _find_in_set(name, model_languages)
+
+
+def _match_alias(name: str, model_languages: set[str]) -> str | None:
+    """Step 2: try special-case aliases (Odia→Oriya, etc.)."""
+    for alias in SPECIAL_ALIASES.get(name, []):
+        match = _find_in_set(alias, model_languages)
+        if match:
+            return match
+    return None
+
+
+def _match_left_trim(name: str, model_languages: set[str]) -> str | None:
+    """Step 3: progressively remove one word from the left
+    ("South Azerbaijani" → "Azerbaijani")."""
+    words = name.split()
+    for i in range(1, len(words)):
+        match = _find_in_set(" ".join(words[i:]), model_languages)
+        if match:
+            return match
+    return None
+
+
+def _match_strip_qualifiers(name: str, model_languages: set[str]) -> str | None:
+    """Step 4: strip parenthesised qualifiers, then retry exact + left-trim
+    ("Chinese (Simplified)" → "Chinese")."""
+    stripped = re.sub(r"\s*\([^)]*\)", "", name).strip()
+    if stripped == name:
         return None
-    parts = cleaned.split("_")
-    if len(parts) != 2:
-        return None
-    script = parts[1]
-    if len(script) != 4 or not script.isalpha():
-        return None
-    return script
+    match = _match_exact(stripped, model_languages) or _match_left_trim(
+        stripped, model_languages
+    )
+    return match
 
 
-def build_flores_index(flores200_langcodes: dict[str, str]) -> dict[str, list[str]]:
-    index: dict[str, list[str]] = {}
-    for code, display_name in flores200_langcodes.items():
-        base = base_name_from_flores_display(display_name)
-        index.setdefault(base, []).append(code)
-    return index
+def _match_language(
+    flores_display_name: str, model_languages: set[str]
+) -> tuple[bool, str | None]:
+    """Match a FLORES-200 display name to a model language.
+
+    Matching strategy (tried in order):
+      1. Exact match (case-insensitive)
+      2. Special-case aliases
+         (Odia→Oriya, Northern Kurdish→Kurdish (Kurmanji), Yue Chinese→Cantonese)
+      3. Progressive left-word removal
+         ("South Azerbaijani" → "Azerbaijani")
+      4. Strip parenthesised qualifiers
+         ("Chinese (Simplified)" → "Chinese"),
+         then retry exact + left-word removal on the stripped form
+    """
+    match = (
+        _match_exact(flores_display_name, model_languages)
+        or _match_alias(flores_display_name, model_languages)
+        or _match_left_trim(flores_display_name, model_languages)
+        or _match_strip_qualifiers(flores_display_name, model_languages)
+    )
+    return (True, match) if match else (False, None)
 
 
-def apply_alias(base: str) -> str:
-    return NAME_ALIASES.get(base, base)
-
-
-# map languages supported by a model to flores200 codes
-def map_model_names_to_flores_codes(
-    model_supported_names: set[str],
-    flores200_langcodes: dict[str, str],
-) -> tuple[dict[str, set[str]], set[str], list[str]]:
-    flores_index = build_flores_index(flores200_langcodes)
-    name_to_codes: dict[str, set[str]] = {}
-    supported_codes: set[str] = set()
-    unmatched: list[str] = []
-
-    for model_lang_name in sorted(model_supported_names):
-        base = base_name_from_model_name(model_lang_name)
-        aliased = apply_alias(base)
-        candidates = flores_index.get(aliased, [])
-        if not candidates and aliased != base:
-            candidates = flores_index.get(base, [])
-        if not candidates:
-            unmatched.append(model_lang_name)
-            name_to_codes[model_lang_name] = set()
-            continue
-
-        preferred_script = script_preference_from_model_name(model_lang_name)
-        if preferred_script is not None:
-            chosen = {
-                code
-                for code in candidates
-                if script_from_flores_code(code) == preferred_script
-            }
-            if not chosen:
-                chosen = set(candidates)
-        else:
-            chosen = set(candidates)
-            scripts = {script_from_flores_code(code) for code in candidates}
-            scripts.discard(None)
-            if len(scripts) > 1:
-                LOGGER.info(
-                    "No script preference for %s; mapping to %s",
-                    model_lang_name,
-                    sorted(chosen),
-                )
-
-        name_to_codes[model_lang_name] = chosen
-        supported_codes.update(chosen)
-
-    return name_to_codes, supported_codes, unmatched
+def build_model_language_mapping(model_languages: set[str]) -> dict[str, list[object]]:
+    mapping: dict[str, list[object]] = {}
+    for language_code, flores_display_name in flores200_langcodes.items():
+        is_supported, matched_model_language = _match_language(
+            flores_display_name, model_languages
+        )
+        mapping[language_code] = [is_supported, matched_model_language]
+    return mapping

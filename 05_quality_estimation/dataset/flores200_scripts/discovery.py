@@ -16,7 +16,7 @@ def _resolve_splits(split: str | None) -> list[str]:
     return [split]
 
 
-# return all languages in a given split
+# return all languages (langcode) in a given split
 def _discover_languages(root: Path, split: str) -> list[str]:
     split_dir = root / split
     if not split_dir.exists():
