@@ -85,7 +85,9 @@ def resolve_model(name: str) -> tuple[str, str, str]:
         model_key = canonical
 
     request_name = (
-        canonical[len("openai/") :] if canonical.startswith("openai/") else canonical
+        canonical[len("hosted_vllm/") :]
+        if canonical.startswith("hosted_vllm/")
+        else canonical
     )
     return canonical, request_name, model_key
 
