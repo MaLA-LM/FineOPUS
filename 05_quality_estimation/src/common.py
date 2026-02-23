@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import statistics
 
@@ -13,9 +14,10 @@ def ensure_dataset_ready(args: argparse.Namespace, dataset: DatasetAdapter) -> N
 
 
 def summarize_scores(scores: list[float]) -> tuple[float | None, float | None]:
-    if not scores:
+    valid = [s for s in scores if not math.isnan(s)]
+    if not valid:
         return None, None
-    return float(statistics.fmean(scores)), float(statistics.median(scores))
+    return float(statistics.fmean(valid)), float(statistics.median(valid))
 
 
 def sanitize_model_tag(name: str) -> str:
