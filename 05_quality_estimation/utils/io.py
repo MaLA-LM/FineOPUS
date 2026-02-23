@@ -22,10 +22,3 @@ OUTPUT_COLUMNS = [
 ]
 
 REQUIRED_COLUMNS = set(OUTPUT_COLUMNS)
-
-
-def write_parquet_atomic(frame, output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = Path(str(output_path) + ".tmp")
-    frame.to_parquet(tmp_path, index=False)
-    tmp_path.replace(output_path)

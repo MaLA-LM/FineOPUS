@@ -114,7 +114,6 @@ def run_scoring(
                 shard_id=shard_context.shard_id,
                 run_id=run_id,
                 max_directions_per_part=args.max_directions_per_part,
-                max_seconds_per_part=args.max_seconds_per_part,
                 target_part_bytes=args.target_part_bytes,
             )
             writers[split] = writer

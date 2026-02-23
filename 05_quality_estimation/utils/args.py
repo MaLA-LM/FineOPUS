@@ -56,12 +56,6 @@ def add_common_scoring_args(
         help="Close and commit a part after this many directions.",
     )
     parser.add_argument(
-        "--max-seconds-per-part",
-        type=int,
-        default=3600,  # 1 hour
-        help="Close and commit a part after this many seconds.",
-    )
-    parser.add_argument(
         "--target-part-bytes",
         type=int,
         default=67_108_864,  # 64 MiB

@@ -8,7 +8,5 @@ def validate_args(args) -> None:
         raise SystemExit("--output-base is required.")
     if args.max_directions_per_part <= 0:
         raise SystemExit("--max-directions-per-part must be > 0.")
-    if args.max_seconds_per_part <= 0:
-        raise SystemExit("--max-seconds-per-part must be > 0.")
     if args.target_part_bytes <= 0:
         raise SystemExit("--target-part-bytes must be > 0.")

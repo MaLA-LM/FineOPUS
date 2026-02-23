@@ -37,7 +37,6 @@ MANIFEST="${MANIFEST:-${WORKDIR}/flores200_directions.tsv}"
 BATCH_SIZE="${BATCH_SIZE:-8}"
 GPUS="${GPUS:-1}"
 MAX_DIRECTIONS_PER_PART="${MAX_DIRECTIONS_PER_PART:-25}"
-MAX_SECONDS_PER_PART="${MAX_SECONDS_PER_PART:-600}"
 TARGET_PART_BYTES="${TARGET_PART_BYTES:-67108864}"
 MODEL="${MODEL:-wmt22-cometkiwi-da}"
 
@@ -187,10 +186,6 @@ while [ $# -gt 0 ]; do
             MAX_DIRECTIONS_PER_PART="${2:-}"
             shift 2
             ;;
-        --max-seconds-per-part)
-            MAX_SECONDS_PER_PART="${2:-}"
-            shift 2
-            ;;
         --target-part-bytes)
             TARGET_PART_BYTES="${2:-}"
             shift 2
@@ -281,7 +276,6 @@ COMMON_ARGS=(
     --gpus "$GPUS"
     --manifest "$MANIFEST"
     --max-directions-per-part "$MAX_DIRECTIONS_PER_PART"
-    --max-seconds-per-part "$MAX_SECONDS_PER_PART"
     --target-part-bytes "$TARGET_PART_BYTES"
 )
 

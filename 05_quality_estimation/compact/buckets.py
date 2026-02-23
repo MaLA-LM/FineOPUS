@@ -1,18 +1,20 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Mapping
 
 from utils.hashing import stable_hash_int
+from utils.io import ROW_TYPE_SUMMARY
 
 if TYPE_CHECKING:
     import pyarrow as pa
 
+StageCommitKey = tuple[str, str, str, int]
+
 
 def compute_bucket_id(direction_key_value: str, num_buckets: int) -> int:
-    if num_buckets <= 0:
-        raise ValueError("num_buckets must be > 0.")
     return stable_hash_int(direction_key_value) % num_buckets
 
 
@@ -21,23 +23,50 @@ def _iter_stage_files(dataset_root: Path) -> list[Path]:
         return []
     return sorted(
         path
-        for path in dataset_root.rglob("*.parquet")
-        if path.is_file() and any(part.startswith("split=") for part in path.parts)
+        for path in dataset_root.rglob("part-*.jsonl")
+        if path.is_file() and any(part.startswith("shard=") for part in path.parts)
     )
+
+
+def _stage_checkpoint_path_for_part(stage_part_path: Path) -> Path:
+    return stage_part_path.parent / "checkpoint.jsonl"
+
+
+def _extract_stage_commit_key(record: Mapping[str, object]) -> StageCommitKey:
+    return (
+        record["direction_key"],
+        record["model_name"],
+        record["split"],
+        int(record["shard_id"]),
+    )
+
+
+def _load_stage_checkpoint(checkpoint_path: Path) -> set[StageCommitKey]:
+    if not checkpoint_path.exists():
+        return set()
+
+    committed: set[StageCommitKey] = set()
+    with checkpoint_path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if record.get("row_type") == ROW_TYPE_SUMMARY:
+                committed.add(_extract_stage_commit_key(record))
+    return committed
 
 
 def _split_table_by_bucket(table: pa.Table, num_buckets: int) -> dict[int, pa.Table]:
     import pyarrow as pa
 
-    if "direction_key" not in table.column_names:
-        raise ValueError("Input table is missing required 'direction_key' column.")
-
     index_map: dict[int, list[int]] = defaultdict(list)
     keys = table.column("direction_key").to_pylist()
     for idx, key in enumerate(keys):
-        if key is None:
-            raise ValueError("direction_key contains null values.")
-        bucket_id = compute_bucket_id(str(key), num_buckets)
+        bucket_id = compute_bucket_id(key, num_buckets)
         index_map[bucket_id].append(idx)
 
     result: dict[int, pa.Table] = {}
@@ -80,5 +109,5 @@ def _extract_summary_keys(table: pa.Table) -> set[tuple[str, str, str]]:
     return {
         (str(dkeys[idx]), str(models[idx]), str(splits[idx]))
         for idx in range(table.num_rows)
-        if row_types[idx] == "summary"
+        if row_types[idx] == ROW_TYPE_SUMMARY
     }
