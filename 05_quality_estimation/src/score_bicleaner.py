@@ -75,7 +75,12 @@ def score_entry(
     tgt_iso = iso639_1_from_dataset(entry.tgt_lang, dataset, ISO639_1_BY_BASE_NAME)
     model_id = select_model_id(model_selector, src_iso, tgt_iso, BICLEANER_MODEL_IDS)
 
-    with TemporaryDirectory() as tmp_dir:
+    # Use scratch (output_base) for temp files instead of /tmp, which is
+    # too small on Mahti compute nodes and fills up across array tasks.
+    tmp_parent = Path(args.output_base) / ".tmp_bicleaner"
+    tmp_parent.mkdir(parents=True, exist_ok=True)
+
+    with TemporaryDirectory(dir=tmp_parent) as tmp_dir:
         tmp_root = Path(tmp_dir)
         input_path = tmp_root / "input.tsv"
         output_path = tmp_root / "output.tsv"

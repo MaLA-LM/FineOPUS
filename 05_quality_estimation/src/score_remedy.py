@@ -111,7 +111,12 @@ def score_entry(
         )
         remedy_tgt_lang = "en"
 
-    with TemporaryDirectory() as tmp_dir:
+    # Use scratch (output_base) for temp files instead of /tmp, which is
+    # too small on Mahti compute nodes and fills up across array tasks.
+    tmp_parent = Path(args.output_base) / ".tmp_remedy"
+    tmp_parent.mkdir(parents=True, exist_ok=True)
+
+    with TemporaryDirectory(dir=tmp_parent) as tmp_dir:
         tmp_root = Path(tmp_dir)
         src_file, mt_file = write_parallel_files(
             examples, tmp_root, remedy_src_lang, remedy_tgt_lang

@@ -51,10 +51,6 @@ def resolve_shard_context(args) -> ShardContext:
 
     if num_shards <= 0:
         raise SystemExit("num_shards must be > 0.")
-    if shard_id < 0 or shard_id >= num_shards:
-        raise SystemExit(
-            f"shard_id out of range: {shard_id} not in [0, {num_shards - 1}]"
-        )
     return ShardContext(shard_id=shard_id, num_shards=num_shards)
 
 
@@ -78,11 +74,10 @@ def _resolve_entry_shard_id(
 ) -> int:
     if entry.shard_id is None:
         return compute_shard_id(direction_key_value, num_shards)
-    if entry.shard_id < 0 or entry.shard_id >= num_shards:
+    if entry.shard_id < 0:
         raise SystemExit(
             "Manifest shard_id out of range for current shard count: "
             f"{direction_key_value} has shard_id={entry.shard_id}, "
-            f"num_shards={num_shards}."
         )
     return entry.shard_id
 
