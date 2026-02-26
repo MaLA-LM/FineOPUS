@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=flores200_score
-#SBATCH --account=project_2008161
-#SBATCH --partition=gpusmall
-#SBATCH --gres=gpu:a100:1
+#SBATCH --account=project_462001050
+#SBATCH --partition=small-g
+#SBATCH --time=24:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=7
+#SBATCH --gpus-per-node=1
 #SBATCH --mem=60G
-#SBATCH --time=24:00:00
-#SBATCH --output=/projappl/project_2008161/members/ibrahiam/encoder_flores_200/logs/%x-%j.out
-#SBATCH --error=/projappl/project_2008161/members/ibrahiam/encoder_flores_200/logs/%x-%j.err
+#SBATCH --output=/projappl/project_462001050/members/ibrahiam/05_quality_estimation/logs/%x-%j.out
+#SBATCH --error=/projappl/project_462001050/members/ibrahiam/05_quality_estimation/logs/%x-%j.err
 
 set -euo pipefail
 
-export HF_HOME="/scratch/project_2008161/$USER/hf"
+export HF_HOME="/scratch/project_462001050/$USER/hf"
 export HF_HUB_CACHE="$HF_HOME/hub"
 export HF_DATASETS_CACHE="$HF_HOME/datasets"
 export HF_ASSETS_CACHE="$HF_HOME/assets"
@@ -22,16 +22,16 @@ export HUGGINGFACE_ASSETS_CACHE="$HF_ASSETS_CACHE"
 export TRANSFORMERS_CACHE="$HF_HUB_CACHE"
 
 echo "=================================="
-echo "Job ID: $SLURM_JOB_ID"
-echo "Node: $SLURM_NODELIST"
+echo "Job ID: ${SLURM_JOB_ID:-N/A}"
+echo "Node: ${SLURM_NODELIST:-N/A}"
 echo "Start time: $(date)"
 echo "=================================="
 
-WORKDIR="${WORKDIR:-/projappl/project_2008161/members/ibrahiam/encoder_flores_200}"
-ROOT="${ROOT:-${DATA_DIR:-/scratch/project_2008161/downstream_benchmarks/flores200}}"
-OUTPUT_BASE="${OUTPUT_BASE:-${OUTPUT_DIR:-/scratch/project_2008161/QE_flores200_scores}}"
+WORKDIR="${WORKDIR:-/projappl/project_462001050/members/ibrahiam/05_quality_estimation}"
+VENV_BASE="${VENV_BASE:-/scratch/project_462001050/ibrahiam/envs}"
+ROOT="${ROOT:-${DATA_DIR:-/scratch/project_462001050/downstream_benchmarks/flores200}}"
+OUTPUT_BASE="${OUTPUT_BASE:-${OUTPUT_DIR:-/scratch/project_462001050/QE_flores200_scores}}"
 DATASET="${DATASET:-flores200}"
-VENV_BASE="${VENV_BASE:-${WORKDIR}/envs}"
 MANIFEST="${MANIFEST:-${WORKDIR}/flores200_directions.tsv}"
 
 BATCH_SIZE="${BATCH_SIZE:-8}"
@@ -86,19 +86,19 @@ resolve_model() {
             BACKEND="comet"
             MODULE="src.score_comet"
             MODEL_CANONICAL="Unbabel/wmt22-cometkiwi-da"
-            VENV_PATH="${COMET_VENV:-${VENV_BASE}/comet_venv}"
+            VENV_PATH="${METRIC_VENV:-${VENV_BASE}/metric_venv}"
             ;;
         comet23|unbabel/wmt23-cometkiwi-da-xl)
             BACKEND="comet"
             MODULE="src.score_comet"
             MODEL_CANONICAL="Unbabel/wmt23-cometkiwi-da-xl"
-            VENV_PATH="${COMET_VENV:-${VENV_BASE}/comet_venv}"
+            VENV_PATH="${METRIC_VENV:-${VENV_BASE}/metric_venv}"
             ;;
         xcomet|unbabel/xcomet-xl)
             BACKEND="comet"
             MODULE="src.score_comet"
             MODEL_CANONICAL="Unbabel/XCOMET-XL"
-            VENV_PATH="${COMET_VENV:-${VENV_BASE}/comet_venv}"
+            VENV_PATH="${METRIC_VENV:-${VENV_BASE}/metric_venv}"
             ;;
         metricx24|google/metricx-24-hybrid-xl-v2p6)
             BACKEND="metricx"
@@ -122,7 +122,6 @@ resolve_model() {
             BACKEND="remedy"
             MODULE="src.score_remedy"
             MODEL_CANONICAL="ShaomuTan/ReMedy-9B-22"
-            REMEDY_INST="${REMEDY_VENV:-${VENV_BASE}/remedy_venv}"
             ;;
         bicleaner|auto)
             BACKEND="bicleaner"
@@ -228,30 +227,55 @@ done
 
 resolve_model
 
-if [ "$BACKEND" = "bicleaner" ]; then
-    module --force purge
-    module load tykky
-    module load gcc/10.4.0
+# Ensure VENV_PATH is always defined (bicleaner/remedy don't set it)
+VENV_PATH="${VENV_PATH:-}"
 
-    export SING_FLAGS="--nv"
-    export APPTAINER_FLAGS="--nv"
-    export SINGULARITY_FLAGS="--nv"
-    export SINGULARITYENV_LD_LIBRARY_PATH="/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/lib64:${LD_LIBRARY_PATH:-}"
+if [ "$BACKEND" = "bicleaner" ]; then
+    export PYTHONNOUSERSITE=1
+    module --force purge
+    module load LUMI
+    module load partition/G
+    module load rocm
+    module load lumi-container-wrapper
+
+    # --- ROCm/TF settings for MI250X (gfx90a) ---
+    # Do NOT set HSA_OVERRIDE_GFX_VERSION: let ROCm auto-detect gfx90a.
+    export TF_ROCM_FUSION_ENABLE=0
+    export SINGULARITY_BIND="/opt/rocm"
+    # ----------------------------------
+
+    export TF_FORCE_GPU_ALLOW_GROWTH=true
+    export ROCR_VISIBLE_DEVICES="${ROCR_VISIBLE_DEVICES:-0}"
 
     export PATH="$BICLEANER_INST/bin:$PATH"
 elif [ "$BACKEND" = "remedy" ]; then
     export PYTHONNOUSERSITE=1
     module --force purge
-    module load tykky
-
-    REPO="/projappl/project_2008161/members/$USER/Remedy"
-    export PATH="$REMEDY_INST/bin:$PATH"
-
+    REPO="/scratch/project_462001050/$USER/envs/Remedy"
     unset PYTHONPATH
     export PYTHONPATH="$REPO"
+
+    export HF_HOME="/pfs/lustrep3/scratch/project_462001050/$USER/hf"
+    export TRANSFORMERS_CACHE="$HF_HOME"
+    export HF_DATASETS_CACHE="$HF_HOME"
+    export HUGGINGFACE_HUB_CACHE="$HF_HOME"
+    mkdir -p "$HF_HOME"
+
+    # vLLM / ROCm runtime knobs (the combo that worked)
+    export VLLM_TARGET_DEVICE=rocm
+    export VLLM_USE_V1=1
+    export VLLM_USE_TRITON_FLASH_ATTN=0
+
+    # Disable torch.compile / Inductor (fixes triton_key import crash)
+    export TORCHDYNAMO_DISABLE=1
+    export TORCHINDUCTOR_DISABLE=1
+    export SIF=/scratch/project_462001050/ibrahiam/envs/images/vllm092_rocm.sif
 else
-    module load pytorch
-    source "${VENV_PATH}/bin/activate"
+    module purge
+    module use /appl/local/laifs/modules
+    module load lumi-aif-singularity-bindings
+    export SIF=/appl/local/laifs/containers/lumi-multitorch-u24r64f21m43t29-20260124_092648/lumi-multitorch-full-u24r64f21m43t29-20260124_092648.sif
+
 fi
 
 if [ -n "${HF_TOKEN:-}" ]; then
@@ -278,7 +302,27 @@ COMMON_ARGS=(
     --target-part-bytes "$TARGET_PART_BYTES"
 )
 
-if [ "$BACKEND" = "llm" ]; then
+set +e
+if [ "$BACKEND" = "bicleaner" ]; then
+    srun python3 -m "$MODULE" \
+        "${COMMON_ARGS[@]}" \
+        --model "$MODEL_CANONICAL"
+
+elif [ "$BACKEND" = "remedy" ]; then
+    singularity exec --rocm -B /scratch -B /pfs -B /projappl "$SIF" env \
+        PYTHONPATH="$PYTHONPATH" \
+        HF_HOME="$HF_HOME" \
+        TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE" \
+        HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
+        HUGGINGFACE_HUB_CACHE="$HUGGINGFACE_HUB_CACHE" \
+        VLLM_TARGET_DEVICE=rocm \
+        VLLM_USE_V1=1 \
+        VLLM_USE_TRITON_FLASH_ATTN=0 \
+        TORCHDYNAMO_DISABLE=1 \
+        TORCHINDUCTOR_DISABLE=1 \
+        python3 -m "$MODULE" "${COMMON_ARGS[@]}" --model "$MODEL_CANONICAL" --cache-dir "$HF_HOME"
+
+elif [ "$BACKEND" = "llm" ]; then
     MODEL_NAME="${MODEL_NAME:-$MODEL_CANONICAL}"
     MODEL_REPO="${MODEL_REPO:-$MODEL_CANONICAL}"
     MODEL_TAG="$(echo "$MODEL_NAME" | tr '[:upper:]' '[:lower:]' | sed 's|[^a-z0-9._-]|-|g')"
@@ -292,15 +336,19 @@ if [ "$BACKEND" = "llm" ]; then
     }
     trap cleanup EXIT
 
-    vllm serve "$MODEL_REPO" \
-        --served-model-name "$MODEL_NAME" \
-        --host "$VLLM_HOST" \
-        --port "$VLLM_PORT" \
-        --dtype "$VLLM_DTYPE" \
-        --gpu-memory-utilization "$VLLM_GPU_UTIL" \
-        $VLLM_EXTRA_ARGS \
-        > "$VLLM_LOG" 2>&1 &
+    singularity run "$SIF" bash -c "
+        source ${VENV_PATH}/bin/activate
+        vllm serve $MODEL_REPO \
+            -O0 \
+            --served-model-name $MODEL_NAME \
+            --host $VLLM_HOST \
+            --port $VLLM_PORT \
+            --dtype $VLLM_DTYPE \
+            --gpu-memory-utilization $VLLM_GPU_UTIL \
+            $VLLM_EXTRA_ARGS
+    " > "$VLLM_LOG" 2>&1 &
     SERVER_PID=$!
+
 
     READY=0
     for i in {1..120}; do
@@ -320,21 +368,33 @@ if [ "$BACKEND" = "llm" ]; then
         echo "ERROR: vLLM did not become ready in time. Check $VLLM_LOG"
         exit 1
     fi
-
-    python3 -m "$MODULE" \
-        "${COMMON_ARGS[@]}" \
-        --model "$MODEL_NAME" \
-        --api-base "$API_BASE" \
-        --api-key "$API_KEY" \
-        --temperature "$TEMPERATURE" \
-        --max-tokens "$MAX_TOKENS" \
+    
+    LLM_ARGS=(
+        --model "$MODEL_NAME"
+        --api-base "$API_BASE"
+        --temperature "$TEMPERATURE"
+        --max-tokens "$MAX_TOKENS"
         --max-retries "$MAX_RETRIES"
-else
-    python3 -m "$MODULE" \
-        "${COMMON_ARGS[@]}" \
-        --model "$MODEL_CANONICAL"
-fi
+    )
+    if [ -n "${API_KEY:-}" ]; then
+        LLM_ARGS+=(--api-key "$API_KEY")
+    fi
 
+    singularity run "$SIF" bash -c "
+        source ${VENV_PATH}/bin/activate
+        python3 -m $MODULE \
+            ${COMMON_ARGS[*]} \
+            ${LLM_ARGS[*]}
+    "
+else
+    # comet / metricx backends
+    singularity run "$SIF" bash -c "
+        source ${VENV_PATH}/bin/activate
+        python3 -m $MODULE \
+            ${COMMON_ARGS[*]} \
+            --model $MODEL_CANONICAL
+    "
+fi
 
 EXIT_CODE=$?
 

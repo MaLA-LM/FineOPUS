@@ -1,0 +1,204 @@
+# ==================================================================
+# Singularity/Apptainer definition: vLLM 0.9.2 + ReMedy on ROCm for LUMI
+#
+# Target hardware : AMD MI250X (gfx90a) on CSC LUMI
+# Base image      : ROCm 6.4 (Ubuntu 24.04, glibc 2.38)
+# PyTorch         : 2.7.0 + ROCm 6.3 wheels (official mapping for torch 2.7.0)
+# vLLM            : 0.9.2 (built from source for ROCm)
+# Remedy          : 0.1.3 (installed --no-deps to avoid pulling CUDA vLLM wheels)
+#
+# IMPORTANT:
+# Ubuntu/Debian base images often ship apt-managed pip/setuptools/wheel.
+# Upgrading those in the system site-packages can fail (missing RECORD).
+# To avoid that, we create a venv inside the container and do all pip work there.
+#
+# Build on Mahti/Puhti (CSC recommended pattern):
+#   apptainer build --fakeroot --bind="$TMPDIR:/tmp" vllm092_rocm.sif vllm092_rocm.def
+#
+# Quick verify (import-level; run on ROCm system like LUMI with --rocm):
+#   singularity exec --rocm vllm092_rocm.sif \
+#     python -c "import vllm, torch; print('vllm', vllm.__version__, 'hip', torch.version.hip)"
+# ==================================================================
+
+Bootstrap: docker
+From: rocm/dev-ubuntu-24.04:6.4
+
+%labels
+    Author          ibrahiam
+    Version         vllm-0.9.2-rocm
+    Description     vLLM 0.9.2 + ReMedy on ROCm for LUMI MI250X (gfx90a)
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Target GPU arch (MI250/MI250X)
+    export PYTORCH_ROCM_ARCH="gfx90a"
+
+    # ROCm paths — CMake & hipcc must find the ROCm installation
+    export ROCM_HOME=/opt/rocm
+    export HIP_PATH=${ROCM_HOME}
+    export PATH=${ROCM_HOME}/bin:${ROCM_HOME}/llvm/bin:${PATH}
+    export LD_LIBRARY_PATH=${ROCM_HOME}/lib:${LD_LIBRARY_PATH:-}
+    export CMAKE_PREFIX_PATH=${ROCM_HOME}:${CMAKE_PREFIX_PATH:-}
+
+    # ── 1) System packages ──────────────────────────────────────────
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-dev python3-pip \
+        git curl wget ca-certificates \
+        build-essential cmake ninja-build pkg-config \
+        libssl-dev libffi-dev libopenblas-dev \
+        rocm-cmake \
+        hipblas-dev \
+        hipblaslt-dev \
+        rocblas-dev \
+        hipsparse-dev \
+        hipfft-dev \
+        rocsparse-dev \
+        rocm-smi-lib \
+        rocprim-dev \
+        hipcub-dev \
+        rocthrust-dev \
+        hipsolver-dev \
+        rocfft-dev \
+        rocrand-dev \
+        hiprand-dev \
+        miopen-hip-dev \
+        rccl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+    # Verify hipcc is reachable
+    hipcc --version
+
+    # Ensure 'python' exists
+    ln -sf "$(command -v python3)" /usr/local/bin/python || true
+
+    # ── 1b) Create an isolated venv for all pip installs ────────────
+    # Avoids failures when attempting to upgrade apt-managed pip/wheel/setuptools.
+    python3 -m venv /opt/venv
+    export PATH=/opt/venv/bin:$PATH
+
+    # Now it's safe to upgrade toolchain inside the venv
+    python -m pip install --no-cache-dir -U pip setuptools wheel
+
+    # Keep NumPy on 1.x for maximal ABI safety for compiled deps
+    python -m pip install --no-cache-dir "numpy<2"
+
+    # ── 2) PyTorch ROCm (official ROCm wheel index for torch 2.7.0) ─
+    # Note: torch 2.7.0 ROCm wheels are published under rocm6.3.
+    python -m pip install --no-cache-dir \
+        torch==2.7.0 \
+        torchvision==0.22.0 \
+        torchaudio==2.7.0 \
+        --index-url https://download.pytorch.org/whl/rocm6.3
+
+    # Sanity: torch must report HIP (ROCm build)
+    python - <<'PY'
+import torch
+hip = getattr(torch.version, "hip", None)
+assert hip, f"Expected ROCm/HIP build of PyTorch, got torch.version.hip={hip}"
+print("[stage 2] PyTorch", torch.__version__, "| HIP", hip)
+PY
+
+    # ── 3) Build & install vLLM 0.9.2 from source for ROCm ─────────
+    cd /tmp
+    rm -rf /tmp/vllm
+    git clone --depth 1 --branch v0.9.2 https://github.com/vllm-project/vllm.git
+    cd vllm
+
+    # Install any release-provided requirement files if present
+    for req_file in \
+        requirements/rocm.txt \
+        requirements-rocm.txt \
+        requirements/build.txt \
+        requirements-build.txt; do
+        if [ -f "${req_file}" ]; then
+            echo "[stage 3] Installing ${req_file}"
+            python -m pip install --no-cache-dir -r "${req_file}"
+        fi
+    done
+
+    # Build vLLM with ROCm target
+    # --no-build-isolation ensures we use the venv toolchain + pinned numpy
+    # Explicitly pass ROCM_HOME so CMake finds hipcc, hipblas, etc.
+    # GPU_TARGETS must be set explicitly — no GPU present on the build node,
+    # so amdgpu-arch fails and CMake would default to gfx906/gfx942.
+    ROCM_HOME=/opt/rocm \
+    HIP_PATH=/opt/rocm \
+    VLLM_TARGET_DEVICE=rocm \
+    PYTORCH_ROCM_ARCH=gfx90a \
+    GPU_TARGETS=gfx90a \
+    AMDGPU_TARGETS=gfx90a \
+    MAX_JOBS="${MAX_JOBS:-8}" \
+    CMAKE_PREFIX_PATH="/opt/rocm:${CMAKE_PREFIX_PATH:-}" \
+    python -m pip install --no-cache-dir \
+        --no-build-isolation .
+
+    cd /
+    rm -rf /tmp/vllm
+
+    python - <<'PY'
+import vllm
+assert vllm.__version__.startswith("0.9.2"), f"Expected vLLM 0.9.2, got {vllm.__version__}"
+print("[stage 3] vLLM", vllm.__version__)
+PY
+
+    # ── 4) Install Remedy without deps (prevents CUDA vllm wheel) ───
+    python -m pip install --no-cache-dir --no-deps remedy-mt-eval==0.1.3
+
+    # ── 5) Pure-Python runtime deps Remedy expects ──────────────────
+    python -m pip install --no-cache-dir \
+        "transformers<4.54.0" \
+        "datasets>=3.1.0" \
+        "trl>=0.12.0" \
+        "hf-transfer>=0.1.8" \
+        "huggingface_hub>=0.30,<1.0" \
+        "safetensors>=0.4.3" \
+        pandas \
+        scipy \
+        "scikit-learn>=1.6.0" \
+        "matplotlib>=3.10.0" \
+        pyarrow \
+        pydantic
+
+    # ── 6) Final import-level smoke test ────────────────────────────
+    python - <<'PY'
+import torch, vllm
+hip = getattr(torch.version, "hip", None)
+assert hip, "torch.version.hip is empty — not a ROCm build"
+assert vllm.__version__.startswith("0.9.2"), f"vLLM version mismatch: {vllm.__version__}"
+print("========================================")
+print("  BUILD OK")
+print("  PyTorch ", torch.__version__, "| HIP", hip)
+print("  vLLM    ", vllm.__version__)
+try:
+    import remedy
+    print("  Remedy   imported")
+except Exception as e:
+    print("  Remedy   import issue (may still be CLI-usable):", type(e).__name__, str(e)[:120])
+print("========================================")
+PY
+
+%environment
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+
+    # LUMI MI250 / MI250X
+    export PYTORCH_ROCM_ARCH="gfx90a"
+
+    # ROCm paths (needed at runtime for HIP libraries)
+    export ROCM_HOME=/opt/rocm
+    export HIP_PATH=/opt/rocm
+    export PATH=/opt/venv/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+    export LD_LIBRARY_PATH=${ROCM_HOME}/lib:${ROCM_HOME}/lib64:${LD_LIBRARY_PATH:-}
+
+    # Python / HF behaviour
+    export PYTHONUNBUFFERED=1
+    export HF_HUB_ENABLE_HF_TRANSFER=1
+    export HF_HOME=/scratch/$USER/hf
+    export TRANSFORMERS_CACHE=/scratch/$USER/hf
+    export HF_DATASETS_CACHE=/scratch/$USER/hf
+
+%runscript
+    exec "$@"

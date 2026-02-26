@@ -1,0 +1,14 @@
+name: bicleaner-lumi
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - numpy<2.0.0
+  - pip:
+    - --find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-6.3/
+    - tensorflow-rocm==2.17.0
+    - bicleaner-ai
+    - pydantic
+    - pandas
+    - pyarrow

@@ -1,0 +1,289 @@
+# ==================================================================
+# Singularity/Apptainer definition: vLLM 0.9.2 + ReMedy on ROCm for LUMI
+#
+# Target hardware : AMD MI250X (gfx90a) on CSC LUMI
+# Base image      : ROCm 6.4 (Ubuntu 24.04, glibc 2.38)
+# PyTorch         : 2.7.0 + ROCm 6.3 wheels (official mapping for torch 2.7.0)
+# vLLM            : 0.9.2 (built from source for ROCm)
+# Remedy          : 0.1.3 (installed --no-deps to avoid pulling CUDA vllm wheels)
+#
+# Key fixes baked in (from our session):
+#   - Install ROCm-matching AMD SMI python bindings (NOT PyPI amdsmi)
+#   - Avoid /scratch/$USER/hf default in image (USER may be empty -> /scratch//hf)
+#   - Default-disable vLLM V1 to avoid triton_key import crash with Triton 3.6.x
+#   - Provide helper wrapper remedy-score-rocm that auto-patches soft-capping keys
+#
+# Build (CSC pattern on Mahti/Puhti):
+#   apptainer build --fakeroot --bind="$TMPDIR:/tmp" vllm092_rocm.sif vllm092_rocm.def
+#
+# Runtime note (LUMI):
+#   Bind /pfs (recommended) because /scratch/project_* is a symlink -> /pfs/... inside container:
+#     singularity exec --rocm -B /scratch -B /pfs -B /projappl vllm092_rocm.sif ...
+# ==================================================================
+
+Bootstrap: docker
+From: rocm/dev-ubuntu-24.04:6.4
+
+%labels
+    Author          ibrahiam
+    Version         vllm-0.9.2-rocm
+    Description     vLLM 0.9.2 + ReMedy on ROCm for LUMI MI250X (gfx90a)
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Target GPU arch (MI250/MI250X)
+    export PYTORCH_ROCM_ARCH="gfx90a"
+
+    # ROCm paths — CMake & hipcc must find the ROCm installation
+    export ROCM_HOME=/opt/rocm
+    export HIP_PATH=${ROCM_HOME}
+    export PATH=${ROCM_HOME}/bin:${ROCM_HOME}/llvm/bin:${PATH}
+    export LD_LIBRARY_PATH=${ROCM_HOME}/lib:${ROCM_HOME}/lib64:${LD_LIBRARY_PATH:-}
+    export CMAKE_PREFIX_PATH=${ROCM_HOME}:${CMAKE_PREFIX_PATH:-}
+
+    # ── 1) System packages ──────────────────────────────────────────
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-dev python3-pip \
+        git curl wget ca-certificates \
+        build-essential cmake ninja-build pkg-config \
+        libssl-dev libffi-dev libopenblas-dev \
+        rocm-cmake \
+        hipblas-dev hipblaslt-dev rocblas-dev \
+        hipsparse-dev rocsparse-dev \
+        hipfft-dev rocfft-dev \
+        rocrand-dev hiprand-dev \
+        rocprim-dev hipcub-dev rocthrust-dev hipsolver-dev \
+        miopen-hip-dev rccl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+    hipcc --version
+
+    # Ensure 'python' exists
+    ln -sf "$(command -v python3)" /usr/local/bin/python || true
+
+    # ── 1b) Create isolated venv for ALL pip installs ───────────────
+    # Avoids failures upgrading apt-managed pip/wheel/setuptools (missing RECORD).
+    python3 -m venv /opt/venv
+    export PATH=/opt/venv/bin:$PATH
+
+    python -m pip install --no-cache-dir -U pip setuptools wheel
+
+    # Keep NumPy on 1.x for maximal ABI safety for compiled deps
+    python -m pip install --no-cache-dir "numpy<2"
+
+    # ── 2) PyTorch ROCm (torch 2.7.0 ROCm wheels are under rocm6.3) ──
+    python -m pip install --no-cache-dir \
+        torch==2.7.0 \
+        torchvision==0.22.0 \
+        torchaudio==2.7.0 \
+        --index-url https://download.pytorch.org/whl/rocm6.3
+
+    python - <<'PY'
+import torch
+hip = getattr(torch.version, "hip", None)
+assert hip, f"Expected ROCm/HIP build of PyTorch, got torch.version.hip={hip}"
+print("[stage 2] PyTorch", torch.__version__, "| HIP", hip)
+PY
+
+    # ── 3) Build & install vLLM 0.9.2 from source for ROCm ─────────
+    cd /tmp
+    rm -rf /tmp/vllm
+    git clone --depth 1 --branch v0.9.2 https://github.com/vllm-project/vllm.git
+    cd vllm
+
+    for req_file in \
+        requirements/rocm.txt \
+        requirements-rocm.txt \
+        requirements/build.txt \
+        requirements-build.txt; do
+        if [ -f "${req_file}" ]; then
+            echo "[stage 3] Installing ${req_file}"
+            python -m pip install --no-cache-dir -r "${req_file}"
+        fi
+    done
+
+    ROCM_HOME=/opt/rocm \
+    HIP_PATH=/opt/rocm \
+    VLLM_TARGET_DEVICE=rocm \
+    PYTORCH_ROCM_ARCH=gfx90a \
+    GPU_TARGETS=gfx90a \
+    AMDGPU_TARGETS=gfx90a \
+    MAX_JOBS="${MAX_JOBS:-8}" \
+    CMAKE_PREFIX_PATH="/opt/rocm:${CMAKE_PREFIX_PATH:-}" \
+    python -m pip install --no-cache-dir --no-build-isolation .
+
+    cd /
+    rm -rf /tmp/vllm
+
+    python - <<'PY'
+import vllm
+assert vllm.__version__.startswith("0.9.2"), f"Expected vLLM 0.9.2, got {vllm.__version__}"
+print("[stage 3] vLLM", vllm.__version__)
+PY
+
+    # ── 3b) Install ROCm-matching AMD SMI Python bindings ───────────
+    # DO NOT use PyPI "amdsmi" (can mismatch libamd_smi.so -> undefined symbols).
+    # Copy ROCm's amd_smi source to a writable path first; installing in-place can fail.
+    rm -rf /tmp/amd_smi
+    cp -a /opt/rocm/share/amd_smi /tmp/amd_smi
+    python -m pip install --no-cache-dir /tmp/amd_smi
+    rm -rf /tmp/amd_smi
+
+    # Import-only sanity (init will be runtime / GPU-node dependent)
+    python - <<'PY'
+import amdsmi
+print("[stage 3b] amdsmi import OK")
+PY
+
+    # ── 4) Install Remedy without deps (prevents CUDA vllm wheel) ───
+    python -m pip install --no-cache-dir --no-deps remedy-mt-eval==0.1.3
+
+    # ── 5) Runtime deps Remedy expects ──────────────────────────────
+    python -m pip install --no-cache-dir \
+        "transformers<4.54.0" \
+        "datasets>=3.1.0" \
+        "trl>=0.12.0" \
+        "hf-transfer>=0.1.8" \
+        "huggingface_hub>=0.30,<1.0" \
+        "safetensors>=0.4.3" \
+        pandas scipy \
+        "scikit-learn>=1.6.0" \
+        "matplotlib>=3.10.0" \
+        pyarrow pydantic
+
+    # ── 5b) Helper: remedy-score-rocm wrapper ───────────────────────
+    # Automatically snapshots HF model to local dir and patches Gemma2-style
+    # soft-capping keys (needed for ROCm attention backends).
+    cat > /opt/venv/bin/remedy-score-rocm <<'PY'
+#!/opt/venv/bin/python
+import os, re, sys, json, subprocess
+from pathlib import Path
+
+SOFTCAP_KEYS = ("attn_logit_softcapping", "final_logit_softcapping")
+
+def _sanitize(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", name)
+
+def _get_arg(args, key):
+    for i in range(len(args) - 1):
+        if args[i] == key:
+            return args[i + 1]
+    return None
+
+def _replace_model_arg(args, new_model):
+    out = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--model" and i + 1 < len(args):
+            out += ["--model", new_model]
+            i += 2
+        else:
+            out.append(args[i])
+            i += 1
+    return out
+
+def maybe_patch_softcap(local_dir: Path) -> None:
+    cfg = local_dir / "config.json"
+    if not cfg.exists():
+        return
+    d = json.load(cfg.open())
+    changed = False
+    for k in SOFTCAP_KEYS:
+        if k in d and d[k] not in (None, 0, 0.0):
+            d[k] = 0.0
+            changed = True
+    if changed:
+        json.dump(d, cfg.open("w"), indent=2)
+
+def main():
+    args = sys.argv[1:]
+    model = _get_arg(args, "--model")
+    if not model:
+        print("ERROR: --model is required", file=sys.stderr)
+        return 2
+
+    # Recommended defaults for this image (can be overridden by user):
+    os.environ.setdefault("VLLM_TARGET_DEVICE", "rocm")
+    os.environ.setdefault("VLLM_USE_V1", "0")                # avoid triton_key crash path
+    os.environ.setdefault("VLLM_USE_TRITON_FLASH_ATTN", "0") # prefer CK on ROCm
+
+    # If model is a local path, just run remedy-score as-is.
+    mp = Path(model)
+    if mp.exists():
+        return subprocess.call(["remedy-score"] + args)
+
+    # Otherwise treat as HF repo_id and snapshot locally, then patch softcap keys.
+    cache_dir = _get_arg(args, "--cache_dir")
+    base = Path(cache_dir) if cache_dir else Path(os.environ.get("HF_HOME", "/tmp/hf"))
+    local_dir = base / "patched_models" / _sanitize(model)
+
+    if not (local_dir / "config.json").exists():
+        from huggingface_hub import snapshot_download
+        local_dir.parent.mkdir(parents=True, exist_ok=True)
+        snapshot_download(repo_id=model, local_dir=str(local_dir), local_dir_use_symlinks=False)
+
+    # Patch Gemma2-style soft-capping if present.
+    maybe_patch_softcap(local_dir)
+
+    args2 = _replace_model_arg(args, str(local_dir))
+    return subprocess.call(["remedy-score"] + args2)
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+PY
+    chmod +x /opt/venv/bin/remedy-score-rocm
+
+    # ── 6) Final import-level smoke test ────────────────────────────
+    python - <<'PY'
+import torch, vllm, amdsmi
+hip = getattr(torch.version, "hip", None)
+assert hip, "torch.version.hip is empty — not a ROCm build"
+assert vllm.__version__.startswith("0.9.2"), f"vLLM version mismatch: {vllm.__version__}"
+print("========================================")
+print("  BUILD OK")
+print("  PyTorch ", torch.__version__, "| HIP", hip)
+print("  vLLM    ", vllm.__version__)
+print("  amdsmi  import OK")
+try:
+    import remedy
+    print("  Remedy  imported")
+except Exception as e:
+    print("  Remedy  import issue (CLI may still be usable):", type(e).__name__, str(e)[:120])
+print("  Wrapper remedy-score-rocm installed")
+print("========================================")
+PY
+
+%environment
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+
+    # LUMI MI250 / MI250X
+    export PYTORCH_ROCM_ARCH="gfx90a"
+
+    # ROCm paths (needed at runtime for HIP libraries)
+    export ROCM_HOME=/opt/rocm
+    export HIP_PATH=/opt/rocm
+    export PATH=/opt/venv/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:${LD_LIBRARY_PATH:-}
+
+    # vLLM defaults for ROCm stability on this stack
+    # - Disable V1 by default to avoid triton_key import failures with Triton 3.6.x
+    # - Prefer CK FlashAttention on ROCm (still may require softcap patch for Gemma2-family)
+    export VLLM_TARGET_DEVICE=rocm
+    export VLLM_USE_V1=0
+    export VLLM_USE_TRITON_FLASH_ATTN=0
+
+    # HF behavior: DO NOT default to /scratch/$USER (USER can be empty -> /scratch//hf).
+    # Use a safe writable default; override in your job script for persistence.
+    export PYTHONUNBUFFERED=1
+    export HF_HUB_ENABLE_HF_TRANSFER=1
+    export HF_HOME=/tmp/hf
+    export TRANSFORMERS_CACHE=/tmp/hf
+    export HF_DATASETS_CACHE=/tmp/hf
+    export HUGGINGFACE_HUB_CACHE=/tmp/hf
+
+%runscript
+    exec "$@"
