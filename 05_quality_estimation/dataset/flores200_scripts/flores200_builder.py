@@ -5,7 +5,8 @@ from pathlib import Path
 
 Example = dict[str, str]
 
-DEFAULT_FLORES_ROOT = "/scratch/project_2008161/downstream_benchmarks/flores200"
+# mahti: /scratch/project_2008161/downstream_benchmarks/flores200/
+DEFAULT_FLORES_ROOT = "/scratch/project_462001050/downstream_benchmarks/flores200"
 
 
 def load_flores200_parallel(

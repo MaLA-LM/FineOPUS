@@ -26,9 +26,7 @@ def build_lm(
     import dspy
 
     api_key = api_key or "EMPTY"
-    model_name = (
-        model if model.startswith("hosted_vllm/") else f"hosted_vllm/{model}"
-    )
+    model_name = model if model.startswith("hosted_vllm/") else f"hosted_vllm/{model}"
     return dspy.LM(
         model_name,
         api_base=api_base,
