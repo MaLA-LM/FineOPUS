@@ -20,11 +20,14 @@ export HF_ASSETS_CACHE="$HF_HOME/assets"
 export HUGGINGFACE_HUB_CACHE="$HF_HUB_CACHE"
 export HUGGINGFACE_ASSETS_CACHE="$HF_ASSETS_CACHE"
 export TRANSFORMERS_CACHE="$HF_HUB_CACHE"
+export MASTER_ADDR=127.0.0.1
+export MASTER_PORT=$(( 20000 + (SLURM_JOB_ID % 20000) ))
 
 echo "=================================="
 echo "Job ID: ${SLURM_JOB_ID:-N/A}"
 echo "Node: ${SLURM_NODELIST:-N/A}"
 echo "Start time: $(date)"
+echo "Master Port: $MASTER_PORT"
 echo "=================================="
 
 WORKDIR="${WORKDIR:-/projappl/project_462001050/members/ibrahiam/05_quality_estimation}"
@@ -39,6 +42,8 @@ GPUS="${GPUS:-1}"
 MAX_DIRECTIONS_PER_PART="${MAX_DIRECTIONS_PER_PART:-25}"
 TARGET_PART_BYTES="${TARGET_PART_BYTES:-67108864}"
 MODEL="${MODEL:-wmt22-cometkiwi-da}"
+SHARD_ID="${SHARD_ID:-${SLURM_ARRAY_TASK_ID:-}}"
+NUM_SHARDS="${NUM_SHARDS:-${SLURM_ARRAY_TASK_COUNT:-}}"
 
 VLLM_HOST="${VLLM_HOST:-127.0.0.1}"
 VLLM_PORT="${VLLM_PORT:-8000}"
@@ -64,6 +69,8 @@ Common args:
   --batch-size <int>
   --gpus <int>
   --manifest <path_tsv>
+  --shard-id <int>
+  --num-shards <int>
   --max-directions-per-part <int>
   --max-seconds-per-part <int>
   --target-part-bytes <int>
@@ -121,7 +128,7 @@ resolve_model() {
         remedy|shaomutan/remedy-9b-22)
             BACKEND="remedy"
             MODULE="src.score_remedy"
-            MODEL_CANONICAL="ShaomuTan/ReMedy-9B-22"
+            MODEL_CANONICAL="/scratch/project_462001050/ibrahiam/envs/images/Models/patched_models/ShaomuTan_ReMedy-9B-22"
             ;;
         bicleaner|auto)
             BACKEND="bicleaner"
@@ -179,6 +186,14 @@ while [ $# -gt 0 ]; do
             ;;
         --manifest)
             MANIFEST="${2:-}"
+            shift 2
+            ;;
+        --shard-id)
+            SHARD_ID="${2:-}"
+            shift 2
+            ;;
+        --num-shards)
+            NUM_SHARDS="${2:-}"
             shift 2
             ;;
         --max-directions-per-part)
@@ -254,7 +269,8 @@ elif [ "$BACKEND" = "remedy" ]; then
     REPO="/scratch/project_462001050/$USER/envs/Remedy"
     unset PYTHONPATH
     export PYTHONPATH="$REPO"
-
+    export TRANSFORMERS_OFFLINE=1
+    export HF_HUB_OFFLINE=1
     export HF_HOME="/pfs/lustrep3/scratch/project_462001050/$USER/hf"
     export TRANSFORMERS_CACHE="$HF_HOME"
     export HF_DATASETS_CACHE="$HF_HOME"
@@ -302,6 +318,13 @@ COMMON_ARGS=(
     --target-part-bytes "$TARGET_PART_BYTES"
 )
 
+if [ -n "${SHARD_ID}" ]; then
+    COMMON_ARGS+=(--shard-id "$SHARD_ID")
+fi
+if [ -n "${NUM_SHARDS}" ]; then
+    COMMON_ARGS+=(--num-shards "$NUM_SHARDS")
+fi
+
 set +e
 if [ "$BACKEND" = "bicleaner" ]; then
     srun python3 -m "$MODULE" \
@@ -315,6 +338,8 @@ elif [ "$BACKEND" = "remedy" ]; then
         TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE" \
         HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
         HUGGINGFACE_HUB_CACHE="$HUGGINGFACE_HUB_CACHE" \
+        TRANSFORMERS_OFFLINE=1 \
+        HF_HUB_OFFLINE=1 \
         VLLM_TARGET_DEVICE=rocm \
         VLLM_USE_V1=1 \
         VLLM_USE_TRITON_FLASH_ATTN=0 \

@@ -24,6 +24,7 @@ export TRANSFORMERS_CACHE="$HF_HUB_CACHE"
 echo "=================================="
 echo "Job ID: $SLURM_JOB_ID"
 echo "Node: $SLURM_NODELIST"
+echo "Cuda visible: ${CUDA_VISIBLE_DEVICES:-N/A}"
 echo "Start time: $(date)"
 echo "=================================="
 
@@ -39,6 +40,8 @@ GPUS="${GPUS:-1}"
 MAX_DIRECTIONS_PER_PART="${MAX_DIRECTIONS_PER_PART:-25}"
 TARGET_PART_BYTES="${TARGET_PART_BYTES:-67108864}"
 MODEL="${MODEL:-wmt22-cometkiwi-da}"
+SHARD_ID="${SHARD_ID:-${SLURM_ARRAY_TASK_ID:-}}"
+NUM_SHARDS="${NUM_SHARDS:-${SLURM_ARRAY_TASK_COUNT:-}}"
 
 VLLM_HOST="${VLLM_HOST:-127.0.0.1}"
 VLLM_PORT="${VLLM_PORT:-8000}"
@@ -64,6 +67,8 @@ Common args:
   --batch-size <int>
   --gpus <int>
   --manifest <path_tsv>
+  --shard-id <int>
+  --num-shards <int>
   --max-directions-per-part <int>
   --max-seconds-per-part <int>
   --target-part-bytes <int>
@@ -121,7 +126,7 @@ resolve_model() {
         remedy|shaomutan/remedy-9b-22)
             BACKEND="remedy"
             MODULE="src.score_remedy"
-            MODEL_CANONICAL="ShaomuTan/ReMedy-9B-22"
+            MODEL_CANONICAL="remedy"
             REMEDY_INST="${REMEDY_VENV:-${VENV_BASE}/remedy_venv}"
             ;;
         bicleaner|auto)
@@ -182,6 +187,14 @@ while [ $# -gt 0 ]; do
             MANIFEST="${2:-}"
             shift 2
             ;;
+        --shard-id)
+            SHARD_ID="${2:-}"
+            shift 2
+            ;;
+        --num-shards)
+            NUM_SHARDS="${2:-}"
+            shift 2
+            ;;
         --max-directions-per-part)
             MAX_DIRECTIONS_PER_PART="${2:-}"
             shift 2
@@ -231,12 +244,11 @@ resolve_model
 if [ "$BACKEND" = "bicleaner" ]; then
     module --force purge
     module load tykky
-    module load gcc/10.4.0
 
     export SING_FLAGS="--nv"
     export APPTAINER_FLAGS="--nv"
     export SINGULARITY_FLAGS="--nv"
-    export SINGULARITYENV_LD_LIBRARY_PATH="/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/lib64:${LD_LIBRARY_PATH:-}"
+    #export SINGULARITYENV_LD_LIBRARY_PATH="/appl/spack/v020/install-tree/gcc-10.4.0/cuda-12.6.1-tauwpv/lib64:${LD_LIBRARY_PATH:-}"
 
     export PATH="$BICLEANER_INST/bin:$PATH"
 elif [ "$BACKEND" = "remedy" ]; then
@@ -277,6 +289,13 @@ COMMON_ARGS=(
     --max-directions-per-part "$MAX_DIRECTIONS_PER_PART"
     --target-part-bytes "$TARGET_PART_BYTES"
 )
+
+if [ -n "${SHARD_ID}" ]; then
+    COMMON_ARGS+=(--shard-id "$SHARD_ID")
+fi
+if [ -n "${NUM_SHARDS}" ]; then
+    COMMON_ARGS+=(--num-shards "$NUM_SHARDS")
+fi
 
 if [ "$BACKEND" = "llm" ]; then
     MODEL_NAME="${MODEL_NAME:-$MODEL_CANONICAL}"
