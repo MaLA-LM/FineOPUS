@@ -76,6 +76,19 @@ def parse_args() -> argparse.Namespace:
 
 
 def resolve_model(name: str):
+    # If --model points to a local directory, build a spec on the fly
+    # so remedy-score receives the full path directly.
+    model_path = Path(name)
+    if model_path.is_dir():
+        from models.model_registry import ModelSpec
+
+        key = model_path.name.lower().replace(" ", "-")
+        spec = ModelSpec(
+            key=key,
+            backend="remedy",
+            model_id=str(model_path),
+        )
+        return spec, key
     return resolve_model_spec(name, "remedy")
 
 
