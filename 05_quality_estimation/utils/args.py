@@ -50,6 +50,24 @@ def add_common_scoring_args(
         help="TSV manifest with columns: src_lang, tgt_lang, split[, shard_id].",
     )
     parser.add_argument(
+        "--shard-id",
+        type=int,
+        default=None,
+        help=(
+            "Optional shard id for this worker. "
+            "Defaults to SLURM_ARRAY_TASK_ID when running under Slurm."
+        ),
+    )
+    parser.add_argument(
+        "--num-shards",
+        type=int,
+        default=None,
+        help=(
+            "Optional total shard count. "
+            "Defaults to SLURM_ARRAY_TASK_COUNT when running under Slurm."
+        ),
+    )
+    parser.add_argument(
         "--max-directions-per-part",
         type=int,
         default=25,

@@ -38,19 +38,28 @@ def _parse_int_env(name: str) -> int | None:
 
 
 def resolve_shard_context(args) -> ShardContext:
-    task_id = _parse_int_env("SLURM_ARRAY_TASK_ID")
-    task_count = _parse_int_env("SLURM_ARRAY_TASK_COUNT")
-    task_min = _parse_int_env("SLURM_ARRAY_TASK_MIN")
+    shard_id = getattr(args, "shard_id", None)
+    if shard_id is None:
+        shard_id = _parse_int_env("SLURM_ARRAY_TASK_ID")
 
-    if task_id is not None and task_count is not None:
-        min_task_id = 0 if task_min is None else task_min
-        shard_id = task_id - min_task_id
-        num_shards = task_count
-    else:
-        raise SystemExit("run inside a Slurm array with SLURM_ARRAY_TASK_ID/COUNT.")
+    num_shards = getattr(args, "num_shards", None)
+    if num_shards is None:
+        num_shards = _parse_int_env("SLURM_ARRAY_TASK_COUNT")
+
+    if shard_id is None or num_shards is None:
+        raise SystemExit(
+            "Missing shard context: provide --shard-id and --num-shards, "
+            "or run inside a Slurm array with SLURM_ARRAY_TASK_ID/COUNT."
+        )
 
     if num_shards <= 0:
         raise SystemExit("num_shards must be > 0.")
+    if shard_id < 0:
+        raise SystemExit("shard_id must be >= 0.")
+    if shard_id >= num_shards:
+        raise SystemExit(
+            f"shard_id out of range: {shard_id} not in [0, {num_shards - 1}]."
+        )
     return ShardContext(shard_id=shard_id, num_shards=num_shards)
 
 
