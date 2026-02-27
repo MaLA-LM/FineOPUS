@@ -20,14 +20,11 @@ export HF_ASSETS_CACHE="$HF_HOME/assets"
 export HUGGINGFACE_HUB_CACHE="$HF_HUB_CACHE"
 export HUGGINGFACE_ASSETS_CACHE="$HF_ASSETS_CACHE"
 export TRANSFORMERS_CACHE="$HF_HUB_CACHE"
-export MASTER_ADDR=127.0.0.1
-export MASTER_PORT=$(( 20000 + (SLURM_JOB_ID % 20000) ))
 
 echo "=================================="
 echo "Job ID: ${SLURM_JOB_ID:-N/A}"
 echo "Node: ${SLURM_NODELIST:-N/A}"
 echo "Start time: $(date)"
-echo "Master Port: $MASTER_PORT"
 echo "=================================="
 
 WORKDIR="${WORKDIR:-/projappl/project_462001050/members/ibrahiam/05_quality_estimation}"
