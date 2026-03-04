@@ -87,17 +87,10 @@ class _BaseLanguageSupport:
     def get_full_language_name(self, lang_code: str) -> str:
         if not self._support_known:
             return lang_code
+        name_to_codes = self._name_to_codes
         code_list = self._name_to_codes.get(lang_code)
-        if not code_list:
-            return lang_code
-
-        # Current mapping shape is [is_supported, matched_model_language].
-        # Keep a fallback for any older shape that may include an explicit
-        # full-name entry at index 2.
-        if len(code_list) > 1 and isinstance(code_list[1], str) and code_list[1]:
-            return code_list[1]
-        if len(code_list) > 2 and isinstance(code_list[2], str) and code_list[2]:
-            return code_list[2]
+        if code_list:
+            return code_list[1] if len(code_list) > 1 else lang_code
         return lang_code
 
 
