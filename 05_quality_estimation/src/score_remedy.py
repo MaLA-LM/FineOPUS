@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+from itertools import count
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -99,6 +100,7 @@ def score_entry(
     dataset,
     language_support: RemedyLanguages,
     cache_dir: Path,
+    iteration: int = 0,
 ):
     examples = load_examples(entry, args, dataset)
 
@@ -144,6 +146,7 @@ def score_entry(
             save_dir=tmp_root,
             num_gpus=args.gpus,
             gpu_memory_utilization=args.gpu_memory_utilization,
+            iteration=iteration,
         )
         scores_path = resolve_calibration_scores_path(
             save_dir=tmp_root,
@@ -197,6 +200,7 @@ def main() -> None:
     model_tag = sanitize_model_tag(model_key)
     language_support = RemedyLanguages()
     cache_dir = Path(args.cache_dir)
+    iteration_counter = count()
 
     run_scoring(
         args,
@@ -204,7 +208,13 @@ def main() -> None:
         directions,
         model_tag,
         lambda entry: score_entry(
-            entry, args, spec, dataset, language_support, cache_dir
+            entry,
+            args,
+            spec,
+            dataset,
+            language_support,
+            cache_dir,
+            iteration=next(iteration_counter),
         ),
     )
 

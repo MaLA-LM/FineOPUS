@@ -3,6 +3,7 @@
 import argparse
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import sleep
 
 from dataset.manifest import ManifestEntry
 from dataset.mediator import get_dataset
@@ -85,6 +86,10 @@ def score_entry(
         input_path = tmp_root / "input.tsv"
         output_path = tmp_root / "output.tsv"
         write_tsv(examples, input_path)
+
+        # sleep five seconds
+        sleep(5)
+
         run_bicleaner(
             input_path,
             output_path,

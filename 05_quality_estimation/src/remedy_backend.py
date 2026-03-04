@@ -9,6 +9,8 @@ from utils.logger import logger
 
 DEFAULT_REMEDY_COMMAND = "remedy-score"
 DEFAULT_GPU_MEMORY_UTILIZATION = 0.9
+PORT_RANGE_START = 20000
+PORT_RANGE_SIZE = 20000
 
 
 def _model_output_dir_name(model_id: str) -> str:
@@ -37,6 +39,32 @@ def _write_lines(path: Path, lines: list[str]) -> None:
         if lines:
             handle.write("\n".join(lines))
             handle.write("\n")
+
+
+def _parse_int(raw: str | None, default: int = 0) -> int:
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _resolve_master_port(env: dict[str, str], iteration: int) -> int:
+    master_port = _parse_int(env.get("MASTER_PORT"), default=0)
+    if (
+        master_port < PORT_RANGE_START
+        or master_port >= PORT_RANGE_START + PORT_RANGE_SIZE
+    ):
+        seed_job = _parse_int(
+            env.get("SLURM_ARRAY_JOB_ID") or env.get("SLURM_JOB_ID"),
+            default=0,
+        )
+        seed_task = _parse_int(env.get("SLURM_ARRAY_TASK_ID"), default=0)
+        master_port = PORT_RANGE_START + ((seed_job + seed_task) % PORT_RANGE_SIZE)
+
+    slot = (master_port - PORT_RANGE_START + max(iteration, 0)) % PORT_RANGE_SIZE
+    return PORT_RANGE_START + slot
 
 
 def build_remedy_command(
@@ -86,6 +114,7 @@ def run_remedy(
     save_dir: Path,
     num_gpus: int,
     gpu_memory_utilization: float,
+    iteration: int = 0,
 ) -> None:
     if num_gpus <= 0:
         raise ValueError("--gpus/--num_gpus must be >= 1 for remedy-score.")
@@ -109,7 +138,17 @@ def run_remedy(
         num_gpus,
     )
 
-    subprocess.run(args, check=True)
+    env = os.environ.copy()
+    env["MASTER_ADDR"] = env.get("MASTER_ADDR", "127.0.0.1")
+    env["MASTER_PORT"] = str(_resolve_master_port(env, iteration))
+    logger.info(
+        "[remedy-score] master=%s:%s iteration=%s",
+        env["MASTER_ADDR"],
+        env["MASTER_PORT"],
+        iteration,
+    )
+
+    subprocess.run(args, check=True, env=env)
 
 
 def resolve_calibration_scores_path(
