@@ -22,7 +22,27 @@ class DimScores(BaseModel):
 
 
 class QEResult(BaseModel):
+    """QE result for a single input-output pair (old prompt)."""
+
     model_config = ConfigDict(extra="forbid")
 
     dims_0to10: DimScores
     overall_0to100: StrictInt = Field(ge=0, le=100)
+
+
+class QEBatchItem(BaseModel):
+    """Single item inside a batched QE response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: StrictInt = Field(ge=0)
+    dims_0to10: DimScores
+    overall_0to100: StrictInt = Field(ge=0, le=100)
+
+
+class QEBatchResult(BaseModel):
+    """Top-level wrapper for a batch of QE results."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    results: list[QEBatchItem]

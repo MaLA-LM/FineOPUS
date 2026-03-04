@@ -12,7 +12,7 @@ from src.common import (
     sanitize_model_tag,
     summarize_scores,
 )
-from src.llm_backend import build_lm, score_llm
+from src.llm_backend import score_llm_batched
 from utils.args import add_common_scoring_args
 from utils.cli import validate_args
 from utils.frames import build_frames
@@ -59,14 +59,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-tokens",
         type=int,
-        default=256,
-        help="Max tokens to generate per response.",
+        default=4096,
+        help="Max tokens to generate per response (must fit full batch JSON).",
     )
     parser.add_argument(
         "--max-retries",
         type=int,
-        default=2,
-        help="Retries per segment if the output fails validation.",
+        default=5,
+        help="Retries per batch if the output fails validation.",
+    )
+    parser.add_argument(
+        "--micro-batch-size",
+        type=int,
+        default=32,
+        help="Number of segments scored per LLM request (micro-batch).",
+    )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=16,
+        help="Max in-flight requests to vLLM (async concurrency).",
     )
     return parser.parse_args()
 
@@ -95,7 +107,7 @@ def resolve_model(name: str) -> tuple[str, str, str]:
 def score_entry(
     entry: ManifestEntry,
     args: argparse.Namespace,
-    lm,
+    request_model: str,
     model_id: str,
     language_support: QwenLanguages,
     dataset,
@@ -104,12 +116,20 @@ def score_entry(
     src_lang_name = language_support.get_full_language_name(entry.src_lang)
     tgt_lang_name = language_support.get_full_language_name(entry.tgt_lang)
 
-    scores = score_llm(
+    # Async micro-batched scoring: groups examples into chunks,
+    # fires up to `concurrency` requests in parallel via httpx.
+    scores = score_llm_batched(
         examples,
-        lm,
         args.max_retries,
         src_lang_name,
         tgt_lang_name,
+        batch_size=args.micro_batch_size,
+        concurrency=args.concurrency,
+        api_base=args.api_base,
+        model=request_model,
+        api_key=args.api_key,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
     )
     src_lang_seen = language_support.support_status(entry.src_lang)
     tgt_lang_seen = language_support.support_status(entry.tgt_lang)
@@ -134,6 +154,10 @@ def main() -> None:
     args = parse_args()
     if args.max_retries < 0:
         raise SystemExit("--max-retries must be >= 0")
+    if args.micro_batch_size < 1:
+        raise SystemExit("--micro-batch-size must be >= 1")
+    if args.concurrency < 1:
+        raise SystemExit("--concurrency must be >= 1")
     try:
         model_id, request_model, model_key = resolve_model(args.model)
     except ValueError as exc:
@@ -147,22 +171,28 @@ def main() -> None:
         logger.info("No directions found.")
         return
 
-    lm = build_lm(
-        api_base=args.api_base,
-        model=request_model,
-        api_key=args.api_key,
-        temperature=args.temperature,
-        max_tokens=args.max_tokens,
-    )
-
     model_tag = sanitize_model_tag(model_key)
     language_support = LLM_LANGUAGE_SUPPORT(dataset=dataset)
+    logger.info(
+        "LLM scoring: model=%s micro_batch_size=%d concurrency=%d max_tokens=%d",
+        model_id,
+        args.micro_batch_size,
+        args.concurrency,
+        args.max_tokens,
+    )
     run_scoring(
         args,
         dataset,
         directions,
         model_tag,
-        lambda entry: score_entry(entry, args, lm, model_id, language_support, dataset),
+        lambda entry: score_entry(
+            entry,
+            args,
+            request_model,
+            model_id,
+            language_support,
+            dataset,
+        ),
     )
 
 

@@ -6,19 +6,19 @@ PROMPT_TEMPLATE = """Source language:{source_lang} , Source text:
 Target language: {target_lang} , Machine Translation text:
 ```{target_seg}```
 
-Evaluate the quality of a machine translation for a given segment, using the provided source text,
-machine-translated text, source language, and target language.
+Task: Reference-free MT quality scoring for this single segment.
+Score each dimension as an integer 0..10 (higher=better), then overall 0..100.
 
-You must analyze the translation without access to any human reference, considering the following:
-- Meaning preservation (accuracy) and completeness (no omissions/additions).
-- Terminology correctness and consistency.
-- Fluency, grammar, and coherence in the target language.
-- Appropriate style/tone for the target language and implied audience.
-- Locale conventions and formatting (numbers, punctuation, dates, tags if any).
-- Technical integrity (entities, units, code/markup, constraints preserved).
-- Cultural appropriateness (no unintended offensiveness or pragmatic shifts).
+Dimensions:
+1) accuracy_completeness (meaning preserved, no add/omit)
+2) terminology_consistency
+3) fluency_coherence
+4) style_tone_audience
+5) locale_formatting
+6) technical_integrity (entities/units/code/markup preserved)
+7) cultural_appropriateness
 
-Return ONLY valid JSON with integer scores, higher is  better, in the following format:
+Output: ONLY valid JSON, exactly this shape:
 {{
   "dims_0to10": {{
     "accuracy_completeness": 0-10,
@@ -31,12 +31,6 @@ Return ONLY valid JSON with integer scores, higher is  better, in the following 
   }},
   "overall_0to100": 0-100
 }}
-
-Important:
-- Only use the source and MT segment for evaluation (no references).
-- Output MUST be valid and must follow the structure.
-- overall_0to100 must reflect the dimension scores, but you may adjust for severity of critical errors.
-- Output JSON only (no extra text).
 """
 
 
