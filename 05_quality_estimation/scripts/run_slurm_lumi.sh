@@ -20,11 +20,16 @@ export HF_ASSETS_CACHE="$HF_HOME/assets"
 export HUGGINGFACE_HUB_CACHE="$HF_HUB_CACHE"
 export HUGGINGFACE_ASSETS_CACHE="$HF_ASSETS_CACHE"
 export TRANSFORMERS_CACHE="$HF_HUB_CACHE"
+export MASTER_ADDR=127.0.0.1
+PORT_JOB_SEED="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}"
+PORT_TASK_SEED="${SLURM_ARRAY_TASK_ID:-0}"
+export MASTER_PORT=$(( 20000 + ((PORT_JOB_SEED + PORT_TASK_SEED) % 20000) ))
 
 echo "=================================="
 echo "Job ID: ${SLURM_JOB_ID:-N/A}"
 echo "Node: ${SLURM_NODELIST:-N/A}"
 echo "Start time: $(date)"
+echo "Master Port: $MASTER_PORT"
 echo "=================================="
 
 WORKDIR="${WORKDIR:-/projappl/project_462001050/members/ibrahiam/05_quality_estimation}"
@@ -43,15 +48,18 @@ SHARD_ID="${SHARD_ID:-${SLURM_ARRAY_TASK_ID:-}}"
 NUM_SHARDS="${NUM_SHARDS:-${SLURM_ARRAY_TASK_COUNT:-}}"
 
 VLLM_HOST="${VLLM_HOST:-127.0.0.1}"
-VLLM_PORT="${VLLM_PORT:-8000}"
+DEFAULT_VLLM_PORT=$(( 40000 + ((PORT_JOB_SEED + PORT_TASK_SEED) % 20000) ))
+VLLM_PORT="${VLLM_PORT:-$DEFAULT_VLLM_PORT}"
 VLLM_DTYPE="${VLLM_DTYPE:-bfloat16}"
 VLLM_GPU_UTIL="${VLLM_GPU_UTIL:-0.90}"
 VLLM_EXTRA_ARGS="${VLLM_EXTRA_ARGS:-}"
 API_BASE="${API_BASE:-http://${VLLM_HOST}:${VLLM_PORT}/v1}"
 API_KEY="${API_KEY:-${OPENAI_API_KEY:-}}"
 TEMPERATURE="${TEMPERATURE:-0.0}"
-MAX_TOKENS="${MAX_TOKENS:-256}"
+MAX_TOKENS="${MAX_TOKENS:-8192}"
 MAX_RETRIES="${MAX_RETRIES:-5}"
+CONCURRENCY="${CONCURRENCY:-32}"
+MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-32}"
 MODEL_REPO="${MODEL_REPO:-}"
 MODEL_NAME="${MODEL_NAME:-}"
 
@@ -110,16 +118,28 @@ resolve_model() {
             MODEL_CANONICAL="google/metricx-24-hybrid-xl-v2p6"
             VENV_PATH="${METRIC_VENV:-${VENV_BASE}/metric_venv}"
             ;;
-        qwen|qwen/qwen3-14b)
+        qwen3-14b|qwen/qwen3-14b)
             BACKEND="llm"
             MODULE="src.score_llm"
             MODEL_CANONICAL="Qwen/Qwen3-14B"
+            VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
+            ;;
+        qwen3-4b|qwen3-4b-instruct-2507|qwen/qwen3-4b-instruct-2507)
+            BACKEND="llm"
+            MODULE="src.score_llm"
+            MODEL_CANONICAL="Qwen/Qwen3-4B-Instruct-2507"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         m-prometheus-7b|unbabel/m-prometheus-7b)
             BACKEND="llm"
             MODULE="src.score_llm"
             MODEL_CANONICAL="Unbabel/M-Prometheus-7B"
+            VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
+            ;;
+        m-prometheus-3b|unbabel/m-prometheus-3b)
+            BACKEND="llm"
+            MODULE="src.score_llm"
+            MODEL_CANONICAL="Unbabel/M-Prometheus-3B"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         remedy|shaomutan/remedy-9b-22)
@@ -302,7 +322,7 @@ echo "Backend: $BACKEND"
 echo "Model: $MODEL"
 echo "Manifest: $MANIFEST"
 echo "Output base: $OUTPUT_BASE"
-
+echo "vLLM endpoint: ${API_BASE} (host=${VLLM_HOST}, port=${VLLM_PORT})"
 
 COMMON_ARGS=(
     --dataset "$DATASET"
@@ -367,6 +387,10 @@ elif [ "$BACKEND" = "llm" ]; then
             --port $VLLM_PORT \
             --dtype $VLLM_DTYPE \
             --gpu-memory-utilization $VLLM_GPU_UTIL \
+            --enable-prefix-caching \
+            --enable-chunked-prefill \
+            --max-num-batched-tokens 4096 \
+            --max-num-seqs 32 \
             $VLLM_EXTRA_ARGS
     " > "$VLLM_LOG" 2>&1 &
     SERVER_PID=$!
@@ -397,6 +421,8 @@ elif [ "$BACKEND" = "llm" ]; then
         --temperature "$TEMPERATURE"
         --max-tokens "$MAX_TOKENS"
         --max-retries "$MAX_RETRIES"
+        --concurrency "$CONCURRENCY"
+        --micro-batch-size "$MICRO_BATCH_SIZE"
     )
     if [ -n "${API_KEY:-}" ]; then
         LLM_ARGS+=(--api-key "$API_KEY")

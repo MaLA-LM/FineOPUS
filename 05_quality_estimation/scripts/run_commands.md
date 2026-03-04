@@ -123,4 +123,8 @@ python -m compact
 
 # 5) check done
 python -m check_done.check_shards --tsv flores200_directions_bicleaner.tsv
+
+
+# 6) csv summary
+python -m create_spreadsheet /scratch/project_462001050/QE_flores200_scores/dataset=flores200 --output flores200_benchmark_results.csv
 ```
