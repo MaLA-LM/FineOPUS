@@ -4,7 +4,7 @@ import argparse
 
 from dataset.manifest import ManifestEntry
 from dataset.mediator import get_dataset, DatasetAdapter
-from models.language_support import QwenLanguages
+from models.language_support import QwenLanguages, PrometheusLanguages
 from models.model_registry import resolve_model_spec, supported_model_keys
 from src.common import (
     ensure_dataset_ready,
@@ -20,7 +20,6 @@ from utils.logger import logger
 from utils.runner import collect_directions, run_scoring
 
 DEFAULT_LLM_MODEL = "Qwen/Qwen3-14B"
-LLM_LANGUAGE_SUPPORT = QwenLanguages
 
 
 def parse_args() -> argparse.Namespace:
@@ -172,7 +171,21 @@ def main() -> None:
         return
 
     model_tag = sanitize_model_tag(model_key)
-    language_support = LLM_LANGUAGE_SUPPORT(dataset=dataset)
+
+    if model_key.startswith("qwen3-"):
+        # Use the QwenLanguages for all Qwen3 variants, since they share the same supported languages.
+        language_support = QwenLanguages(dataset=dataset)
+        logger.info(
+            "Using QwenLanguages for model_key=%s",
+            model_key,
+        )
+    elif model_key.startswith("m-prometheus-"):
+        logger.info(
+            "Using PrometheusLanguages for model_key=%s",
+            model_key,
+        )
+        language_support = PrometheusLanguages(dataset=dataset)
+
     logger.info(
         "LLM scoring: model=%s micro_batch_size=%d concurrency=%d max_tokens=%d",
         model_id,

@@ -5,6 +5,7 @@ from typing import Callable, Literal, Optional
 from dataset.mediator import DatasetAdapter, DEFAULT_DATASET_ID, get_dataset
 from models.language_data.comet import COMET_SUPPORTED_LANGUAGES
 from models.language_data.metricx24 import METRICX24_SUPPORTED_LANGUAGES
+from models.language_data.prometheus import PROMETHEUS_SUPPORTED_LANGUAGES
 from models.language_data.qwen import QWEN_SUPPORTED_LANGUAGES
 from models.language_data.remedy import REMEDY_SUPPORTED_LANGUAGES, REMEDY_ISO_MAP
 
@@ -126,7 +127,26 @@ class QwenLanguages(_BaseLanguageSupport):
         super().__init__(
             set(QWEN_SUPPORTED_LANGUAGES),
             language_codes,
-            "qwen3-14b",
+            "qwen3",
+            dataset=dataset,
+            langcode_to_name=langcode_to_name,
+        )
+
+
+class PrometheusLanguages(_BaseLanguageSupport):
+    """Class representing languages supported by Prometheus model."""
+
+    def __init__(
+        self,
+        language_codes: Optional[dict[str, str]] = None,
+        *,
+        dataset: DatasetAdapter | str | None = None,
+        langcode_to_name: Optional[LanguageCodeMapper] = None,
+    ) -> None:
+        super().__init__(
+            set(PROMETHEUS_SUPPORTED_LANGUAGES),
+            language_codes,
+            "Prometheus",
             dataset=dataset,
             langcode_to_name=langcode_to_name,
         )
