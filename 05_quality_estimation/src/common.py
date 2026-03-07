@@ -14,7 +14,8 @@ def ensure_dataset_ready(args: argparse.Namespace, dataset: DatasetAdapter) -> N
 
 
 def summarize_scores(scores: list[float]) -> tuple[float | None, float | None]:
-    valid = [s for s in scores if not math.isnan(s)]
+    # NaN means the LLM failed to return valid output; treat as 0 (penalty).
+    valid = [0 if math.isnan(s) else s for s in scores]
     if not valid:
         return None, None
     return float(statistics.fmean(valid)), float(statistics.median(valid))
