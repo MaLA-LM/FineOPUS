@@ -123,6 +123,12 @@ resolve_model() {
             MODEL_CANONICAL="Qwen/Qwen3-14B"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
+        qwen3-8b|qwen/qwen3-8b)
+            BACKEND="llm"
+            MODULE="src.score_llm"
+            MODEL_CANONICAL="Qwen/Qwen3-8B"
+            VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
+            ;;                
         qwen3-4b|qwen3-4b-instruct-2507|qwen/qwen3-4b-instruct-2507)
             BACKEND="llm"
             MODULE="src.score_llm"

@@ -2,7 +2,7 @@
 #SBATCH --job-name=flores200_score
 #SBATCH --account=project_462001050
 #SBATCH --partition=small-g
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=7
@@ -124,6 +124,12 @@ resolve_model() {
             MODEL_CANONICAL="Qwen/Qwen3-14B"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
+        qwen3-8b|qwen/qwen3-8b)
+            BACKEND="llm"
+            MODULE="src.score_llm"
+            MODEL_CANONICAL="Qwen/Qwen3-8B"
+            VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
+            ;;            
         qwen3-4b|qwen3-4b-instruct-2507|qwen/qwen3-4b-instruct-2507)
             BACKEND="llm"
             MODULE="src.score_llm"
@@ -344,25 +350,57 @@ fi
 
 set +e
 if [ "$BACKEND" = "bicleaner" ]; then
-    srun python3 -m "$MODULE" \
-        "${COMMON_ARGS[@]}" \
-        --model "$MODEL_CANONICAL"
+
+    run_bicleaner() {
+        srun python3 -m "$MODULE" \
+            "${COMMON_ARGS[@]}" \
+            --model "$MODEL_CANONICAL"
+    }
+
+    EXIT_CODE=1
+    for attempt in 1 2 3; do
+        echo "Attempt $attempt"
+        if run_bicleaner; then
+            EXIT_CODE=0
+            break
+        else
+            EXIT_CODE=$?
+            echo "Attempt $attempt failed with exit code $EXIT_CODE"
+        fi
+        sleep $((30*attempt))
+    done
 
 elif [ "$BACKEND" = "remedy" ]; then
-    singularity exec --rocm -B /scratch -B /pfs -B /projappl "$SIF" env \
-        PYTHONPATH="$PYTHONPATH" \
-        HF_HOME="$HF_HOME" \
-        TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE" \
-        HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
-        HUGGINGFACE_HUB_CACHE="$HUGGINGFACE_HUB_CACHE" \
-        TRANSFORMERS_OFFLINE=1 \
-        HF_HUB_OFFLINE=1 \
-        VLLM_TARGET_DEVICE=rocm \
-        VLLM_USE_V1=1 \
-        VLLM_USE_TRITON_FLASH_ATTN=0 \
-        TORCHDYNAMO_DISABLE=1 \
-        TORCHINDUCTOR_DISABLE=1 \
-        python3 -m "$MODULE" "${COMMON_ARGS[@]}" --model "$MODEL_CANONICAL" --cache-dir "$HF_HOME"
+
+    run_remedy() {
+        singularity exec --rocm -B /scratch -B /pfs -B /projappl "$SIF" env \
+            PYTHONPATH="$PYTHONPATH" \
+            HF_HOME="$HF_HOME" \
+            TRANSFORMERS_CACHE="$TRANSFORMERS_CACHE" \
+            HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
+            HUGGINGFACE_HUB_CACHE="$HUGGINGFACE_HUB_CACHE" \
+            TRANSFORMERS_OFFLINE=1 \
+            HF_HUB_OFFLINE=1 \
+            VLLM_TARGET_DEVICE=rocm \
+            VLLM_USE_V1=1 \
+            VLLM_USE_TRITON_FLASH_ATTN=0 \
+            TORCHDYNAMO_DISABLE=1 \
+            TORCHINDUCTOR_DISABLE=1 \
+            python3 -m "$MODULE" "${COMMON_ARGS[@]}" --model "$MODEL_CANONICAL" --cache-dir "$HF_HOME"
+    }
+
+    EXIT_CODE=1
+    for attempt in 1 2 3; do
+        echo "Attempt $attempt"
+        if run_remedy; then
+            EXIT_CODE=0
+            break
+        else
+            EXIT_CODE=$?
+            echo "Attempt $attempt failed with exit code $EXIT_CODE"
+        fi
+        sleep $((30*attempt))
+    done
 
 elif [ "$BACKEND" = "llm" ]; then
     MODEL_NAME="${MODEL_NAME:-$MODEL_CANONICAL}"
@@ -378,43 +416,68 @@ elif [ "$BACKEND" = "llm" ]; then
     }
     trap cleanup EXIT
 
-    singularity run "$SIF" bash -c "
-        source ${VENV_PATH}/bin/activate
-        vllm serve $MODEL_REPO \
-            -O0 \
-            --served-model-name $MODEL_NAME \
-            --host $VLLM_HOST \
-            --port $VLLM_PORT \
-            --dtype $VLLM_DTYPE \
-            --gpu-memory-utilization $VLLM_GPU_UTIL \
-            --enable-prefix-caching \
-            --enable-chunked-prefill \
-            --max-num-batched-tokens 4096 \
-            --max-num-seqs 32 \
-            $VLLM_EXTRA_ARGS
-    " > "$VLLM_LOG" 2>&1 &
-    SERVER_PID=$!
+    start_vllm_server() {
+        # Kill any leftover server from a prior attempt
+        if [ -n "${SERVER_PID:-}" ] && kill -0 "$SERVER_PID" 2>/dev/null; then
+            kill "$SERVER_PID"
+            wait "$SERVER_PID" 2>/dev/null || true
+        fi
+        SERVER_PID=""
 
+        singularity run "$SIF" bash -c "
+            source ${VENV_PATH}/bin/activate
+            export HF_HUB_OFFLINE=1
+            export TRANSFORMERS_OFFLINE=1
+            export VLLM_LOGGING_LEVEL=WARNING
+            vllm serve $MODEL_REPO \
+                -O0 \
+                --served-model-name $MODEL_NAME \
+                --host $VLLM_HOST \
+                --port $VLLM_PORT \
+                --dtype $VLLM_DTYPE \
+                --gpu-memory-utilization $VLLM_GPU_UTIL \
+                --enable-prefix-caching \
+                --enable-chunked-prefill \
+                --max-num-batched-tokens 4096 \
+                --max-num-seqs 32 \
+                $VLLM_EXTRA_ARGS
+        " > /dev/null 2>&1 &
+        SERVER_PID=$!
 
-    READY=0
-    for i in {1..120}; do
-        if curl -sf "${API_BASE}/models" >/dev/null 2>&1; then
-            READY=1
-            echo "vLLM is up."
+        for i in {1..120}; do
+            if curl -sf "${API_BASE}/models" >/dev/null 2>&1; then
+                echo "vLLM is up."
+                return 0
+            fi
+            if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+                echo "ERROR: vLLM server exited early. Check $VLLM_LOG"
+                return 1
+            fi
+            sleep 20
+        done
+
+        echo "ERROR: vLLM did not become ready in time. Check $VLLM_LOG"
+        return 1
+    }
+
+    EXIT_CODE=1
+    for attempt in 1 2 3; do
+        echo "Server start attempt $attempt"
+        if start_vllm_server; then
+            EXIT_CODE=0
             break
+        else
+            EXIT_CODE=$?
+            echo "Server start attempt $attempt failed with exit code $EXIT_CODE"
         fi
-        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-            echo "ERROR: vLLM server exited early. Check $VLLM_LOG"
-            exit 1
-        fi
-        sleep 20
+        sleep $((30*attempt))
     done
 
-    if [ "$READY" -ne 1 ]; then
-        echo "ERROR: vLLM did not become ready in time. Check $VLLM_LOG"
-        exit 1
+    if [ "$EXIT_CODE" -ne 0 ]; then
+        echo "ERROR: vLLM server failed to start after 3 attempts"
+        exit "$EXIT_CODE"
     fi
-    
+
     LLM_ARGS=(
         --model "$MODEL_NAME"
         --api-base "$API_BASE"
@@ -428,23 +491,52 @@ elif [ "$BACKEND" = "llm" ]; then
         LLM_ARGS+=(--api-key "$API_KEY")
     fi
 
-    singularity run "$SIF" bash -c "
-        source ${VENV_PATH}/bin/activate
-        python3 -m $MODULE \
-            ${COMMON_ARGS[*]} \
-            ${LLM_ARGS[*]}
-    "
+    run_llm_scoring() {
+        singularity run "$SIF" bash -c "
+            source ${VENV_PATH}/bin/activate
+            python3 -m $MODULE \
+                ${COMMON_ARGS[*]} \
+                ${LLM_ARGS[*]}
+        "
+    }
+
+    EXIT_CODE=1
+    for attempt in 1 2 3; do
+        echo "Scoring attempt $attempt"
+        if run_llm_scoring; then
+            EXIT_CODE=0
+            break
+        else
+            EXIT_CODE=$?
+            echo "Scoring attempt $attempt failed with exit code $EXIT_CODE"
+        fi
+        sleep $((30*attempt))
+    done
+
 else
     # comet / metricx backends
-    singularity run "$SIF" bash -c "
-        source ${VENV_PATH}/bin/activate
-        python3 -m $MODULE \
-            ${COMMON_ARGS[*]} \
-            --model $MODEL_CANONICAL
-    "
-fi
+    run_metric() {
+        singularity run "$SIF" bash -c "
+            source ${VENV_PATH}/bin/activate
+            python3 -m $MODULE \
+                ${COMMON_ARGS[*]} \
+                --model $MODEL_CANONICAL
+        "
+    }
 
-EXIT_CODE=$?
+    EXIT_CODE=1
+    for attempt in 1 2 3; do
+        echo "Attempt $attempt"
+        if run_metric; then
+            EXIT_CODE=0
+            break
+        else
+            EXIT_CODE=$?
+            echo "Attempt $attempt failed with exit code $EXIT_CODE"
+        fi
+        sleep $((30*attempt))
+    done
+fi
 
 echo "=================================="
 echo "End time: $(date)"

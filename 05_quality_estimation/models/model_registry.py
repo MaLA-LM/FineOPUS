@@ -71,6 +71,16 @@ _SPECS: dict[Backend, dict[str, ModelSpec]] = {
                 "hosted_vllm/qwen/qwen3-14b",
             ),
         ),
+        "qwen3-8b": ModelSpec(
+            key="qwen3-8b",
+            backend="llm",
+            model_id="Qwen/Qwen3-8B",
+            aliases=(
+                "qwen/qwen3-8b",
+                "hosted_vllm/qwen3-8b",
+                "hosted_vllm/qwen/qwen3-8b",
+            ),
+        ),
         "qwen3-4b-instruct-2507": ModelSpec(
             key="qwen3-4b-instruct-2507",
             backend="llm",
