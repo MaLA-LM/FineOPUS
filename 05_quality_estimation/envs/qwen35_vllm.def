@@ -1,0 +1,156 @@
+# ==================================================================
+# Apptainer definition: vLLM (nightly/main; Qwen3.5-ready) on ROCm for LUMI
+#
+# Target hardware : AMD MI250X (gfx90a) on CSC LUMI
+# ROCm userland   : 7.0.2 (bundled in container)
+# PyTorch         : 2.10.0 + ROCm 7.0 wheels
+# vLLM            : built from vllm-project/vllm main (nightly; pre-0.17.0)
+#
+# Build (typical):
+#   apptainer build --fakeroot --bind="$TMPDIR:/tmp" vllm_rocm70_qwen35.sif vllm_rocm70_qwen35.def
+#
+# Runtime on LUMI:
+#   (Recommended) DO NOT use --rocm (to avoid binding host ROCm over container ROCm)
+#   apptainer exec -B /scratch -B /pfs -B /projappl vllm_rocm70_qwen35.sif bash -lc '
+#       source /opt/venv/bin/activate
+#       python -c "import torch; print(torch.__version__, torch.version.hip)"
+#   '
+# ==================================================================
+
+Bootstrap: docker
+From: rocm/dev-ubuntu-24.04:7.0.2-complete
+
+%labels
+    Author          ibrahiam
+    Version         vllm-main-rocm7.0
+    Description     vLLM (nightly; Qwen3.5-ready) on ROCm for LUMI MI250X (gfx90a)
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+
+    # Target GPU arch (MI250/MI250X)
+    export PYTORCH_ROCM_ARCH="gfx90a"
+
+    # ROCm paths
+    export ROCM_HOME=/opt/rocm
+    export HIP_PATH=${ROCM_HOME}
+    export PATH=${ROCM_HOME}/bin:${ROCM_HOME}/llvm/bin:${PATH}
+    export LD_LIBRARY_PATH=${ROCM_HOME}/lib:${ROCM_HOME}/lib64:${LD_LIBRARY_PATH:-}
+    export CMAKE_PREFIX_PATH=${ROCM_HOME}:${CMAKE_PREFIX_PATH:-}
+
+    # ---- 1) System packages ----
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        python3 python3-venv python3-dev python3-pip \
+        git curl wget ca-certificates \
+        build-essential cmake ninja-build pkg-config \
+        libssl-dev libffi-dev libopenblas-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+
+    
+    # Avoid git "dubious ownership" failures during fakeroot builds (FetchContent clones)
+    git config --system --add safe.directory '*'
+
+    # Ensure 'python' exists
+    ln -sf "$(command -v python3)" /usr/local/bin/python || true
+
+    # ---- 2) Create isolated venv for ALL pip installs ----
+    python3 -m venv /opt/venv
+    export PATH=/opt/venv/bin:$PATH
+
+    python -m pip install --no-cache-dir -U pip setuptools wheel
+
+    # Keep NumPy conservative for compiled deps
+    python -m pip install --no-cache-dir "numpy<2"
+
+    # ---- 3) PyTorch ROCm (ROCm 7.0 wheels) ----
+    python -m pip install --no-cache-dir \
+        torch==2.10.0 \
+        torchvision==0.25.0 \
+        torchaudio==2.10.0 \
+        --index-url https://download.pytorch.org/whl/rocm7.0
+
+    # Triton version aligned with current vLLM ROCm build requirements
+    python -m pip install --no-cache-dir \
+        triton==3.6.0 \
+        --index-url https://download.pytorch.org/whl/rocm7.0
+
+    python - <<'PY'
+import torch
+hip = getattr(torch.version, "hip", None)
+assert hip, f"Expected ROCm/HIP build of PyTorch, got torch.version.hip={hip}"
+print("[stage 3] PyTorch", torch.__version__, "| HIP", hip)
+PY
+
+    # ---- 4) Build & install vLLM from source (nightly/main) ----
+    cd /tmp
+    rm -rf /tmp/vllm
+    git clone https://github.com/vllm-project/vllm.git
+    cd vllm
+
+    # OPTIONAL PIN (recommended for reproducibility):
+    #   git checkout <commit_sha>
+
+    # Install ROCm deps from upstream requirements
+    # (requirements/rocm.txt includes common.txt; common.txt pins transformers<5)
+    python -m pip install --no-cache-dir -r requirements/rocm.txt
+
+    # Install ROCm-matching AMD SMI Python bindings (avoid PyPI mismatch)
+    rm -rf /tmp/amd_smi
+    cp -a /opt/rocm/share/amd_smi /tmp/amd_smi
+    python -m pip install --no-cache-dir /tmp/amd_smi
+    rm -rf /tmp/amd_smi
+
+    # Build/install vLLM (ROCm)
+    ROCM_HOME=/opt/rocm \
+    HIP_PATH=/opt/rocm \
+    VLLM_TARGET_DEVICE=rocm \
+    PYTORCH_ROCM_ARCH=gfx90a \
+    GPU_TARGETS=gfx90a \
+    AMDGPU_TARGETS=gfx90a \
+    MAX_JOBS="${MAX_JOBS:-8}" \
+    CMAKE_PREFIX_PATH="/opt/rocm:${CMAKE_PREFIX_PATH:-}" \
+    python setup.py install
+
+    # Record the installed vLLM version + commit
+    python - <<'PY'
+import subprocess, vllm
+print("[stage 4] vLLM", vllm.__version__)
+try:
+    sha = subprocess.check_output(["git","rev-parse","HEAD"], text=True).strip()
+    print("[stage 4] vLLM git SHA", sha)
+except Exception:
+    pass
+PY
+
+    cd /
+    rm -rf /tmp/vllm
+
+%environment
+    export LANG=C.UTF-8
+    export LC_ALL=C.UTF-8
+
+    # LUMI MI250 / MI250X
+    export PYTORCH_ROCM_ARCH="gfx90a"
+
+    # ROCm paths
+    export ROCM_HOME=/opt/rocm
+    export HIP_PATH=/opt/rocm
+    export PATH=/opt/venv/bin:/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/rocm/lib:/opt/rocm/lib64:${LD_LIBRARY_PATH:-}
+
+    # vLLM target
+    export VLLM_TARGET_DEVICE=rocm
+
+    # HF cache defaults (override in job scripts to point to /pfs or /scratch/project_*)
+    export PYTHONUNBUFFERED=1
+    export HF_HUB_ENABLE_HF_TRANSFER=1
+    export HF_HOME=/tmp/hf
+    export TRANSFORMERS_CACHE=/tmp/hf
+    export HF_DATASETS_CACHE=/tmp/hf
+    export HUGGINGFACE_HUB_CACHE=/tmp/hf
+
+%runscript
+    exec "$@"
