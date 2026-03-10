@@ -118,6 +118,17 @@ sbatch --array=1-1 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=100,T
 
 sbatch --array=0 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 scripts/run_slurm_lumi.sh --manifest flores200_directions.tsv --model m-prometheus-7b --num-shards 1
 
+
+---
+
+# reruns
+sbatch --array=81,128 
+  --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 
+  scripts/run_slurm_lumi.sh 
+  --manifest flores200_directions_qwen4b.tsv 
+  --model qwen3-4b 
+  --num-shards 190
+
 ---
 # 3) optional manual non-array run
 python -m src.score_comet 
@@ -137,9 +148,9 @@ python -m compact
   --num-buckets 2
 
 
-# 5) check done
+# 5) check done, model name as directory name
 python -m check_done.check_shards --tsv flores200_directions_bicleaner.tsv
-python -m check_done.check_shards --tsv flores200_directions_prometheus.tsv --model m-prometheus-7b --path /scratch/project_462001050/QE_flores200_scores/dataset=flores200
+python -m check_done.check_shards --tsv flores200_directions_qwen4b.tsv --model qwen3-4b-instruct-2507 --path /scratch/project_462001050/QE_flores200_scores/dataset=flores200
 
 
 # 6) csv summary

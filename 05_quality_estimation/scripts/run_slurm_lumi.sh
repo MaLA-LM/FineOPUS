@@ -2,7 +2,7 @@
 #SBATCH --job-name=flores200_score
 #SBATCH --account=project_462001050
 #SBATCH --partition=small-g
-#SBATCH --time=48:00:00
+#SBATCH --time=72:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=7
@@ -42,11 +42,12 @@ MANIFEST="${MANIFEST:-${WORKDIR}/flores200_directions.tsv}"
 BATCH_SIZE="${BATCH_SIZE:-8}"
 GPUS="${GPUS:-1}"
 MAX_DIRECTIONS_PER_PART="${MAX_DIRECTIONS_PER_PART:-25}"
-TARGET_PART_BYTES="${TARGET_PART_BYTES:-67108864}"
+TARGET_PART_BYTES="${TARGET_PART_BYTES:-67108864}" # 64 MiB
 MODEL="${MODEL:-wmt22-cometkiwi-da}"
 SHARD_ID="${SHARD_ID:-${SLURM_ARRAY_TASK_ID:-}}"
 NUM_SHARDS="${NUM_SHARDS:-${SLURM_ARRAY_TASK_COUNT:-}}"
 
+#vllm settings
 VLLM_HOST="${VLLM_HOST:-127.0.0.1}"
 DEFAULT_VLLM_PORT=$(( 40000 + ((PORT_JOB_SEED + PORT_TASK_SEED) % 20000) ))
 VLLM_PORT="${VLLM_PORT:-$DEFAULT_VLLM_PORT}"
@@ -59,7 +60,7 @@ TEMPERATURE="${TEMPERATURE:-0.0}"
 MAX_TOKENS="${MAX_TOKENS:-8192}"
 MAX_RETRIES="${MAX_RETRIES:-5}"
 CONCURRENCY="${CONCURRENCY:-32}"
-MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-32}"
+MICRO_BATCH_SIZE="${MICRO_BATCH_SIZE:-16}"
 MODEL_REPO="${MODEL_REPO:-}"
 MODEL_NAME="${MODEL_NAME:-}"
 
@@ -277,7 +278,6 @@ if [ "$BACKEND" = "bicleaner" ]; then
     module load lumi-container-wrapper
 
     # --- ROCm/TF settings for MI250X (gfx90a) ---
-    # Do NOT set HSA_OVERRIDE_GFX_VERSION: let ROCm auto-detect gfx90a.
     export TF_ROCM_FUSION_ENABLE=0
     export SINGULARITY_BIND="/opt/rocm"
     # ----------------------------------
@@ -438,7 +438,7 @@ elif [ "$BACKEND" = "llm" ]; then
                 --gpu-memory-utilization $VLLM_GPU_UTIL \
                 --enable-prefix-caching \
                 --enable-chunked-prefill \
-                --max-num-batched-tokens 4096 \
+                --max-num-batched-tokens 8192 \
                 --max-num-seqs 32 \
                 $VLLM_EXTRA_ARGS
         " > /dev/null 2>&1 &
