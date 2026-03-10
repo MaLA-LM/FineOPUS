@@ -190,17 +190,42 @@ async def _score_one_batch(
     prompt = render_batch_prompt(batch, src_lang, tgt_lang, start_id=0)
 
     async with sem:
+        import httpx as _httpx
+
         last_error: Exception | None = None
         for attempt in range(max_retries + 3):
-            text = await _call_vllm(
-                client,
-                url,
-                model,
-                prompt,
-                api_key,
-                temperature,
-                max_tokens,
-            )
+            try:
+                text = await _call_vllm(
+                    client,
+                    url,
+                    model,
+                    prompt,
+                    api_key,
+                    temperature,
+                    max_tokens,
+                )
+            except (
+                _httpx.ReadTimeout,
+                _httpx.ConnectTimeout,
+                _httpx.PoolTimeout,
+                _httpx.RemoteProtocolError,
+                _httpx.ConnectError,
+            ) as exc:
+                last_error = exc
+                wait = min(2**attempt, 60)
+                logger.warning(
+                    "Batch %d/%d attempt %d: transient HTTP error (%s: %s), "
+                    "retrying in %ds",
+                    batch_idx + 1,
+                    total_batches,
+                    attempt + 1,
+                    type(exc).__name__,
+                    exc,
+                    wait,
+                )
+                await asyncio.sleep(wait)
+                continue
+
             scores = _parse_batch_response(text, current_size)
             if scores is None:
                 logger.debug(
@@ -246,7 +271,7 @@ async def _run_batches_async(
     total = len(batches)
 
     # Generous timeout: large batches may take a while to generate
-    timeout = httpx.Timeout(600.0, connect=30.0)
+    timeout = httpx.Timeout(2400.0, connect=60.0)
 
     async with httpx.AsyncClient(timeout=timeout) as client:
         tasks = [
