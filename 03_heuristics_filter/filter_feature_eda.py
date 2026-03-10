@@ -37,6 +37,25 @@ STAT_RENAME_MAP = {
     '95%': 'p95', '99%': 'p99', '99.9%': 'p999'
 }
 
+ABSOLUTE_SAFEGUARDS = {
+    'char_len_ratio': {'lower': 0.25, 'upper': 4.0},   # A translation is rarely 4x longer
+    'word_len_ratio': {'lower': 0.25, 'upper': 4.0},
+    'score_lcs_ratio': {'lower': 0.01},                # Only drop if LCS is virtually 0%
+    'score_levenshtein': {'lower': 0.01},              
+    'src_char_len': {'lower': 1, 'upper': 2500},
+    'trg_char_len': {'lower': 1, 'upper': 2500},
+    'src_word_len': {'lower': 1, 'upper': 500},
+    'trg_word_len': {'lower': 1, 'upper': 500},
+    'score_numerals': {'lower': 0.1},                  # Only drop if numeral match is terrible
+    'score_term_punct': {'lower': 0.0},                # Punctuation differs widely; rarely drop
+    'score_repeat_src': {'upper': 150},                # Allow up to 150 chars of natural repetition
+    'score_repeat_trg': {'upper': 150},
+    'src_max_word_len': {'upper': 150},                # E.g., long URLs
+    'trg_max_word_len': {'upper': 150},
+    'src_avg_word_len': {'upper': 50},
+    'trg_avg_word_len': {'upper': 50},
+}
+
 MAX_SAMPLE_SIZE = 400_000_000  # Cap in-memory rows to 400 Million (~130GB raw, peaks at ~200GB during pandas operations)
 
 # ----------------------------
@@ -98,7 +117,6 @@ def aggregate_global_stats(by_lp_df: pd.DataFrame) -> pd.DataFrame:
 def compute_smart_thresholds(by_lp_df: pd.DataFrame) -> pd.DataFrame:
     thresholds = []
     
-    # 1. Categorize features by the type of bounds they require
     two_sided_features = [
         'char_len_ratio', 'word_len_ratio', 
         'score_lcs_ratio', 'score_levenshtein',
@@ -106,7 +124,6 @@ def compute_smart_thresholds(by_lp_df: pd.DataFrame) -> pd.DataFrame:
         'src_word_len', 'trg_word_len'
     ]
     
-    # score_numerals (numeral consistency) and score_term_punct (terminal punctuation consistency) measure how well specific linguistic anchors match between the source and target sentences.
     lower_bound_features = [
         'score_numerals', 'score_term_punct'
     ]
@@ -120,31 +137,32 @@ def compute_smart_thresholds(by_lp_df: pd.DataFrame) -> pd.DataFrame:
     for (lp, feat), row in by_lp_df.set_index(['langpair', 'feature']).iterrows():
         lower, upper = np.nan, np.nan
         
-        # Local empirical tails
+        # 1. Calculate Local Statistical Bounds
         p001, p999 = row['p001'], row['p999']
         l_mean, l_std = row['mean'], row['std']
         
-        # Local 4-sigma theoretical bounds
         sigma_lower = l_mean - 4 * l_std if pd.notna(l_std) else p001
         sigma_upper = l_mean + 4 * l_std if pd.notna(l_std) else p999
         
+        stat_lower = min(p001, sigma_lower)
+        stat_upper = max(p999, sigma_upper)
+
+        # 2. Apply Absolute Linguistic Safeguards
+        safe_l = ABSOLUTE_SAFEGUARDS.get(feat, {}).get('lower', 0.0)
+        safe_u = ABSOLUTE_SAFEGUARDS.get(feat, {}).get('upper', float('inf'))
+
         if feat in two_sided_features:
-            lower = min(p001, sigma_lower)
-            upper = max(p999, sigma_upper)
-            
-            # Sentence/word lengths cannot logically be less than 1
-            if ('char_len' in feat or 'word_len' in feat) and 'ratio' not in feat:
-                lower = max(1.0, lower)
+            # We use `min` for lower bounds to take the *widest* (most forgiving) limit
+            lower = min(stat_lower, safe_l)
+            # We use `max` for upper bounds to take the *highest* limit
+            upper = max(stat_upper, safe_u)
             
         elif feat in lower_bound_features:
-            lower = min(p001, sigma_lower)
-            # Match scores typically cannot be less than 0
-            lower = max(0.0, lower)
+            lower = min(stat_lower, safe_l)
             
         elif feat in upper_bound_features:
-            upper = max(p999, sigma_upper)
+            upper = max(stat_upper, safe_u)
 
-        # Append to list if at least one bound was calculated
         if pd.notna(lower) or pd.notna(upper):
             thresholds.append({
                 'langpair': lp, 
@@ -153,29 +171,22 @@ def compute_smart_thresholds(by_lp_df: pd.DataFrame) -> pd.DataFrame:
                 'threshold_upper': upper
             })
             
+    # 3. Pivot and Format
     thresh_df = pd.DataFrame(thresholds)
     
     if not thresh_df.empty:
-        # Explicitly pivot on the value columns to create the MultiIndex
         thresh_df = thresh_df.pivot(
             index='langpair', 
             columns='feature', 
             values=['threshold_lower', 'threshold_upper']
         )
         
-        # Safely flatten the MultiIndex: 
-        # col[0] is 'threshold_lower' or 'threshold_upper'
-        # col[1] is the feature name (e.g., 'char_len_ratio')
         thresh_df.columns = [
             f"{col[1]}_{col[0].replace('threshold_', '')}" 
             for col in thresh_df.columns
         ]
         
-        # Restore 'langpair' from the index back to a standard column
         thresh_df.reset_index(inplace=True)
-        
-        # CRITICAL: Drop all columns that are 100% NaN. 
-        # This removes ghost columns like 'score_numerals_upper'
         thresh_df.dropna(axis=1, how='all', inplace=True)
         
     return thresh_df
@@ -215,77 +226,77 @@ def main():
     logging.info(f"Discovered {len(langpairs)} total language pairs. Processing sequentially...")
     cols_to_load = NUMERIC_COLS + BOOL_COLS
     
-    # # --- Sequentially Process and Append ---
-    # for lp_dir in langpairs:
-    #     lp_name = lp_dir.name
-    #     if lp_name in processed_lps:
-    #         continue
+    # --- Sequentially Process and Append ---
+    for lp_dir in langpairs:
+        lp_name = lp_dir.name
+        if lp_name in processed_lps:
+            continue
             
-    #     parquet_files = sorted(lp_dir.glob("*.parquet"))
-    #     if not parquet_files:
-    #         continue
+        parquet_files = sorted(lp_dir.glob("*.parquet"))
+        if not parquet_files:
+            continue
 
-    #     # 1. Fast Metadata Scan for Total Rows
-    #     total_rows = 0
-    #     try:
-    #         for p_file in parquet_files:
-    #             total_rows += pq.ParquetFile(p_file).metadata.num_rows
-    #     except Exception as e:
-    #         logging.error(f"Failed to read metadata for {lp_name}: {e}")
-    #         continue
+        # 1. Fast Metadata Scan for Total Rows
+        total_rows = 0
+        try:
+            for p_file in parquet_files:
+                total_rows += pq.ParquetFile(p_file).metadata.num_rows
+        except Exception as e:
+            logging.error(f"Failed to read metadata for {lp_name}: {e}")
+            continue
 
-    #     if total_rows == 0:
-    #         continue
+        if total_rows == 0:
+            continue
 
-    #     # Calculate dynamic sampling fraction to prevent memory overflow
-    #     sample_frac = min(1.0, MAX_SAMPLE_SIZE / total_rows)
-    #     logging.info(f"Loading {lp_name}... Total Rows: {total_rows}. Sampling Fraction: {sample_frac:.4f}")
+        # Calculate dynamic sampling fraction to prevent memory overflow
+        sample_frac = min(1.0, MAX_SAMPLE_SIZE / total_rows)
+        logging.info(f"Loading {lp_name}... Total Rows: {total_rows}. Sampling Fraction: {sample_frac:.4f}")
 
-    #     # 2. Stream and Downsample Data
-    #     sampled_chunks = []
-    #     try:
-    #         for p_file in parquet_files:
-    #             pf = pq.ParquetFile(p_file)
-    #             # Stream in chunks of 100,000 rows
-    #             for batch in pf.iter_batches(batch_size=100_000, columns=[c for c in cols_to_load if c in pf.schema.names]):
-    #                 batch_df = batch.to_pandas()
-    #                 if sample_frac < 1.0:
-    #                     sampled_chunks.append(batch_df.sample(frac=sample_frac, random_state=42))
-    #                 else:
-    #                     sampled_chunks.append(batch_df)
-    #     except Exception as e:
-    #         logging.warning(f"Could not load data chunks for {lp_name}: {e}")
-    #         continue
+        # 2. Stream and Downsample Data
+        sampled_chunks = []
+        try:
+            for p_file in parquet_files:
+                pf = pq.ParquetFile(p_file)
+                # Stream in chunks of 100,000 rows
+                for batch in pf.iter_batches(batch_size=100_000, columns=[c for c in cols_to_load if c in pf.schema.names]):
+                    batch_df = batch.to_pandas()
+                    if sample_frac < 1.0:
+                        sampled_chunks.append(batch_df.sample(frac=sample_frac, random_state=42))
+                    else:
+                        sampled_chunks.append(batch_df)
+        except Exception as e:
+            logging.warning(f"Could not load data chunks for {lp_name}: {e}")
+            continue
             
-    #     if not sampled_chunks:
-    #         continue
+        if not sampled_chunks:
+            continue
 
-    #     df = pd.concat(sampled_chunks, ignore_index=True)
+        df = pd.concat(sampled_chunks, ignore_index=True)
 
-    #     # 3. Compute & Append Per-LP Stats
-    #     lp_stats = generate_summary_stats(df, NUMERIC_COLS, exact_total_rows=total_rows)
-    #     if not lp_stats.empty:
-    #         lp_stats.insert(0, 'langpair', lp_name)
-    #         lp_stats.to_csv(by_lp_path, mode='a', header=not by_lp_path.exists(), index=False)
+        # 3. Compute & Append Per-LP Stats
+        lp_stats = generate_summary_stats(df, NUMERIC_COLS, exact_total_rows=total_rows)
+        if not lp_stats.empty:
+            lp_stats.insert(0, 'langpair', lp_name)
+            lp_stats.to_csv(by_lp_path, mode='a', header=not by_lp_path.exists(), index=False)
             
-    #     # 4. Compute & Append Boolean Rates
-    #     available_bools = [c for c in BOOL_COLS if c in df.columns]
-    #     if available_bools:
-    #         bool_rates = df[available_bools].mean().reset_index()
-    #         bool_rates.columns = ['feature', 'true_rate']
-    #         bool_rates.insert(0, 'langpair', lp_name)
-    #         bool_rates.to_csv(bool_by_lp_path, mode='a', header=not bool_by_lp_path.exists(), index=False)
+        # 4. Compute & Append Boolean Rates
+        available_bools = [c for c in BOOL_COLS if c in df.columns]
+        if available_bools:
+            bool_rates = df[available_bools].mean().reset_index()
+            bool_rates.columns = ['feature', 'true_rate']
+            bool_rates.insert(0, 'langpair', lp_name)
+            bool_rates.to_csv(bool_by_lp_path, mode='a', header=not bool_by_lp_path.exists(), index=False)
 
-    #     # 5. Compute & Append Correlations
-    #     numeric_present = [c for c in NUMERIC_COLS if c in df.columns]
-    #     if numeric_present:
-    #         corr = df[numeric_present].corr(method="spearman").reset_index()
-    #         corr.rename(columns={'index': 'feature_1'}, inplace=True)
-    #         corr_melted = corr.melt(id_vars='feature_1', var_name='feature_2', value_name='spearman_corr')
-    #         corr_melted.insert(0, 'langpair', lp_name)
-    #         corr_melted.to_csv(corr_path, mode='a', header=not corr_path.exists(), index=False)
+        # 5. Compute & Append Correlations
+        numeric_present = [c for c in NUMERIC_COLS if c in df.columns]
+        if numeric_present:
+            corr = df[numeric_present].corr(method="spearman").reset_index()
+            corr.rename(columns={'index': 'feature_1'}, inplace=True)
+            corr_melted = corr.melt(id_vars='feature_1', var_name='feature_2', value_name='spearman_corr')
+            corr_melted.insert(0, 'langpair', lp_name)
+            corr_melted.to_csv(corr_path, mode='a', header=not corr_path.exists(), index=False)
 
-    #     del df, sampled_chunks # Explicitly free RAM immediately
+        del df, sampled_chunks # Explicitly free RAM immediately
 
     # --- Global Aggregations ---
     if not by_lp_path.exists():

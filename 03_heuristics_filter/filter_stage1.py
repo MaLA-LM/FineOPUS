@@ -166,8 +166,13 @@ def main():
         if out_file.exists():
             try:
                 # Quickly read metadata to keep stats accurate
-                total_original += pq.ParquetFile(p_file).metadata.num_rows
-                total_rows_kept += pq.ParquetFile(out_file).metadata.num_rows
+                orig_rows = pq.ParquetFile(p_file).metadata.num_rows
+                kept_rows = pq.ParquetFile(out_file).metadata.num_rows
+                
+                total_original += orig_rows
+                total_rows_kept += kept_rows
+                total_rows_dropped += (orig_rows - kept_rows)
+                
                 total_files_processed += 1
             except Exception:
                 pass
@@ -202,13 +207,19 @@ def main():
 
     logging.info(f"[{args.lang_pair}] Done. Files: {total_files_processed} | Original: {total_original} | Kept: {total_rows_kept} | Dropped: {total_rows_dropped}")
 
+    # Calculate retention rate safely
+    retention_rate = (total_rows_kept / total_original) if total_original > 0 else 0.0
+    math_is_valid = (total_original - total_rows_kept) == total_rows_dropped
+    
     # 5. Update Tracking CSV
     try:
         new_row = pd.DataFrame([{
             'langpair': args.lang_pair,
             'original_rows': total_original,
             'kept_rows': total_rows_kept,
-            'dropped_rows': total_rows_dropped
+            'dropped_rows': total_rows_dropped,
+            'retention_rate': retention_rate,
+            'math_check_passed': math_is_valid
         }])
         
         file_exists = os.path.isfile(args.log_csv)
