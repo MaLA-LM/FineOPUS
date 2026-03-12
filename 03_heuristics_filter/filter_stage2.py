@@ -25,7 +25,7 @@ DEFAULT_FEATURES = [
     "src_char_len", "trg_char_len", "src_word_len", "trg_word_len",
     "char_len_ratio", "word_len_ratio", "score_term_punct", "score_numerals",
     "score_lcs_ratio", "score_levenshtein", "score_repeat_src", "score_repeat_trg",
-    "src_predlang_conf_glotlid", "tgt_predlang_conf_glotlid",
+    "src_max_word_len", "trg_max_word_len", "src_avg_word_len", "trg_avg_word_len",
 ]
 
 # ----------------------------
@@ -117,7 +117,7 @@ def process_single_langpair(langpair_dir: str, out_dir: str, args) -> tuple:
         return total_in_all, total_kept_all
 
     # 1. Pre-train Model
-    model, feature_medians = train_isolation_forest(langpair_dir, args.features, args.contamination)
+    model, feature_medians = train_isolation_forest(langpair_dir, args.features, args.contamination, args.batch_size)
     if model is None:
         logging.error(f"Could not train model for {args.lang_pair}. No valid training data extracted.")
         return total_in_all, total_kept_all
@@ -227,6 +227,8 @@ def main():
         return
 
     original_rows, kept_rows = process_single_langpair(lp_dir, out_dir, args)
+    # Calculate retention rate safely
+    retention_rate = (kept_rows / original_rows) if original_rows > 0 else 0.0
 
     # ----------------------------
     # Update Tracking CSV
@@ -236,7 +238,8 @@ def main():
         new_row = pd.DataFrame([{
             'langpair': args.lang_pair,
             'original_rows': original_rows,
-            'kept_rows': kept_rows
+            'kept_rows': kept_rows,
+            'retention_rate': retention_rate,
         }])
         
         # mode='a' appends to the file safely. If it doesn't exist, header=True writes the columns.

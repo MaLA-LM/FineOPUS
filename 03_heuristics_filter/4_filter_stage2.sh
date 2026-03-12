@@ -22,7 +22,7 @@ module load cray-python
 export ARROW_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-DATA_ROOT="/scratch/project_462001249/FineOPUS/filtered_stage2"
+DATA_ROOT="/scratch/project_462001249/FineOPUS/filtered_stage1"
 OUT_DIR="/scratch/project_462001249/FineOPUS/filtered_stage2"
 mkdir -p "$OUT_DIR"
 
@@ -73,7 +73,7 @@ for (( i=$SLURM_ARRAY_TASK_ID; i<=$TOTAL_PAIRS; i+=$STRIDE )); do
         --out_root "$OUT_DIR" \
         --log_csv "$TRACKING_CSV" \
         --error_log "$ERROR_LOG" \
-        --batch_size 1000000 \
+        --batch_size 200000000 \
         --contamination 0.0001
 
 done
