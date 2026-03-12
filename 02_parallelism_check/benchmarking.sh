@@ -8,7 +8,7 @@
 #SBATCH --gpus-per-node=1
 #SBATCH --mem=64G
 #SBATCH --time=1-00:00:00
-#SBATCH --account=project_462000787
+#SBATCH --account=project_462000964
 
 start_time=$(date +%s)
 echo "Job started at: $(date)"

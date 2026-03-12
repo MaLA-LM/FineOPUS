@@ -256,8 +256,8 @@ def encode_texts(
     try:
         if model_name == "google/embeddinggemma-300m":
             embeddings = model.encode_document(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
-        elif model_name == "jinaai/jina-embeddings-v3":
-            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, task="text-matching", normalize_embeddings=normalize_embeddings)
+        elif model_name == "jinaai/jina-embeddings-v3" or model_name == "jinaai/jina-embeddings-v5-text-nano" or model_name == "jinaai/jina-embeddings-v5-text-small":
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, task="text-matching", normalize_embeddings=normalize_embeddings)       
         elif model_name == "Qwen/Qwen3-Embedding-0.6B":
             embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
         elif model_name == "intfloat/multilingual-e5-large":

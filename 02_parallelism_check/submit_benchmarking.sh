@@ -1,7 +1,9 @@
 #!/bin/bash
 
 MODELS=(
-    "jinaai/jina-embeddings-v3"
+    # "jinaai/jina-embeddings-v3"
+    # "jinaai/jina-embeddings-v5-text-nano"
+    # "jinaai/jina-embeddings-v5-text-small"
     # "google/embeddinggemma-300m"
     # "Qwen/Qwen3-Embedding-0.6B"
     # "intfloat/multilingual-e5-large"
