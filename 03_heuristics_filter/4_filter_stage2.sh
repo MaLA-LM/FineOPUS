@@ -74,7 +74,7 @@ for (( i=$SLURM_ARRAY_TASK_ID; i<=$TOTAL_PAIRS; i+=$STRIDE )); do
         --log_csv "$TRACKING_CSV" \
         --error_log "$ERROR_LOG" \
         --batch_size 200000000 \
-        --contamination 0.0001
+        --contamination 0.001
 
 done
 
