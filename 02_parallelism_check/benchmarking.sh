@@ -24,8 +24,9 @@ NORMALIZE_EMBEDDINGS="${NORMALIZE_EMBEDDINGS:-false}"
 
 # Activate environment
 module purge
-module use /appl/local/csc/modulefiles/
-module load pytorch/2.5
+module load LUMI/25.09
+module load partition/G
+module load rocm/6.4.4
 source ../.venv/bin/activate
 
 # Show GPU info
@@ -36,7 +37,7 @@ elif command -v nvidia-smi &> /dev/null; then
 fi
 
 # Build base command
-BASE_CMD="srun python ./benchmarking.py \
+BASE_CMD="srun uv run ./benchmarking.py \
   --dataset_name \"$DATASET\" \
   --model \"$MODEL\" \
   --split \"$SPLIT\" \
