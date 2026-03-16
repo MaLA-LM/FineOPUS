@@ -78,6 +78,25 @@ python -m dataset.make_manifest
   --out flores200_directions_qwen4b.tsv
 
 sbatch --array=0-189 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 scripts/run_slurm_lumi.sh --manifest flores200_directions_qwen4b.tsv --model qwen3-4b
+
+
+# qwen3-8b->
+python -m dataset.make_manifest 
+  --dataset flores200
+  --split all 
+  --num-shards 190
+  --out flores200_directions_qwen8b.tsv
+
+sbatch --array=0-189 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 scripts/run_slurm_lumi.sh --manifest flores200_directions_qwen8b.tsv --model qwen3-8b
+
+# qwen3-14b->
+python -m dataset.make_manifest 
+  --dataset flores200
+  --split all 
+  --num-shards 190
+  --out flores200_directions_qwen14b.tsv
+
+sbatch --array=0-189 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 scripts/run_slurm_lumi.sh --manifest flores200_directions_qwen14b.tsv --model qwen3-14b
 ---
 
 # 20 translation directions, JSONL parts rotating by directions/bytes
@@ -142,29 +161,38 @@ python -m src.score_comet
   --shard-id 0
 
 # 4) compact stage JSONL files into bucketed final parquet output
-python -m compact 
-  --output-base /scratch/project_2008161/QE_flores200_scores 
-  --dataset flores200 
+python -m compact
+  --output-base /scratch/project_462001050/QE_flores200_scores
+  --dataset flores200
   --num-buckets 2
 
 
 # 5) check done, model name as directory name
-python -m check_done.check_shards --tsv flores200_directions_bicleaner.tsv
-python -m check_done.check_shards --tsv flores200_directions_qwen4b.tsv --model qwen3-4b-instruct-2507 --path /scratch/project_462001050/QE_flores200_scores/dataset=flores200
-
+# models: shaomutan_remedy-9b-22, wmt23-cometkiwi-da-xl, xcomet-xl, metricx24, m-prometheus-7b
+python -m stand_alone_modules.check_done.check_shards --tsv flores200_directions_bicleaner.tsv
+python -m stand_alone_modules.check_done.check_shards --tsv flores200_directions_qwen4b.tsv --model qwen3-4b-instruct-2507 --path /scratch/project_462001050/QE_flores200_scores/dataset=flores200
+python -m stand_alone_modules.check_done.check_shards --tsv flores200_directions_qwen14b.tsv --model qwen3-14b --path /scratch/project_462001050/QE_flores200_scores/dataset=flores200
+python -m stand_alone_modules.check_done.check_shards --tsv flores200_directions_remedy.tsv --model shaomutan_remedy-9b-22 --path /scratch/project_462001050/QE_flores200_scores/dataset=flores200
 
 # 6) csv summary
-python -m create_spreadsheet /scratch/project_462001050/QE_flores200_scores/dataset=flores200 --output flores200_benchmark_results_1.csv
+python -m stand_alone_modules.create_spreadsheet /scratch/project_462001050/QE_flores200_scores/dataset=flores200 --output flores200_benchmark_results_1.csv
 
 # 7) dedup
-python -m dedup scan --dataset-path /scratch/project_462001050/QE_flores200_scores/dataset=flores200 --output .
-python -m dedup apply --plan /scratch/.../dataset=flores200/dedup_plan.json
+python -m stand_alone_modules.dedup scan --dataset-path /scratch/project_462001050/QE_flores200_scores/dataset=flores200 --output .
+python -m stand_alone_modules.dedup apply --plan /scratch/.../dataset=flores200/dedup_plan.json
 
 #8) patch results seen/unseen + null scores
 # Step 1: patch (creates *-patched.jsonl files alongside originals)
-python -m patch_results patch --model-path /scratch/project_462001050/QE_flores200_scores/dataset=flores200/model=m-prometheus-7b
-
+python -m stand_alone_modules.patch_results patch --model-path /scratch/project_462001050/QE_flores200_scores/dataset=flores200/model=m-prometheus-7b
 # Step 2: replace (swaps patched files into original names, deletes old)
-python -m patch_results replace --model-path /scratch/project_462001050/QE_flores200_scores/dataset=flores200/model=m-prometheus-7b
+python -m stand_alone_modules.patch_results replace --model-path /scratch/project_462001050/QE_flores200_scores/dataset=flores200/model=m-prometheus-7b
+
+# 9) compcation:
+singularity run $SIF python -m stand_alone_modules.compact
+  --output-base /scratch/project_462001050/QE_flores200_scores
+  --dataset flores200
+  --name raw_scores
+  --target-part-bytes 671088640
+  --workers 9
 
 ```
