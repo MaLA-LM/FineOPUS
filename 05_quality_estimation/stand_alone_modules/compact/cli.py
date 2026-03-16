@@ -10,9 +10,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-base", required=True, help="Base output directory.")
     parser.add_argument("--dataset", required=True, help="Dataset id.")
     parser.add_argument(
+        "--name",
+        required=True,
+        help="name of buckets folder",
+    )
+    parser.add_argument(
         "--target-part-bytes",
         type=int,
-        default=268_435_456,  # 256 MiB
+        default=671088640,  # 640MB, ~254MB of parquet file size
         help="Best-effort target size per compacted output file.",
     )
     parser.add_argument(

@@ -3,12 +3,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from utils.io import ROW_TYPE_SUMMARY
+
 
 class ModelPartWriter:
     """Writes compacted Parquet files for a single model bucket.
 
-    Each model gets its own output directory and checkpoint file.
-    Instances are independent — safe to use from separate threads.
+    Each bucket owns its own output directory and checkpoint file.
     """
 
     def __init__(
@@ -19,18 +20,23 @@ class ModelPartWriter:
         model: str,
         target_part_bytes: int,
         run_id: str,
+        bucket_name: str,
+        bucket_id: int,
     ) -> None:
         self.output_base = Path(output_base)
         self.dataset = dataset
         self.model = model
         self.target_part_bytes = target_part_bytes
         self.run_id = run_id
+        self.bucket_name = bucket_name
+        self.bucket_id = bucket_id
 
         self._bucket_dir = (
             self.output_base
             / f"dataset={self.dataset}"
-            / "buckets"
+            / f"buckets={self.bucket_name}"
             / f"model={self.model}"
+            / f"bucket={self.bucket_id:03d}"
         )
         self._checkpoint_path = self._bucket_dir / "checkpoint.parquet"
 
@@ -43,7 +49,7 @@ class ModelPartWriter:
     # -- checkpoint ---------------------------------------------------------
 
     def _load_checkpoint(self) -> set[tuple[str, str]]:
-        """Load (direction_key, split) pairs already committed for this model."""
+        """Load (direction_key, split) pairs already committed for this bucket."""
         if not self._checkpoint_path.exists():
             return set()
         import pyarrow.parquet as pq
@@ -82,14 +88,38 @@ class ModelPartWriter:
             if not candidate.exists():
                 return candidate
 
-    def append(self, table, new_splits: set[tuple[str, str]] | None = None) -> None:
-        """Buffer a table. Auto-flushes when target size is reached."""
+    def append_new_rows(self, table) -> tuple[int, int]:
+        """Append only rows that are not already committed for this bucket."""
+        import pyarrow as pa
+
+        skipped = 0
+        if self.committed_splits:
+            dk = table.column("direction_key").to_pylist()
+            sp = table.column("split").to_pylist()
+            keep = [
+                i
+                for i in range(table.num_rows)
+                if (dk[i], sp[i]) not in self.committed_splits
+            ]
+            skipped = table.num_rows - len(keep)
+            if not keep:
+                return 0, skipped
+            table = table.take(pa.array(keep, type=pa.int64()))
+
+        rt = table.column("row_type").to_pylist()
+        dk = table.column("direction_key").to_pylist()
+        sp = table.column("split").to_pylist()
+        new_splits = {
+            (dk[i], sp[i]) for i in range(table.num_rows) if rt[i] == ROW_TYPE_SUMMARY
+        }
+
         self._buffer_tables.append(table)
         self._buffer_bytes += int(table.nbytes)
         if new_splits:
             self.committed_splits.update(new_splits)
         if self._buffer_bytes >= self.target_part_bytes:
             self._flush_buffer()
+        return table.num_rows, skipped
 
     def _flush_buffer(self) -> None:
         if not self._buffer_tables:
@@ -105,6 +135,7 @@ class ModelPartWriter:
 
         self._buffer_tables.clear()
         self._buffer_bytes = 0
+        self._save_checkpoint()
 
     def flush_all(self) -> None:
         """Flush remaining buffer and persist the checkpoint."""
