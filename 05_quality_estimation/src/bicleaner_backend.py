@@ -5,23 +5,21 @@ import subprocess
 from pathlib import Path
 
 from dataset.mediator import Example
+from models.language_data.remedy import REMEDY_ISO_MAP
 from utils.logger import logger
 
-ISO639_1_BY_BASE_NAME = {
-    "english": "en",
-    "spanish": "es",
-    "german": "de",
-}
+ISO639_1_BY_NAME = {name: code for code, name in REMEDY_ISO_MAP.items()}
 
 DEFAULT_BICLEANER_COMMAND = "bicleaner-ai-classify"
 
 
-def iso639_1_from_dataset(code: str, dataset, iso_map: dict[str, str]) -> str | None:
+def iso639_1_from_dataset(
+    code: str, dataset, iso_map: dict[str, str] = ISO639_1_BY_NAME
+) -> str | None:
     name = dataset.language_codes.get(code)
     if not name:
         return None
-    base_name = name.split()[0].lower()
-    return iso_map.get(base_name)
+    return iso_map.get(name)
 
 
 def _model_for_iso(alpha2: str, model_ids: dict[str, str]) -> str:
@@ -70,6 +68,22 @@ def read_scores(path: Path) -> list[float]:
     return scores
 
 
+def _build_bicleaner_args(
+    input_path: Path, output_path: Path, model_id: str
+) -> list[str]:
+    return [
+        DEFAULT_BICLEANER_COMMAND,
+        "--scol",
+        "1",
+        "--tcol",
+        "2",
+        "--disable_hardrules",
+        str(input_path),
+        str(output_path),
+        model_id,
+    ]
+
+
 def run_bicleaner(
     input_path: Path,
     output_path: Path,
@@ -77,20 +91,28 @@ def run_bicleaner(
     src_iso: str | None,
     tgt_iso: str | None,
 ) -> None:
-    args = [DEFAULT_BICLEANER_COMMAND, "--scol", "1", "--tcol", "2"]
+    base_args = _build_bicleaner_args(input_path, output_path, model_id)
+
     if src_iso and tgt_iso:
-        args.extend(["-s", src_iso, "-t", tgt_iso])
-    else:
+        args = base_args[:4] + ["-s", src_iso, "-t", tgt_iso] + base_args[4:]
         logger.warning(
-            "[bicleaner-ai] Missing ISO 639-1 mapping for one or both languages; "
-            "running bicleaner-ai without -s/-t."
+            "[bicleaner-ai] Running with model '%s' (src_iso=%s, tgt_iso=%s)...",
+            model_id,
+            src_iso,
+            tgt_iso,
         )
-    args.append("--disable_hardrules")
-    args.extend([str(input_path), str(output_path), model_id])
+        try:
+            subprocess.run(args, check=True)
+            return
+        except subprocess.CalledProcessError:
+            logger.warning(
+                "[bicleaner-ai] Failed with -s %s -t %s; retrying without language flags.",
+                src_iso,
+                tgt_iso,
+            )
+
     logger.warning(
-        "[bicleaner-ai] Running bicleaner-ai with model '%s' (src_iso=%s, tgt_iso=%s)...",
+        "[bicleaner-ai] Running with model '%s' without -s/-t flags...",
         model_id,
-        src_iso,
-        tgt_iso,
     )
-    subprocess.run(args, check=True)
+    subprocess.run(base_args, check=True)

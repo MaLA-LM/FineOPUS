@@ -10,7 +10,6 @@ from dataset.mediator import get_dataset
 from models.language_support import CometLanguages
 from models.model_registry import resolve_model_spec, supported_model_keys
 from src.bicleaner_backend import (
-    ISO639_1_BY_BASE_NAME,
     iso639_1_from_dataset,
     read_scores,
     run_bicleaner,
@@ -72,12 +71,10 @@ def score_entry(
 ):
     examples = load_examples(entry, args, dataset)
 
-    src_iso = iso639_1_from_dataset(entry.src_lang, dataset, ISO639_1_BY_BASE_NAME)
-    tgt_iso = iso639_1_from_dataset(entry.tgt_lang, dataset, ISO639_1_BY_BASE_NAME)
+    src_iso = iso639_1_from_dataset(entry.src_lang, dataset)
+    tgt_iso = iso639_1_from_dataset(entry.tgt_lang, dataset)
     model_id = select_model_id(model_selector, src_iso, tgt_iso, BICLEANER_MODEL_IDS)
 
-    # Use scratch (output_base) for temp files instead of /tmp, which is
-    # too small on Mahti compute nodes and fills up across array tasks.
     tmp_parent = Path(args.output_base) / ".tmp_bicleaner"
     tmp_parent.mkdir(parents=True, exist_ok=True)
 

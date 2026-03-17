@@ -126,8 +126,6 @@ def score_entry(
         )
         remedy_tgt_lang = "en"
 
-    # Use scratch (output_base) for temp files instead of /tmp, which is
-    # too small on Mahti compute nodes and fills up across array tasks.
     tmp_parent = Path(args.output_base) / ".tmp_remedy"
     tmp_parent.mkdir(parents=True, exist_ok=True)
 
@@ -198,7 +196,7 @@ def main() -> None:
         return
 
     model_tag = sanitize_model_tag(model_key)
-    language_support = RemedyLanguages()
+    language_support = RemedyLanguages(dataset=dataset)
     cache_dir = Path(args.cache_dir)
     iteration_counter = count()
 

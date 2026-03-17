@@ -24,7 +24,7 @@ DEFAULT_LLM_MODEL = "Qwen/Qwen3-14B"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Score a dataset split with an LLM via vLLM + DSPy."
+        description="Score a dataset split with an LLM via vLLM"
     )
     add_common_scoring_args(
         parser,
