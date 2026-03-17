@@ -159,35 +159,20 @@ _SPECS: dict[Backend, dict[str, ModelSpec]] = {
 }
 
 
-def _normalize(name: str) -> str:
-    return name.strip().lower()
-
-
-def _build_lookup(specs: dict[str, ModelSpec]) -> dict[str, str]:
-    lookup: dict[str, str] = {}
-    for key, spec in specs.items():
-        lookup[_normalize(key)] = key
-        lookup[_normalize(spec.model_id)] = key
-        for alias in spec.aliases:
-            lookup[_normalize(alias)] = key
-    return lookup
-
-
-_LOOKUP: dict[Backend, dict[str, str]] = {
-    backend: _build_lookup(specs) for backend, specs in _SPECS.items()
-}
-
-
 def supported_model_keys(backend: Backend) -> list[str]:
     return sorted(_SPECS[backend].keys())
 
 
 def resolve_model_spec(name: str, backend: Backend) -> tuple[ModelSpec, str]:
-    normalized = _normalize(name)
+    normalized = name.strip().lower()
     if not normalized:
         raise ValueError("--model cannot be empty.")
-    key = _LOOKUP[backend].get(normalized)
-    if key is None:
-        supported = ", ".join(supported_model_keys(backend))
-        raise ValueError(f"Unknown {backend} model '{name}'. Supported: {supported}.")
-    return _SPECS[backend][key], key
+    for key, spec in _SPECS[backend].items():
+        if normalized in (
+            key,
+            spec.model_id.lower(),
+            *(a.lower() for a in spec.aliases),
+        ):
+            return spec, key
+    supported = ", ".join(supported_model_keys(backend))
+    raise ValueError(f"Unknown {backend} model '{name}'. Supported: {supported}.")

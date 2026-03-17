@@ -189,12 +189,10 @@ class RemedyLanguages(_BaseLanguageSupport):
             langcode_to_name=langcode_to_name,
         )
 
-    # REMEDY_ISO_MAP = { code: language_name, ... }
+    _LANGUAGE_TO_ISO = {name: code for code, name in REMEDY_ISO_MAP.items()}
+
     def _iso639_1_from_language(self, language: str) -> Optional[str]:
-        """Get ISO 639-1 code from a language code"""
+        """Get ISO 639-1 code from a language name"""
         if not language:
             return None
-        for code, name in REMEDY_ISO_MAP.items():
-            if name == language:
-                return code
-        return None
+        return self._LANGUAGE_TO_ISO.get(language)
