@@ -11,9 +11,10 @@ MODELS=(
 )
 
 DATASETS=(
-    "Zihao-Li/FLORES-200"
+    # "Zihao-Li/FLORES-200"
     # "Zihao-Li/NTREX-128"
-    # "Zihao-Li/BOUQuET"
+    # "Zihao-Li/BOUQuET_Sentence"
+    # "Zihao-Li/BOUQuET_Paragraph"
 )
 
 # Fixed parameters
