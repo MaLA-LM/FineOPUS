@@ -343,12 +343,12 @@ Each model has a language support class that tracks which of the 200+ FLORES lan
 | Class | Model | Languages Supported |
 |-------|-------|-------------------|
 | `CometLanguages` | COMET family | 102 languages |
-| `QwenLanguages` | Qwen3 family | 121 languages (includes Arabic dialects) |
+| `QwenLanguages` | Qwen3 family | 121 languages (most broad) |
 | `MetricX24Languages` | MetricX-24 | 103 languages |
-| `PrometheusLanguages` | M-Prometheus | 32 languages (most limited) |
-| `RemedyLanguages` | ReMedy | 141 languages (broadest coverage) |
+| `PrometheusLanguages` | M-Prometheus | 32 languages  |
+| `RemedyLanguages` | ReMedy | 36 languages  |
 
-**Note**: `ReMedy` uses `Gemma-2` as its backbone. I did not find an official list of supported languages, but the model was evaluated on about 140 language pairs. ReMedy uses ISO 3166-1 alpha-2 language codes in its interface, so I filtered the FLORES-200 language codes by keeping the languages that had corresponding alpha-2 codes and treated those as supported by ReMedy. I also patched the ReMedy framework to include these languages, because the original implementation only covered about 30 languages. This was necessary because the language codes are inserted directly into the quality estimation prompt within their framework.
+**Note**: `ReMedy` uses `Gemma-2` as its backbone. I did not find an official list of supported languages, but the model was evaluated on about 140 language pairs. ReMedy uses ISO 3166-1 alpha-2 language codes in its interface, so I filtered the FLORES-200 language codes by keeping the languages that had corresponding alpha-2 codes and treated those as supported by ReMedy. I also patched the ReMedy framework to include these languages, because the original implementation only covered about 38 languages. This was necessary because the language codes are inserted directly into the quality estimation prompt within their framework.
 
 **Special handling for ReMedy**: The `RemedyLanguages` class includes `_iso639_1_from_language()` which maps language names to ISO 639-1 codes using a dedicated `REMEDY_ISO_MAP` dictionary (147 entries). This is needed because the remedy-score CLI expects ISO codes, not full names.
 
