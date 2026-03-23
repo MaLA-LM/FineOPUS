@@ -1,28 +1,70 @@
 #!/usr/bin/env python3
 
+import argparse
 import pandas as pd
 import glob
 import os
 
+def load_dataset(results_dir, prefix):
+    csv_files = glob.glob(os.path.join(results_dir, f"{prefix}_*.csv"))
+    csv_files = [f for f in csv_files if not os.path.basename(f).startswith("best_model") 
+                 and not os.path.basename(f).startswith("model_summary")]
+    dfs = [pd.read_csv(f) for f in csv_files]
+    df = pd.concat(dfs, ignore_index=True)
+    df = df[df['source_lang'] != df['target_lang']]
+    return df
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--exclude-models', nargs='+', default=[],
+                        help='Model names (or substrings) to exclude. '
+                             'A model is excluded if any given substring appears in its name.')
+    args = parser.parse_args()
+
     results_dir = "/scratch/project_462000941/members/zihao/OPUS2410/02_parallelism_check/results"
-    csv_files = glob.glob(os.path.join(results_dir, "FLORES-200_*.csv"))
-    
-    print(f"Found {len(csv_files)} model result files:")
-    for f in csv_files:
-        print(f"  - {os.path.basename(f)}")
-    print()
-    
-    all_data = []
-    for csv_file in csv_files:
-        df = pd.read_csv(csv_file)
-        all_data.append(df)
-    
-    combined_df = pd.concat(all_data, ignore_index=True)
-    
+
+    flores_df = load_dataset(results_dir, "FLORES-200")
+    bouquet_df = load_dataset(results_dir, "BOUQuET_Sentence")
+
+    if args.exclude_models:
+        def should_exclude(model_name):
+            return any(pat in model_name for pat in args.exclude_models)
+        excluded_flores = flores_df['model'].apply(should_exclude)
+        excluded_bouquet = bouquet_df['model'].apply(should_exclude)
+        print(f"Excluding models matching: {args.exclude_models}")
+        print(f"  Removed {excluded_flores.sum()} rows from FLORES-200")
+        print(f"  Removed {excluded_bouquet.sum()} rows from BOUQuET_Sentence")
+        flores_df = flores_df[~excluded_flores]
+        bouquet_df = bouquet_df[~excluded_bouquet]
+        print(f"  Remaining models: {sorted(flores_df['model'].unique())}")
+        print()
+
+    print(f"FLORES-200:       {len(flores_df)} rows")
+    print(f"BOUQuET_Sentence: {len(bouquet_df)} rows")
+
+    flores_df['dataset'] = 'FLORES-200'
+    bouquet_df['dataset'] = 'BOUQuET_Sentence'
+
+    merge_keys = ['model', 'source_lang', 'target_lang']
+    both = pd.merge(flores_df[merge_keys + ['MRR', 'avg_rank']],
+                    bouquet_df[merge_keys + ['MRR', 'avg_rank']],
+                    on=merge_keys, suffixes=('_flores', '_bouquet'), how='outer')
+
+    both['MRR'] = both[['MRR_flores', 'MRR_bouquet']].mean(axis=1)
+    both['avg_rank'] = both[['avg_rank_flores', 'avg_rank_bouquet']].mean(axis=1)
+
+    n_both = both['MRR_flores'].notna() & both['MRR_bouquet'].notna()
+    n_flores_only = both['MRR_flores'].notna() & both['MRR_bouquet'].isna()
+    n_bouquet_only = both['MRR_flores'].isna() & both['MRR_bouquet'].notna()
+    print(f"\nLanguage-pair × model combinations:")
+    print(f"  In both datasets (averaged): {n_both.sum()}")
+    print(f"  FLORES-200 only:             {n_flores_only.sum()}")
+    print(f"  BOUQuET_Sentence only:       {n_bouquet_only.sum()}")
+    print(f"  Total:                       {len(both)}")
+
+    combined_df = both[merge_keys + ['MRR', 'avg_rank']].copy()
     combined_df['lang_pair'] = combined_df['source_lang'] + ' -> ' + combined_df['target_lang']
-    
-    combined_df = combined_df[combined_df['source_lang'] != combined_df['target_lang']]
     
     print("=" * 80)
     print("1. Average MRR for each model (sorted by MRR in descending order)")
@@ -70,7 +112,7 @@ def main():
         pct = wins / total_pairs * 100
         print(f"  {model:50s}: {wins:5d} / {total_pairs} ({pct:.1f}%)")
 
-    output_file = os.path.join(results_dir, "best_model_per_lang_pair.csv")
+    output_file = os.path.join(results_dir, "best_model_per_lang_pair_by_flores_bouquet_combined.csv")
     best_per_pair.to_csv(output_file, index=False)
     print(f"\nBest model for each language pair has been saved to: {output_file}")
     
@@ -110,7 +152,7 @@ def main():
     print(f"  Oracle avg MRR (without ensemble models): {oracle_mrr_without_ensemble:.6f}")
     print(f"  Improvement from ensemble:                {oracle_mrr_with_ensemble - oracle_mrr_without_ensemble:.6f} ({(oracle_mrr_with_ensemble - oracle_mrr_without_ensemble) / oracle_mrr_without_ensemble * 100:.2f}%)")
 
-    summary_file = os.path.join(results_dir, "model_summary.csv")
+    summary_file = os.path.join(results_dir, "model_summary_by_flores_bouquet_combined.csv")
     summary_df = pd.DataFrame({
         'model': model_avg_mrr.index,
         'avg_MRR': model_avg_mrr.values,
