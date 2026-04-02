@@ -254,10 +254,11 @@ def encode_texts(
 ) -> Optional[np.ndarray]:
     """Encode texts with batch processing for memory efficiency"""
     JINA_MODELS = {"jinaai/jina-embeddings-v3", "jinaai/jina-embeddings-v5-text-nano", "jinaai/jina-embeddings-v5-text-small"}
+    HARRIER_MODELS = {"microsoft/harrier-oss-v1-0.6b", "microsoft/harrier-oss-v1-270m"}
     try:
         if model_name == "google/embeddinggemma-300m" or model_name == "codefuse-ai/F2LLM-v2-0.6B":
             embeddings = model.encode_document(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
-        elif model_name == "microsoft/harrier-oss-v1-0.6b":
+        elif model_name in HARRIER_MODELS:
             embeddings = model.encode(texts, prompt_name="sts_query", batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
         elif model_name in JINA_MODELS:
             embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, task="text-matching", normalize_embeddings=normalize_embeddings)
