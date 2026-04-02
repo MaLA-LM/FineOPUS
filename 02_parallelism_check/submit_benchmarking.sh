@@ -9,6 +9,7 @@ MODELS=(
     # "intfloat/multilingual-e5-large"
     # "Alibaba-NLP/gte-multilingual-base"
     # "microsoft/harrier-oss-v1-0.6b"
+    # "codefuse-ai/F2LLM-v2-0.6B"
 )
 
 DATASETS=(
