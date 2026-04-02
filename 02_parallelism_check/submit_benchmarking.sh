@@ -8,6 +8,7 @@ MODELS=(
     # "Qwen/Qwen3-Embedding-0.6B"
     # "intfloat/multilingual-e5-large"
     # "Alibaba-NLP/gte-multilingual-base"
+    # "microsoft/harrier-oss-v1-0.6b"
 )
 
 DATASETS=(

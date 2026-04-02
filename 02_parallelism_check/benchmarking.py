@@ -253,17 +253,14 @@ def encode_texts(
     model: Any, model_name: str, texts: List[str], batch_size: int = 32, normalize_embeddings: bool = False
 ) -> Optional[np.ndarray]:
     """Encode texts with batch processing for memory efficiency"""
+    JINA_MODELS = {"jinaai/jina-embeddings-v3", "jinaai/jina-embeddings-v5-text-nano", "jinaai/jina-embeddings-v5-text-small"}
     try:
         if model_name == "google/embeddinggemma-300m":
             embeddings = model.encode_document(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
-        elif model_name == "jinaai/jina-embeddings-v3" or model_name == "jinaai/jina-embeddings-v5-text-nano" or model_name == "jinaai/jina-embeddings-v5-text-small":
-            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, task="text-matching", normalize_embeddings=normalize_embeddings)       
-        elif model_name == "Qwen/Qwen3-Embedding-0.6B":
-            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
-        elif model_name == "intfloat/multilingual-e5-large":
-            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)            
-        elif model_name == "Alibaba-NLP/gte-multilingual-base":
-            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
+        elif model_name == "microsoft/harrier-oss-v1-0.6b":
+            embeddings = model.encode(texts, prompt_name="sts_query", batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
+        elif model_name in JINA_MODELS:
+            embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, task="text-matching", normalize_embeddings=normalize_embeddings)
         else:
             embeddings = model.encode(texts, batch_size=batch_size, show_progress_bar=True, normalize_embeddings=normalize_embeddings)
 

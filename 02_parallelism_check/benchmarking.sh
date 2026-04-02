@@ -28,6 +28,9 @@ module load LUMI/25.09
 module load partition/G
 module load rocm/6.4.4
 source ../.venv/bin/activate
+# module use /appl/local/csc/modulefiles/
+# module load pytorch/2.5
+# source ../torch25_env/bin/activate
 
 # Show GPU info
 if command -v rocm-smi &> /dev/null; then
