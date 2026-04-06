@@ -7,10 +7,14 @@ MODELS=(
     # "google/embeddinggemma-300m"
     # "Qwen/Qwen3-Embedding-0.6B"
     # "intfloat/multilingual-e5-large"
+    # "intfloat/multilingual-e5-small"
     # "Alibaba-NLP/gte-multilingual-base"
     # "microsoft/harrier-oss-v1-0.6b"
     # "microsoft/harrier-oss-v1-270m"
     # "codefuse-ai/F2LLM-v2-0.6B"
+    # "codefuse-ai/F2LLM-v2-330M"
+    # "codefuse-ai/F2LLM-v2-160M"
+    # "codefuse-ai/F2LLM-v2-80M"
 )
 
 DATASETS=(
