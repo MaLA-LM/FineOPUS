@@ -7,12 +7,44 @@ import os
 
 def load_dataset(results_dir, prefix):
     csv_files = glob.glob(os.path.join(results_dir, f"{prefix}_*.csv"))
-    csv_files = [f for f in csv_files if not os.path.basename(f).startswith("best_model") 
+    csv_files = [f for f in csv_files if not os.path.basename(f).startswith("best_model")
                  and not os.path.basename(f).startswith("model_summary")]
     dfs = [pd.read_csv(f) for f in csv_files]
     df = pd.concat(dfs, ignore_index=True)
     df = df[df['source_lang'] != df['target_lang']]
     return df
+
+
+def parse_time_to_seconds(time_str):
+    """Convert time string 'HH:MM:SS' to total seconds."""
+    try:
+        parts = time_str.split(':')
+        if len(parts) == 3:
+            hours, minutes, seconds = int(parts[0]), int(parts[1]), int(parts[2])
+            return hours * 3600 + minutes * 60 + seconds
+        return float('inf')  # Invalid format -> slowest
+    except (ValueError, AttributeError):
+        return float('inf')  # Invalid format -> slowest
+
+
+# Model processing time mapping (time to process all language pairs)
+# Format: "HH:MM:SS" - lower is faster
+MODEL_TIME_SECONDS = {
+    'microsoft/harrier-oss-v1-0.6b': 61285,      # 17:01:25
+    'microsoft/harrier-oss-v1-270m': 40225,      # 11:10:25
+    'intfloat/multilingual-e5-large': 34124,     # 09:28:44
+    'intfloat/multilingual-e5-small': 16325,   # 04:32:05
+    'Alibaba-NLP/gte-multilingual-base': 18914,  # 05:15:14
+    'jinaai/jina-embeddings-v3': 87045,          # 24:10:45
+    'codefuse-ai/F2LLM-v2-0.6B': 60461,          # 16:47:41
+    'jinaai/jina-embeddings-v5-text-small': 130901,  # 36:21:41
+    'codefuse-ai/F2LLM-v2-330M': 35646,          # 09:54:06
+    'jinaai/jina-embeddings-v5-text-nano': 55902,  # 15:31:42
+    'codefuse-ai/F2LLM-v2-160M': 21806,          # 06:03:26
+    'codefuse-ai/F2LLM-v2-80M': 19634,           # 05:27:14
+    'google/embeddinggemma-300m': 62679,           # 17:24:39
+    'Qwen/Qwen3-Embedding-0.6B': 83035,           # 23:03:55
+}
 
 
 def main():
@@ -97,10 +129,16 @@ def main():
     # Add a column to indicate if model is ensemble (0 for non-ensemble, 1 for ensemble)
     # When MRR is the same, prefer non-ensemble models
     combined_df['is_ensemble'] = combined_df['model'].str.startswith('ensemble_').astype(int)
-    
-    # Sort by MRR descending, then by is_ensemble ascending (non-ensemble first)
-    combined_df_sorted = combined_df.sort_values(['lang_pair', 'MRR', 'is_ensemble'], 
-                                                  ascending=[True, False, True])
+
+    # Add processing time column (lower is faster)
+    combined_df['processing_time'] = combined_df['model'].map(MODEL_TIME_SECONDS).fillna(float('inf'))
+
+    # Sort by: lang_pair, MRR descending, is_ensemble ascending (non-ensemble first),
+    # then processing_time ascending (faster model first when tied on MRR)
+    combined_df_sorted = combined_df.sort_values(
+        ['lang_pair', 'MRR', 'is_ensemble', 'processing_time'],
+        ascending=[True, False, True, True]
+    )
     # Take the first (best) row for each language pair
     best_per_pair = combined_df_sorted.groupby('lang_pair').first().reset_index()
     best_per_pair = best_per_pair[['source_lang', 'target_lang', 'model', 'MRR']].sort_values('MRR', ascending=False)
@@ -112,7 +150,7 @@ def main():
         pct = wins / total_pairs * 100
         print(f"  {model:50s}: {wins:5d} / {total_pairs} ({pct:.1f}%)")
 
-    output_file = os.path.join(results_dir, "best_model_per_lang_pair_by_flores_bouquet_combined.csv")
+    output_file = os.path.join(results_dir, "best_model_per_lang_pair_by_flores_bouquet_combined_selected_models.csv")
     best_per_pair.to_csv(output_file, index=False)
     print(f"\nBest model for each language pair has been saved to: {output_file}")
     
@@ -152,12 +190,13 @@ def main():
     print(f"  Oracle avg MRR (without ensemble models): {oracle_mrr_without_ensemble:.6f}")
     print(f"  Improvement from ensemble:                {oracle_mrr_with_ensemble - oracle_mrr_without_ensemble:.6f} ({(oracle_mrr_with_ensemble - oracle_mrr_without_ensemble) / oracle_mrr_without_ensemble * 100:.2f}%)")
 
-    summary_file = os.path.join(results_dir, "model_summary_by_flores_bouquet_combined.csv")
+    summary_file = os.path.join(results_dir, "model_summary_by_flores_bouquet_combined_selected_models.csv")
     summary_df = pd.DataFrame({
         'model': model_avg_mrr.index,
         'avg_MRR': model_avg_mrr.values,
         'avg_rank': [model_avg_rank[m] for m in model_avg_mrr.index],
-        'num_best_pairs': [model_wins.get(m, 0) for m in model_avg_mrr.index]
+        'num_best_pairs': [model_wins.get(m, 0) for m in model_avg_mrr.index],
+        'time_seconds': [MODEL_TIME_SECONDS.get(m, float('inf')) for m in model_avg_mrr.index]
     })
     summary_df.to_csv(summary_file, index=False)
     print(f"\nModel summary has been saved to: {summary_file}")
