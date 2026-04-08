@@ -297,21 +297,41 @@ def main() -> None:
         logger.error(f"Model '{args.model}' not found in {args.model_pairs_json}")
         sys.exit(1)
 
-    all_pairs: List[str] = model_pairs[args.model]
-    logger.info(f"Total pairs for model: {len(all_pairs)}")
+    raw_entries = model_pairs[args.model]
+    # Support both old format (list of str) and new format (list of [pair, bytes])
+    pair_sizes: List[tuple] = [
+        (e[0], e[1]) if isinstance(e, list) else (e, 0)
+        for e in raw_entries
+    ]
+    logger.info(f"Total pairs for model: {len(pair_sizes)}")
+    total_bytes = sum(b for _, b in pair_sizes)
+    logger.info(f"Total data size: {total_bytes / 1e9:.2f} GB")
 
-    # Assign this chunk
-    chunk_size = math.ceil(len(all_pairs) / args.total_chunks)
-    start = args.chunk_id * chunk_size
-    end = min(start + chunk_size, len(all_pairs))
-    assigned_pairs = all_pairs[start:end]
+    # Greedy bin-packing: assign pairs to chunks minimising max chunk size.
+    # Sort by size descending, then repeatedly add each pair to the lightest
+    # chunk.  Deterministic (no randomness) → stable across retries.
+    import heapq
+    sorted_pairs = sorted(pair_sizes, key=lambda x: x[1], reverse=True)
+    heap: List[tuple] = [(0, i, []) for i in range(args.total_chunks)]
+    heapq.heapify(heap)
+    for pair, size in sorted_pairs:
+        load, chunk_id, members = heapq.heappop(heap)
+        heapq.heappush(heap, (load + size, chunk_id, members + [pair]))
+
+    chunks: List[List[str]] = [None] * args.total_chunks  # type: ignore[list-item]
+    for load, chunk_id, members in heap:
+        chunks[chunk_id] = members
+
+    assigned_pairs: List[str] = chunks[args.chunk_id] or []
 
     if not assigned_pairs:
         logger.info("No pairs assigned to this chunk. Exiting.")
         return
 
+    chunk_bytes = sum(b for p, b in pair_sizes if p in set(assigned_pairs))
     logger.info(
-        f"This job processes pairs [{start}:{end}] → {len(assigned_pairs)} pairs"
+        f"This chunk: {len(assigned_pairs)} pairs, "
+        f"{chunk_bytes / 1e9:.2f} GB"
     )
 
     input_dir = Path(args.input_dir)

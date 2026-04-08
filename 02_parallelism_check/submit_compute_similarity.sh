@@ -70,7 +70,9 @@ for model, pairs in data.items():
         continue
     n_pairs = len(pairs)
     n_chunks = math.ceil(n_pairs / $PAIRS_PER_CHUNK)
-    print(f"{model}|{n_pairs}|{n_chunks}")
+    # Support both old (str) and new ([pair, bytes]) formats for size display
+    total_gb = sum(e[1] if isinstance(e, list) else 0 for e in pairs) / 1e9
+    print(f"{model}|{n_pairs}|{n_chunks}|{total_gb:.1f}")
 PYEOF
 }
 
@@ -79,10 +81,10 @@ _py_list_models
 echo ""
 
 # Submit
-while IFS='|' read -r model n_pairs n_chunks; do
+while IFS='|' read -r model n_pairs n_chunks total_gb; do
     last_idx=$((n_chunks - 1))
     echo ">>> Model: $model"
-    echo "    Pairs: $n_pairs  |  Chunks: $n_chunks  |  Array: 0-${last_idx}"
+    echo "    Pairs: $n_pairs  |  Total: ${total_gb} GB  |  Chunks: $n_chunks  |  Array: 0-${last_idx}"
 
     SUBMIT_CMD="sbatch \
         --array=0-${last_idx} \
