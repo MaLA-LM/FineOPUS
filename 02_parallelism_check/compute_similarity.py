@@ -31,7 +31,6 @@ from pathlib import Path
 from typing import Any, List
 
 import numpy as np
-import pandas as pd
 import torch
 
 logging.basicConfig(
@@ -159,50 +158,99 @@ def process_shard(
     batch_size: int,
     lang_pair: str,
 ) -> bool:
-    """Process a single shard parquet file. Returns True on success."""
+    """Process a single shard using two-pass streaming to keep RAM usage low.
+
+    Pass 1 – reads only source_text / target_text in batches, encodes them,
+              and collects similarity scores (N float32 values, tiny).
+    Pass 2 – streams all columns in batches, appends the similarity column,
+              and writes the output parquet without ever loading the full shard.
+
+    This allows arbitrarily large shards to be processed within a fixed RAM
+    budget (controlled by READ_ROWS below).
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
     if is_already_processed(shard_output):
         logger.info(f"  [{shard_input.name}] Already processed. Skipping.")
         return True
 
+    # Validate schema upfront (fast – only reads file footer metadata)
     try:
-        df = pd.read_parquet(shard_input)
+        schema = pq.read_schema(shard_input)
     except Exception as e:
-        logger.error(f"  [{shard_input.name}] Failed to read: {e}")
+        logger.error(f"  [{shard_input.name}] Cannot read schema: {e}")
         return False
 
-    if "source_text" not in df.columns or "target_text" not in df.columns:
+    if "source_text" not in schema.names or "target_text" not in schema.names:
         logger.error(f"  [{shard_input.name}] Missing source_text/target_text columns. Skipping.")
         return False
 
-    n_rows = len(df)
-    logger.info(f"  [{shard_input.name}] Encoding {n_rows:,} rows ...")
+    # Rows read per streaming batch.  Each batch holds at most
+    # READ_ROWS × avg_text_size in RAM while encoding.
+    READ_ROWS = batch_size * 64  # e.g. 64 × 64 = 4096 rows per batch
 
-    source_texts = df["source_text"].fillna("").tolist()
-    target_texts = df["target_text"].fillna("").tolist()
-
+    # ------------------------------------------------------------------
+    # Pass 1: stream text columns only → encode → collect similarities
+    # ------------------------------------------------------------------
+    logger.info(f"  [{shard_input.name}] Pass 1: encoding ...")
+    all_sims: List[np.ndarray] = []
+    total_rows = 0
     try:
-        src_emb = encode_texts(model, model_name, source_texts, batch_size=batch_size, normalize=True)
-        tgt_emb = encode_texts(model, model_name, target_texts, batch_size=batch_size, normalize=True)
+        for batch in pq.ParquetFile(shard_input).iter_batches(
+            batch_size=READ_ROWS, columns=["source_text", "target_text"]
+        ):
+            src = [s or "" for s in batch.column("source_text").to_pylist()]
+            tgt = [t or "" for t in batch.column("target_text").to_pylist()]
+            src_emb = encode_texts(model, model_name, src, batch_size=batch_size, normalize=True)
+            tgt_emb = encode_texts(model, model_name, tgt, batch_size=batch_size, normalize=True)
+            sims = cosine_similarity_rowwise(src_emb, tgt_emb)
+            all_sims.append(sims)
+            total_rows += len(sims)
+            del src_emb, tgt_emb
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     except Exception as e:
         logger.error(f"  [{shard_input.name}] Encoding failed: {e}")
         return False
 
-    similarities = cosine_similarity_rowwise(src_emb, tgt_emb)
-    df["similarity_score"] = similarities
-
-    shard_output.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        df.to_parquet(shard_output, index=False)
-    except Exception as e:
-        logger.error(f"  [{shard_input.name}] Failed to write: {e}")
-        return False
-
+    similarities = np.concatenate(all_sims).astype(np.float32)
     logger.info(
-        f"  [{shard_input.name}] Done. mean={similarities.mean():.4f}, "
-        f"min={similarities.min():.4f}, max={similarities.max():.4f}"
+        f"  [{shard_input.name}] Encoded {total_rows:,} rows. "
+        f"mean={similarities.mean():.4f}, min={similarities.min():.4f}, max={similarities.max():.4f}"
     )
 
-    del src_emb, tgt_emb
+    # ------------------------------------------------------------------
+    # Pass 2: stream all columns → append similarity column → write
+    # ------------------------------------------------------------------
+    logger.info(f"  [{shard_input.name}] Pass 2: writing output ...")
+    shard_output.parent.mkdir(parents=True, exist_ok=True)
+
+    writer = None
+    row_idx = 0
+    try:
+        for batch in pq.ParquetFile(shard_input).iter_batches(batch_size=50_000):
+            n = len(batch)
+            score_col = pa.array(
+                similarities[row_idx : row_idx + n], type=pa.float32()
+            )
+            row_idx += n
+            new_batch = batch.append_column(
+                pa.field("similarity_score", pa.float32()), score_col
+            )
+            if writer is None:
+                writer = pq.ParquetWriter(shard_output, new_batch.schema)
+            writer.write_batch(new_batch)
+    except Exception as e:
+        logger.error(f"  [{shard_input.name}] Write failed: {e}")
+        if shard_output.exists():
+            shard_output.unlink()  # remove incomplete file so next run retries
+        return False
+    finally:
+        if writer:
+            writer.close()
+
+    del similarities
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
@@ -276,8 +324,8 @@ def main() -> None:
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=128,
-        help="Batch size for model encoding (default: 128)",
+        default=64,
+        help="Batch size for model encoding (default: 64)",
     )
     args = parser.parse_args()
 

@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --gpus-per-node=1
-#SBATCH --mem=64G
+#SBATCH --mem=128G
 #SBATCH --time=3-00:00:00
 #SBATCH --account=project_462000964
 
@@ -17,7 +17,7 @@
 #   INPUT_DIR      - root dir of FineOPUS-Filtered-Stage2
 #   OUTPUT_DIR     - root dir for scored output parquets
 #   MODEL_PAIRS_JSON - path to model_to_language_pairs.json
-#   BATCH_SIZE     - encoding batch size (default: 128)
+#   BATCH_SIZE     - encoding batch size (default: 64)
 #
 # The SLURM array index ($SLURM_ARRAY_TASK_ID) is used as chunk_id.
 # ---------------------------------------------------------------------------
@@ -32,7 +32,7 @@ echo "Total chunks  : $TOTAL_CHUNKS"
 INPUT_DIR="${INPUT_DIR:-/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2}"
 OUTPUT_DIR="${OUTPUT_DIR:-/scratch/project_462001069/FineOPUS/intermediate/FineOPUS-Filtered-Stage2-Scored}"
 MODEL_PAIRS_JSON="${MODEL_PAIRS_JSON:-/scratch/project_462000941/members/zihao/OPUS2410/02_parallelism_check/model_to_language_pairs.json}"
-BATCH_SIZE="${BATCH_SIZE:-128}"
+BATCH_SIZE="${BATCH_SIZE:-64}"
 
 # Activate environment
 module purge

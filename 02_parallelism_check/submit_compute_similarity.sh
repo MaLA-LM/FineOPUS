@@ -22,7 +22,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MODEL_PAIRS_JSON="${MODEL_PAIRS_JSON:-$SCRIPT_DIR/model_to_language_pairs.json}"
 INPUT_DIR="${INPUT_DIR:-/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2}"
 OUTPUT_DIR="${OUTPUT_DIR:-/scratch/project_462001069/FineOPUS/intermediate/FineOPUS-Filtered-Stage2-Scored}"
-BATCH_SIZE="${BATCH_SIZE:-128}"
+BATCH_SIZE="${BATCH_SIZE:-64}"
 LOG_DIR="$REPO_ROOT/logs/similarity_scoring"
 # ----------------------------------------------------------------------------
 
