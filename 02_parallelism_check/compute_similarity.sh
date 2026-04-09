@@ -35,11 +35,17 @@ MODEL_PAIRS_JSON="${MODEL_PAIRS_JSON:-/scratch/project_462000941/members/zihao/O
 BATCH_SIZE="${BATCH_SIZE:-64}"
 
 # Activate environment
-module purge
-module load LUMI/25.09
-module load partition/G
-module load rocm/6.4.4
-source /scratch/project_462000941/members/zihao/OPUS2410/.venv/bin/activate
+if [[ "$MODEL" == "Alibaba-NLP/gte-multilingual-base" || "$MODEL" == "jinaai/jina-embeddings-v3" ]]; then
+    module use /appl/local/csc/modulefiles/
+    module load pytorch/2.5
+    source /scratch/project_462000941/members/zihao/OPUS2410/torch25_env/bin/activate
+else
+    module purge
+    module load LUMI/25.09
+    module load partition/G
+    module load rocm/6.4.4
+    source /scratch/project_462000941/members/zihao/OPUS2410/.venv/bin/activate
+fi
 
 # Show GPU info
 if command -v rocm-smi &> /dev/null; then

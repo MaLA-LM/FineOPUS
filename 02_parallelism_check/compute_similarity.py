@@ -186,6 +186,12 @@ def process_shard(
         logger.error(f"  [{shard_input.name}] Missing source_text/target_text columns. Skipping.")
         return False
 
+    # Read total row count from file footer metadata (no row data loaded)
+    try:
+        total_rows_expected = pq.read_metadata(shard_input).num_rows
+    except Exception:
+        total_rows_expected = None
+
     # Rows read per streaming batch.  Each batch holds at most
     # READ_ROWS × avg_text_size in RAM while encoding.
     READ_ROWS = batch_size * 64  # e.g. 64 × 64 = 4096 rows per batch
@@ -193,7 +199,8 @@ def process_shard(
     # ------------------------------------------------------------------
     # Pass 1: stream text columns only → encode → collect similarities
     # ------------------------------------------------------------------
-    logger.info(f"  [{shard_input.name}] Pass 1: encoding ...")
+    total_str = f"{total_rows_expected:,}" if total_rows_expected else "?"
+    logger.info(f"  [{shard_input.name}] Pass 1: encoding {total_str} rows ...")
     all_sims: List[np.ndarray] = []
     total_rows = 0
     try:
@@ -210,6 +217,13 @@ def process_shard(
             del src_emb, tgt_emb
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            if total_rows_expected:
+                pct = total_rows / total_rows_expected * 100
+                logger.info(
+                    f"  [{shard_input.name}] Pass 1: {total_rows:,}/{total_rows_expected:,} rows ({pct:.1f}%)"
+                )
+            else:
+                logger.info(f"  [{shard_input.name}] Pass 1: {total_rows:,} rows encoded")
     except Exception as e:
         logger.error(f"  [{shard_input.name}] Encoding failed: {e}")
         return False
