@@ -253,7 +253,7 @@ def process_shard(
                 pa.field("similarity_score", pa.float32()), score_col
             )
             if writer is None:
-                writer = pq.ParquetWriter(shard_output, new_batch.schema)
+                writer = pq.ParquetWriter(shard_output, new_batch.schema, compression="zstd")
             writer.write_batch(new_batch)
     except Exception as e:
         logger.error(f"  [{shard_input.name}] Write failed: {e}")

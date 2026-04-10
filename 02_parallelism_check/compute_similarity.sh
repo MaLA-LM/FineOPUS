@@ -29,7 +29,7 @@ echo "Model         : $MODEL"
 echo "Total chunks  : $TOTAL_CHUNKS"
 
 # Defaults
-INPUT_DIR="${INPUT_DIR:-/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2}"
+INPUT_DIR="${INPUT_DIR:-/scratch/project_462001069/FineOPUS/intermediate/FineOPUS-Filtered-Stage2-Split}"
 OUTPUT_DIR="${OUTPUT_DIR:-/scratch/project_462001069/FineOPUS/intermediate/FineOPUS-Filtered-Stage2-Scored}"
 MODEL_PAIRS_JSON="${MODEL_PAIRS_JSON:-/scratch/project_462000941/members/zihao/OPUS2410/02_parallelism_check/model_to_language_pairs.json}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
