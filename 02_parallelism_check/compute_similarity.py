@@ -3,28 +3,23 @@
 """
 Large-scale per-row embedding similarity scoring for FineOPUS-Filtered-Stage2.
 
-For each language pair assigned to this job:
-  - Read {input_dir}/{lang_pair}/{lang_pair}_shard_0.parquet
-  - Encode source_text and target_text with the assigned model
-  - Compute per-row cosine similarity
-  - Write output parquet to {output_dir}/{lang_pair}/{lang_pair}_shard_0.parquet
-    with an added 'similarity_score' column
+Reads a manifest JSON produced by submit_compute_similarity.sh, selects the
+parquet shards assigned to this array task (chunk_id), and for each shard:
+  - Encodes source_text and target_text with the assigned model
+  - Computes per-row cosine similarity
+  - Writes output parquet with an added 'similarity_score' column
 
 Usage:
   python compute_similarity.py \
     --model microsoft/harrier-oss-v1-0.6b \
+    --manifest_file /path/to/manifests/model_name.json \
     --chunk_id 0 \
-    --total_chunks 625 \
-    --input_dir /scratch/.../FineOPUS-Filtered-Stage2 \
-    --output_dir /scratch/.../FineOPUS-Filtered-Stage2-Scored \
-    --model_pairs_json /path/to/model_to_language_pairs.json \
     --batch_size 64
 """
 
 import argparse
 import json
 import logging
-import math
 import os
 import sys
 from pathlib import Path
@@ -121,17 +116,8 @@ def cosine_similarity_rowwise(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
-# Per-pair processing
+# Per-shard processing
 # ---------------------------------------------------------------------------
-
-def get_shard_paths(base_dir: Path, lang_pair: str) -> List[Path]:
-    """Return all shard parquet files for a language pair, sorted by shard index."""
-    pair_dir = base_dir / lang_pair
-    if not pair_dir.exists():
-        return []
-    shards = sorted(pair_dir.glob(f"{lang_pair}_shard_*.parquet"))
-    return shards
-
 
 def is_already_processed(output_path: Path) -> bool:
     """Return True if the output parquet exists and has 'similarity_score' column.
@@ -271,34 +257,6 @@ def process_shard(
     return True
 
 
-def process_pair(
-    lang_pair: str,
-    model: Any,
-    model_name: str,
-    input_dir: Path,
-    output_dir: Path,
-    batch_size: int,
-) -> bool:
-    """
-    Process all shards for a single language pair.
-    Returns True if all shards succeeded (or were already done), False otherwise.
-    """
-    input_shards = get_shard_paths(input_dir, lang_pair)
-    if not input_shards:
-        logger.warning(f"[{lang_pair}] No shards found in {input_dir / lang_pair}. Skipping.")
-        return False
-
-    logger.info(f"[{lang_pair}] Found {len(input_shards)} shard(s).")
-    all_ok = True
-    for shard_in in input_shards:
-        shard_out = output_dir / lang_pair / shard_in.name
-        ok = process_shard(shard_in, shard_out, model, model_name, batch_size, lang_pair)
-        if not ok:
-            all_ok = False
-
-    return all_ok
-
-
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -309,31 +267,15 @@ def main() -> None:
     )
     parser.add_argument("--model", required=True, help="Model name/path")
     parser.add_argument(
-        "--model_pairs_json",
+        "--manifest_file",
         required=True,
-        help="Path to model_to_language_pairs.json",
-    )
-    parser.add_argument(
-        "--input_dir",
-        required=True,
-        help="Root directory of FineOPUS-Filtered-Stage2",
-    )
-    parser.add_argument(
-        "--output_dir",
-        required=True,
-        help="Root directory for output parquets with similarity scores",
+        help="Path to the per-model manifest JSON produced by submit_compute_similarity.sh",
     )
     parser.add_argument(
         "--chunk_id",
         type=int,
         default=0,
-        help="0-indexed chunk assigned to this job (default: 0)",
-    )
-    parser.add_argument(
-        "--total_chunks",
-        type=int,
-        default=1,
-        help="Total number of chunks the pairs are split into (default: 1)",
+        help="0-indexed chunk (SLURM array task ID) to process (default: 0)",
     )
     parser.add_argument(
         "--batch_size",
@@ -344,71 +286,44 @@ def main() -> None:
     args = parser.parse_args()
 
     logger.info("=" * 70)
-    logger.info(f"Model          : {args.model}")
-    logger.info(f"Chunk          : {args.chunk_id} / {args.total_chunks}")
-    logger.info(f"Input dir      : {args.input_dir}")
-    logger.info(f"Output dir     : {args.output_dir}")
-    logger.info(f"Batch size     : {args.batch_size}")
+    logger.info(f"Model         : {args.model}")
+    logger.info(f"Manifest file : {args.manifest_file}")
+    logger.info(f"Chunk ID      : {args.chunk_id}")
+    logger.info(f"Batch size    : {args.batch_size}")
     logger.info("=" * 70)
 
-    # Load pairs assigned to this model
-    with open(args.model_pairs_json) as f:
-        model_pairs: dict = json.load(f)
+    with open(args.manifest_file) as f:
+        manifest = json.load(f)
 
-    if args.model not in model_pairs:
-        logger.error(f"Model '{args.model}' not found in {args.model_pairs_json}")
-        sys.exit(1)
-
-    raw_entries = model_pairs[args.model]
-    # Support both old format (list of str) and new format (list of [pair, bytes])
-    pair_sizes: List[tuple] = [
-        (e[0], e[1]) if isinstance(e, list) else (e, 0)
-        for e in raw_entries
-    ]
-    logger.info(f"Total pairs for model: {len(pair_sizes)}")
-    total_bytes = sum(b for _, b in pair_sizes)
-    logger.info(f"Total data size: {total_bytes / 1e9:.2f} GB")
-
-    # Greedy bin-packing: assign pairs to chunks minimising max chunk size.
-    # Sort by size descending, then repeatedly add each pair to the lightest
-    # chunk.  Deterministic (no randomness) → stable across retries.
-    import heapq
-    sorted_pairs = sorted(pair_sizes, key=lambda x: x[1], reverse=True)
-    heap: List[tuple] = [(0, i, []) for i in range(args.total_chunks)]
-    heapq.heapify(heap)
-    for pair, size in sorted_pairs:
-        load, chunk_id, members = heapq.heappop(heap)
-        heapq.heappush(heap, (load + size, chunk_id, members + [pair]))
-
-    chunks: List[List[str]] = [None] * args.total_chunks  # type: ignore[list-item]
-    for load, chunk_id, members in heap:
-        chunks[chunk_id] = members
-
-    assigned_pairs: List[str] = chunks[args.chunk_id] or []
-
-    if not assigned_pairs:
-        logger.info("No pairs assigned to this chunk. Exiting.")
+    chunks = manifest["chunks"]
+    if args.chunk_id >= len(chunks):
+        logger.info(
+            f"chunk_id {args.chunk_id} >= total chunks {len(chunks)}. Nothing to do."
+        )
         return
 
-    chunk_bytes = sum(b for p, b in pair_sizes if p in set(assigned_pairs))
-    logger.info(
-        f"This chunk: {len(assigned_pairs)} pairs, "
-        f"{chunk_bytes / 1e9:.2f} GB"
-    )
+    assigned: List[dict] = chunks[args.chunk_id]
+    if not assigned:
+        logger.info("No parquets assigned to this chunk. Exiting.")
+        return
 
-    input_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    total_bytes = sum(e.get("size", 0) for e in assigned)
+    logger.info(
+        f"Chunk {args.chunk_id}: {len(assigned)} parquet(s), "
+        f"{total_bytes / 1e9:.2f} GB"
+    )
 
     device = setup_environment()
     model = load_model(args.model, device)
 
     success, failed = 0, 0
-    for i, lang_pair in enumerate(assigned_pairs):
-        logger.info(f"--- [{i+1}/{len(assigned_pairs)}] {lang_pair} ---")
-        ok = process_pair(
-            lang_pair, model, args.model, input_dir, output_dir,
-            batch_size=args.batch_size,
+    for i, entry in enumerate(assigned):
+        input_path = Path(entry["input_path"])
+        output_path = Path(entry["output_path"])
+        lang_pair = entry["lang_pair"]
+        logger.info(f"--- [{i+1}/{len(assigned)}] {lang_pair}/{input_path.name} ---")
+        ok = process_shard(
+            input_path, output_path, model, args.model, args.batch_size, lang_pair
         )
         if ok:
             success += 1
@@ -417,9 +332,9 @@ def main() -> None:
 
     logger.info("=" * 70)
     logger.info("SUMMARY")
-    logger.info(f"  Pairs assigned  : {len(assigned_pairs)}")
-    logger.info(f"  Pairs succeeded : {success}")
-    logger.info(f"  Pairs failed    : {failed}")
+    logger.info(f"  Parquets assigned  : {len(assigned)}")
+    logger.info(f"  Parquets succeeded : {success}")
+    logger.info(f"  Parquets failed    : {failed}")
     logger.info("=" * 70)
 
 

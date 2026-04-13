@@ -11,30 +11,25 @@
 #SBATCH --account=project_462000964
 
 # ---------------------------------------------------------------------------
-# Required environment variables (set via submit_all.sh):
-#   MODEL          - HuggingFace model name
-#   TOTAL_CHUNKS   - total number of array jobs for this model
-#   INPUT_DIR      - root dir of FineOPUS-Filtered-Stage2
-#   OUTPUT_DIR     - root dir for scored output parquets
-#   MODEL_PAIRS_JSON - path to model_to_language_pairs.json
+# Required environment variables (set via submit_compute_similarity.sh):
+#   MODEL          - HuggingFace model name (used for environment activation)
+#   MANIFEST_FILE  - path to the per-model manifest JSON produced by submit script
 #   BATCH_SIZE     - encoding batch size (default: 64)
 #
-# The SLURM array index ($SLURM_ARRAY_TASK_ID) is used as chunk_id.
+# The SLURM array index ($SLURM_ARRAY_TASK_ID) selects which chunk of parquet
+# files to process from the manifest.
 # ---------------------------------------------------------------------------
 
 start_time=$(date +%s)
-echo "Job started at: $(date)"
-echo "Array task ID : $SLURM_ARRAY_TASK_ID"
-echo "Model         : $MODEL"
-echo "Total chunks  : $TOTAL_CHUNKS"
+echo "Job started at    : $(date)"
+echo "Array task ID     : $SLURM_ARRAY_TASK_ID"
+echo "Model             : $MODEL"
+echo "Manifest file     : $MANIFEST_FILE"
 
 # Defaults
-INPUT_DIR="${INPUT_DIR:-/scratch/project_462001069/FineOPUS/intermediate/FineOPUS-Filtered-Stage2-Split}"
-OUTPUT_DIR="${OUTPUT_DIR:-/scratch/project_462001069/FineOPUS/intermediate/FineOPUS-Filtered-Stage2-Scored}"
-MODEL_PAIRS_JSON="${MODEL_PAIRS_JSON:-/scratch/project_462000941/members/zihao/OPUS2410/02_parallelism_check/model_to_language_pairs.json}"
 BATCH_SIZE="${BATCH_SIZE:-64}"
 
-# Activate environment
+# Activate environment based on model
 if [[ "$MODEL" == "Alibaba-NLP/gte-multilingual-base" || "$MODEL" == "jinaai/jina-embeddings-v3" ]]; then
     module use /appl/local/csc/modulefiles/
     module load pytorch/2.5
@@ -56,14 +51,11 @@ fi
 
 srun python /scratch/project_462000941/members/zihao/OPUS2410/02_parallelism_check/compute_similarity.py \
     --model "$MODEL" \
-    --model_pairs_json "$MODEL_PAIRS_JSON" \
-    --input_dir "$INPUT_DIR" \
-    --output_dir "$OUTPUT_DIR" \
+    --manifest_file "$MANIFEST_FILE" \
     --chunk_id "$SLURM_ARRAY_TASK_ID" \
-    --total_chunks "$TOTAL_CHUNKS" \
     --batch_size "$BATCH_SIZE"
 
 end_time=$(date +%s)
 duration=$((end_time - start_time))
-echo "Job ended at: $(date)"
-echo "Duration: $(date -u -d @${duration} +%T)"
+echo "Job ended at  : $(date)"
+echo "Duration      : $(date -u -d @${duration} +%T)"

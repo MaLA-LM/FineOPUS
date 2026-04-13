@@ -201,7 +201,7 @@ cython_debug/
 .github
 
 
-# Logs
+# Misc
 /logs/*
 *.jsonl
 /01_language_reID/fineopus-original-filelists/*
@@ -216,5 +216,6 @@ cython_debug/
 /02_parallelism_check/results
 /02_parallelism_check/results_embedding_norm
 /02_parallelism_check/results_multi
+/02_parallelism_check/manifests
 /*/*/hostfiles/*
 models/*
