@@ -126,7 +126,10 @@ def is_already_processed(output_path: Path) -> bool:
     (no row data loaded), so this check is fast even for large shards.
     A corrupt/partial file will raise an exception and return False, triggering reprocessing.
     """
-    if not output_path.exists():
+    try:
+        if not output_path.exists():
+            return False
+    except PermissionError:
         return False
     try:
         import pyarrow.parquet as pq
