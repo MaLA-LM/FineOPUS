@@ -7,7 +7,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from create_spreadsheet.discover import CheckpointFile, discover_checkpoint_files
+from stand_alone_modules.create_spreadsheet.discover import (
+    CheckpointFile,
+    discover_checkpoint_files,
+)
 
 SUMMARY_ROW_TYPE = "summary"
 BASE_COLUMNS = [

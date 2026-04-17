@@ -48,12 +48,14 @@ _SPECS: dict[Backend, dict[str, ModelSpec]] = {
         "metricx24": ModelSpec(
             key="metricx24",
             backend="metricx",
-            model_id="google/metricx-24-hybrid-xl-v2p6",
+            model_id="google/metricx-24-hybrid-xl-v2p6-bfloat16",
             aliases=(
                 "metricx",
                 "metricx-24",
                 "metricx-24-hybrid-xl-v2p6",
+                "metricx-24-hybrid-xl-v2p6-bfloat16",
                 "google/metricx-24-hybrid-xl-v2p6",
+                "google/metricx-24-hybrid-xl-v2p6-bfloat16",
             ),
             tokenizer_id="google/mt5-xl",
             max_length=1536,
@@ -81,6 +83,26 @@ _SPECS: dict[Backend, dict[str, ModelSpec]] = {
                 "hosted_vllm/qwen/qwen3-8b",
             ),
         ),
+        "qwen3-4b-awq": ModelSpec(
+            key="qwen3-4b-awq",
+            backend="llm",
+            model_id="Qwen/Qwen3-4B-AWQ",
+            aliases=(
+                "qwen/qwen3-4b-awq",
+                "hosted_vllm/qwen3-4b-awq",
+                "hosted_vllm/qwen/qwen3-4b-awq",
+            ),
+        ),
+        "qwen3-4b-fp8": ModelSpec(
+            key="qwen3-4b-fp8",
+            backend="llm",
+            model_id="Qwen/Qwen3-4B-FP8",
+            aliases=(
+                "qwen/qwen3-4b-fp8",
+                "hosted_vllm/qwen3-4b-fp8",
+                "hosted_vllm/qwen/qwen3-4b-fp8",
+            ),
+        ),
         "qwen3-4b-instruct-2507": ModelSpec(
             key="qwen3-4b-instruct-2507",
             backend="llm",
@@ -90,6 +112,36 @@ _SPECS: dict[Backend, dict[str, ModelSpec]] = {
                 "qwen/qwen3-4b-instruct-2507",
                 "hosted_vllm/qwen3-4b-instruct-2507",
                 "hosted_vllm/qwen/qwen3-4b-instruct-2507",
+            ),
+        ),
+        "qwen3-4b-instruct-2507-fp8": ModelSpec(
+            key="qwen3-4b-instruct-2507-fp8",
+            backend="llm",
+            model_id="Qwen/Qwen3-4B-Instruct-2507-FP8",
+            aliases=(
+                "qwen/qwen3-4b-instruct-2507-fp8",
+                "hosted_vllm/qwen3-4b-instruct-2507-fp8",
+                "hosted_vllm/qwen/qwen3-4b-instruct-2507-fp8",
+            ),
+        ),
+        "qwen3-1.7b": ModelSpec(
+            key="qwen3-1.7b",
+            backend="llm",
+            model_id="Qwen/Qwen3-1.7B",
+            aliases=(
+                "qwen/qwen3-1.7b",
+                "hosted_vllm/qwen3-1.7b",
+                "hosted_vllm/qwen/qwen3-1.7b",
+            ),
+        ),
+        "qwen3-0.6b": ModelSpec(
+            key="qwen3-0.6b",
+            backend="llm",
+            model_id="Qwen/Qwen3-0.6B",
+            aliases=(
+                "qwen/qwen3-0.6b",
+                "hosted_vllm/qwen3-0.6b",
+                "hosted_vllm/qwen/qwen3-0.6b",
             ),
         ),
         "m-prometheus-7b": ModelSpec(
@@ -151,6 +203,7 @@ _SPECS: dict[Backend, dict[str, ModelSpec]] = {
             aliases=(
                 "remedy",
                 "remedy-9b-22",
+                "shaomutan_remedy-9b-22",
                 "shaomutan/remedy-9b-22",
                 "ShaomuTan/ReMedy-9B-22",
             ),

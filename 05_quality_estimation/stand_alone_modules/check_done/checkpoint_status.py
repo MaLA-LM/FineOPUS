@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from dataset.manifest import ManifestEntry
+from execution.flores_array.manifest import ManifestEntry
 from dataset.mediator import get_dataset
 
 SplitShardKey = tuple[str, int]

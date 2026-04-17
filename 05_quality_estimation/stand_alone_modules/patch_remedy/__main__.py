@@ -1,3 +1,5 @@
-from .patch import run
+from stand_alone_modules.patch_remedy.cli import main
 
-run()
+
+if __name__ == "__main__":
+    main()

@@ -3,8 +3,10 @@
 __all__ = [
     "DimScores",
     "QEResult",
+    "BaseLanguageSupport",
     "CometLanguages",
     "QwenLanguages",
+    "PrometheusLanguages",
     "MetricX24Languages",
     "RemedyLanguages",
     "ModelSpec",
@@ -20,21 +22,27 @@ def __getattr__(name: str):
 
         return {"DimScores": DimScores, "QEResult": QEResult}[name]
     if name in {
+        "BaseLanguageSupport",
         "CometLanguages",
         "QwenLanguages",
+        "PrometheusLanguages",
         "MetricX24Languages",
         "RemedyLanguages",
     }:
         from models.language_support import (
+            BaseLanguageSupport,
             CometLanguages,
             MetricX24Languages,
+            PrometheusLanguages,
             QwenLanguages,
             RemedyLanguages,
         )
 
         return {
+            "BaseLanguageSupport": BaseLanguageSupport,
             "CometLanguages": CometLanguages,
             "QwenLanguages": QwenLanguages,
+            "PrometheusLanguages": PrometheusLanguages,
             "MetricX24Languages": MetricX24Languages,
             "RemedyLanguages": RemedyLanguages,
         }[name]

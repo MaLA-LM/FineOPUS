@@ -30,6 +30,14 @@ class QEResult(BaseModel):
     overall_0to100: StrictInt = Field(ge=0, le=100)
 
 
+class QESimpleResult(BaseModel):
+    """QE result with only the overall score (simple prompt)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    overall_0to100: StrictInt = Field(ge=0, le=100)
+
+
 class QEBatchItem(BaseModel):
     """Single item inside a batched QE response."""
 

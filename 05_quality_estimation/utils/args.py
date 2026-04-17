@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 
 from dataset.mediator import DEFAULT_DATASET_ID
+from execution import get_executor, list_executor_names
 
 _MISSING = object()
 
@@ -30,6 +32,12 @@ def add_common_scoring_args(
         required=True,
         help="Base output directory for stage outputs and compacted outputs.",
     )
+    parser.add_argument(
+        "--execution",
+        default="flores_array",
+        choices=list_executor_names(),
+        help="Execution strategy used to schedule and write work.",
+    )
     if batch_size_default is not _MISSING:
         parser.add_argument(
             "--batch-size",
@@ -45,44 +53,19 @@ def add_common_scoring_args(
             help=gpus_help or "Number of GPUs to use (set 0 for CPU).",
         )
     parser.add_argument(
-        "--manifest",
-        required=True,
-        help="TSV manifest with columns: src_lang, tgt_lang, split[, shard_id].",
-    )
-    parser.add_argument(
-        "--shard-id",
-        type=int,
-        default=None,
-        help=(
-            "Optional shard id for this worker. "
-            "Defaults to SLURM_ARRAY_TASK_ID when running under Slurm."
-        ),
-    )
-    parser.add_argument(
-        "--num-shards",
-        type=int,
-        default=None,
-        help=(
-            "Optional total shard count. "
-            "Defaults to SLURM_ARRAY_TASK_COUNT when running under Slurm."
-        ),
-    )
-    parser.add_argument(
-        "--max-directions-per-part",
-        type=int,
-        default=25,
-        help="Close and commit a part after this many directions.",
-    )
-    parser.add_argument(
-        "--target-part-bytes",
-        type=int,
-        default=67_108_864,  # 64 MiB
-        help="Best-effort target bytes before rotating a part file.",
-    )
-    parser.add_argument(
         "--max-rows",
         type=int,
         default=None,
         help="Optional cap for number of rows (for debugging).",
     )
+    return parser
+
+
+def add_selected_executor_args(
+    parser: argparse.ArgumentParser, argv: Sequence[str] | None = None
+) -> argparse.ArgumentParser:
+    bootstrap = argparse.ArgumentParser(add_help=False)
+    bootstrap.add_argument("--execution", default="flores_array")
+    known_args, _ = bootstrap.parse_known_args(argv)
+    get_executor(known_args.execution).add_cli_args(parser)
     return parser

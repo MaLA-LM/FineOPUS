@@ -11,7 +11,12 @@ from pathlib import Path
 MODELS = [
     ("bicleaner-ai",             "bicleaner_ai"),
     ("m-prometheus-7b",          "m_prometheus_7b"),
+    ("qwen3-4b-awq",             "qwen3_4b_awq"),
+    ("qwen3-4b-fp8",             "qwen3_4b_fp8"),
     ("qwen3-4b-instruct-2507",   "qwen3_4b_instruct_2507"),
+    ("qwen3-4b-instruct-2507-fp8", "qwen3_4b_instruct_2507_fp8"),
+    ("qwen3-1.7b",               "qwen3_1_7b"),
+    ("qwen3-0.6b",               "qwen3_0_6b"),
     ("shaomutan_remedy-9b-22",   "shaomutan_remedy_9b_22"),
     ("xcomet-xl",                "xcomet_xl"),
     ("metricx24",                "metricx24"),

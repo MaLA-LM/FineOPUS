@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from create_spreadsheet.aggregate import aggregate_checkpoints_to_csv
-from create_spreadsheet.cli import parse_args
+from stand_alone_modules.create_spreadsheet.aggregate import aggregate_checkpoints_to_csv
+from stand_alone_modules.create_spreadsheet.cli import parse_args
 
 
 def main() -> None:

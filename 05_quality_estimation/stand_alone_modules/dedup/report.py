@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dedup.scanner import ScanResult
+from stand_alone_modules.dedup.scanner import ScanResult
 
 
 def generate_report(result: ScanResult, output_path: Path) -> None:

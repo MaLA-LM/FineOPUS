@@ -1,7 +1,7 @@
-from dedup.cli import parse_args
-from dedup.deleter import apply_plan
-from dedup.report import generate_report
-from dedup.scanner import scan_dataset, scan_result_to_plan, write_plan
+from stand_alone_modules.dedup.cli import parse_args
+from stand_alone_modules.dedup.deleter import apply_plan
+from stand_alone_modules.dedup.report import generate_report
+from stand_alone_modules.dedup.scanner import scan_dataset, scan_result_to_plan, write_plan
 from utils.logger import logger
 
 

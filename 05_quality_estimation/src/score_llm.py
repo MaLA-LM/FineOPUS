@@ -1,212 +1,30 @@
-﻿from __future__ import annotations
-
-import argparse
-
-from dataset.manifest import ManifestEntry
-from dataset.mediator import get_dataset, DatasetAdapter
-from models.language_support import QwenLanguages, PrometheusLanguages
-from models.model_registry import resolve_model_spec, supported_model_keys
-from src.common import (
-    ensure_dataset_ready,
-    load_examples,
-    sanitize_model_tag,
-    summarize_scores,
+from src.backends.llm.backend import (
+    PROMPT_MODE_DETAILED,
+    PROMPT_MODES,
+    RESPONSE_FORMAT_JSON_SCHEMA,
+    RESPONSE_FORMATS,
+    build_engine,
+    score_llm_offline,
 )
-from src.llm_backend import score_llm_batched
-from utils.args import add_common_scoring_args
-from utils.cli import validate_args
-from utils.frames import build_frames
-from utils.logger import logger
-from utils.runner import collect_directions, run_scoring
+from src.backends.llm.cli import DEFAULT_LLM_MODEL, main, parse_args, resolve_model
+from src.backends.llm.language_support import auto_response_format, select_language_support
+from src.backends.llm.runner import score_entry
 
-DEFAULT_LLM_MODEL = "Qwen/Qwen3-14B"
-
-
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Score a dataset split with an LLM via vLLM"
-    )
-    add_common_scoring_args(
-        parser,
-        batch_size_default=8,
-        gpus_default=1,
-    )
-    parser.add_argument(
-        "--model",
-        default=DEFAULT_LLM_MODEL,
-        help=(
-            "Served model name. "
-            f"Registered aliases: {', '.join(supported_model_keys('llm'))}."
-        ),
-    )
-    parser.add_argument(
-        "--api-base",
-        default="http://127.0.0.1:8000/v1",
-        help="OpenAI-compatible API base URL.",
-    )
-    parser.add_argument(
-        "--api-key",
-        default=None,
-        help="API key for the OpenAI-compatible endpoint (optional).",
-    )
-    parser.add_argument(
-        "--temperature",
-        type=float,
-        default=0.0,
-        help="Sampling temperature for the model.",
-    )
-    parser.add_argument(
-        "--max-tokens",
-        type=int,
-        default=4096,
-        help="Max tokens to generate per response (must fit full batch JSON).",
-    )
-    parser.add_argument(
-        "--max-retries",
-        type=int,
-        default=5,
-        help="Retries per batch if the output fails validation.",
-    )
-    parser.add_argument(
-        "--micro-batch-size",
-        type=int,
-        default=32,
-        help="Number of segments scored per LLM request (micro-batch).",
-    )
-    parser.add_argument(
-        "--concurrency",
-        type=int,
-        default=16,
-        help="Max in-flight requests to vLLM (async concurrency).",
-    )
-    return parser.parse_args()
-
-
-def resolve_model(name: str) -> tuple[str, str, str]:
-    normalized = name.strip()
-    if not normalized:
-        raise ValueError("--model cannot be empty.")
-
-    try:
-        spec, model_key = resolve_model_spec(normalized, "llm")
-        canonical = spec.model_id
-    except ValueError:
-        # Keep support for arbitrary served model names.
-        canonical = normalized
-        model_key = canonical
-
-    request_name = (
-        canonical[len("hosted_vllm/") :]
-        if canonical.startswith("hosted_vllm/")
-        else canonical
-    )
-    return canonical, request_name, model_key
-
-
-def score_entry(
-    entry: ManifestEntry,
-    args: argparse.Namespace,
-    request_model: str,
-    model_id: str,
-    language_support: QwenLanguages,
-    dataset,
-):
-    examples = load_examples(entry, args, dataset)
-    src_lang_name = language_support.get_full_language_name(entry.src_lang)
-    tgt_lang_name = language_support.get_full_language_name(entry.tgt_lang)
-
-    # Async micro-batched scoring: groups examples into chunks,
-    # fires up to `concurrency` requests in parallel via httpx.
-    scores = score_llm_batched(
-        examples,
-        args.max_retries,
-        src_lang_name,
-        tgt_lang_name,
-        batch_size=args.micro_batch_size,
-        concurrency=args.concurrency,
-        api_base=args.api_base,
-        model=request_model,
-        api_key=args.api_key,
-        temperature=args.temperature,
-        max_tokens=args.max_tokens,
-    )
-    src_lang_seen = language_support.support_status(entry.src_lang)
-    tgt_lang_seen = language_support.support_status(entry.tgt_lang)
-    mean_score, median_score = summarize_scores(scores)
-
-    return build_frames(
-        model_id,
-        dataset.id,
-        entry.split,
-        entry.src_lang,
-        entry.tgt_lang,
-        scores,
-        examples,
-        src_lang_seen=src_lang_seen,
-        tgt_lang_seen=tgt_lang_seen,
-        mean=mean_score,
-        median=median_score,
-    )
-
-
-def main() -> None:
-    args = parse_args()
-    if args.max_retries < 0:
-        raise SystemExit("--max-retries must be >= 0")
-    if args.micro_batch_size < 1:
-        raise SystemExit("--micro-batch-size must be >= 1")
-    if args.concurrency < 1:
-        raise SystemExit("--concurrency must be >= 1")
-    try:
-        model_id, request_model, model_key = resolve_model(args.model)
-    except ValueError as exc:
-        raise SystemExit(str(exc)) from exc
-    dataset = get_dataset(args.dataset)
-    ensure_dataset_ready(args, dataset)
-    validate_args(args)
-
-    directions = collect_directions(args, dataset)
-    if not directions:
-        logger.info("No directions found.")
-        return
-
-    model_tag = sanitize_model_tag(model_key)
-
-    if model_key.startswith("qwen3-"):
-        # Use the QwenLanguages for all Qwen3 variants, since they share the same supported languages.
-        language_support = QwenLanguages(dataset=dataset)
-        logger.info(
-            "Using QwenLanguages for model_key=%s",
-            model_key,
-        )
-    elif model_key.startswith("m-prometheus-"):
-        logger.info(
-            "Using PrometheusLanguages for model_key=%s",
-            model_key,
-        )
-        language_support = PrometheusLanguages(dataset=dataset)
-
-    logger.info(
-        "LLM scoring: model=%s micro_batch_size=%d concurrency=%d max_tokens=%d",
-        model_id,
-        args.micro_batch_size,
-        args.concurrency,
-        args.max_tokens,
-    )
-    run_scoring(
-        args,
-        dataset,
-        directions,
-        model_tag,
-        lambda entry: score_entry(
-            entry,
-            args,
-            request_model,
-            model_id,
-            language_support,
-            dataset,
-        ),
-    )
+__all__ = [
+    "PROMPT_MODE_DETAILED",
+    "PROMPT_MODES",
+    "RESPONSE_FORMAT_JSON_SCHEMA",
+    "RESPONSE_FORMATS",
+    "build_engine",
+    "score_llm_offline",
+    "DEFAULT_LLM_MODEL",
+    "parse_args",
+    "resolve_model",
+    "auto_response_format",
+    "select_language_support",
+    "score_entry",
+    "main",
+]
 
 
 if __name__ == "__main__":

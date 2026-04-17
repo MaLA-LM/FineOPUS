@@ -54,15 +54,16 @@ A distributed, multi-model quality estimation (QE) pipeline that scores translat
 └────────────────────────────────┬─────────────────────────────────────────┘
                                  │
                     ┌────────────▼─────────────┐
-                    │    utils/runner.py       │
-                    │  (Pipeline Orchestrator) │
+                    │ execution/flores_array/  │
+                    │        runner.py         │
                     │  - resolve shard context │
                     │  - collect directions    │
                     │  - loop & checkpoint     │
                     └──┬──────────────┬────────┘
                        │              │
           ┌────────────▼──┐    ┌──────▼───────────────┐
-          │  dataset/     │    │  utils/stage_writer  │
+          │  dataset/     │    │ execution/flores_array│
+          │               │    │     /stage_writer     │
           │  (FLORES-200) │    │  (JSONL output +     │
           │  load pairs   │    │   checkpointing)     │
           └───────────────┘    └──────────────────────┘
@@ -72,17 +73,25 @@ A distributed, multi-model quality estimation (QE) pipeline that scores translat
    ┌────▼────┐  ┌──────▼─────┐ ┌─────▼────┐ ┌────▼─────┐
    │  COMET  │  │  MetricX   │ │  ReMedy  │ │   LLM    │
    │ Backend │  │  Backend   │ │ Backend  │ │ Backend  │
-   │(PyTorch)│  │(MT5 model) │ │(CLI+vLLM)│ │(vLLM+    │
-   │         │  │            │ │          │ │ httpx)   │
+   │(PyTorch)│  │(MT5 model) │ │(CLI+vLLM)│ │(vLLM     │
+   │         │  │            │ │          │ │ offline) │
    └─────────┘  └────────────┘ └──────────┘ └──────────┘
 ```
 
 Each scorer:
 1. Parses CLI args and resolves the model via the **model registry**
-2. Reads the **manifest** to get all language-pair directions
-3. Uses **shard context** (from SLURM array or CLI) to pick its subset
-4. For each direction: loads data, scores, writes JSONL with checkpointing
-5. **Checkpointing** allows safe restarts — already-scored directions are skipped
+2. Resolves an execution strategy via `execution.get_executor(args.execution)`
+3. Reads the **manifest** to get all language-pair directions
+4. Uses **shard context** (from SLURM array or CLI) to pick its subset
+5. For each direction: loads data, scores, writes JSONL with checkpointing
+6. **Checkpointing** allows safe restarts — already-scored directions are skipped
+
+## Execution Strategies
+
+Execution strategies live under `execution/` and are selected with `--execution`.
+`flores_array` remains the default strategy for manifest-driven FLORES and
+single-direction OPUS runs. `opus_queue` is also implemented for OPUS and
+drives the SQLite-backed shard queue under `execution/opus_queue/`.
 
 ---
 
@@ -235,9 +244,9 @@ The `expected_detail_rows()` function reconciles these hardcoded expectations wi
 
 The manifest is a TSV file that lists all language-pair directions to score, with deterministic shard assignments. The whole point of the manifest file is to run multiple array tasks of one model on the same dataset with no additional headache of concurrency handling.
 
-#### Creating a Manifest (`dataset/make_manifest.py`)
+#### Creating a Manifest (`execution/flores_array/make_manifest.py`)
 
-CLI tool invoked as `python -m dataset.make_manifest`.
+CLI tool invoked as `python -m execution.flores_array.make_manifest`.
 
 **Algorithm**:
 1. Discover all directions from the dataset on disk
@@ -253,7 +262,7 @@ ace_Arab    acm_Arab    dev      7
 ...
 ```
 
-#### Reading a Manifest (`dataset/manifest.py`)
+#### Reading a Manifest (`execution/flores_array/manifest.py`)
 
 **`ManifestEntry`** dataclass: `(src_lang, tgt_lang, split, shard_id)`
 
@@ -466,34 +475,40 @@ Uses the `bicleaner-ai-classify` CLI tool.
 
 File: `src/score_llm.py` + `src/llm_backend.py`
 
-Uses a **vLLM server** for inference and **async HTTP** (httpx) for concurrent requests.
+Uses vLLM **offline mode** (`LLM.chat()` directly — no separate server process). The model is loaded once and reused across all directions in the shard.
 
 **Architecture**:
 ```
-┌──────────────┐     HTTP/JSON      ┌──────────────┐
-│  score_llm   │ ──────────────────→│  vLLM Server │
-│  (httpx      │    concurrency=16  │  (GPU)       │
-│   async)     │ ←──────────────────│              │
-└──────────────┘                    └──────────────┘
+┌──────────────┐      direct call     ┌──────────────┐
+│  score_llm   │ ───────────────────→ │  vLLM LLM()  │
+│  (offline    │                      │  (GPU)       │
+│   engine)    │ ←─────────────────── │              │
+└──────────────┘                      └──────────────┘
 ```
 
-**Scoring algorithm**:
-1. Split examples into **micro-batches** (default 32 segments per batch)
-2. Render a batch prompt for each micro-batch (all segments in one prompt)
-3. Dispatch all batches as concurrent async HTTP requests (bounded by semaphore)
-4. Each request:
-   - POST to `{api_base}/chat/completions` with JSON schema response format
+**Prompt modes** (`--prompt-mode`):
+
+- `batch` — multiple segments per prompt (production; matches old server pipeline)
+- `detailed` — one segment per prompt, 7 dimensions + overall (default)
+- `simple` — one segment per prompt, overall score only
+
+**Scoring algorithm (batch mode)**:
+
+1. Split examples into batches of `--batch-size` segments
+2. Render a batch prompt for each batch (all segments in one prompt)
+3. Submit all conversations to `engine.chat()` — vLLM batches internally
+4. Each response:
    - Chat template kwargs disable thinking tokens (`enable_thinking=False`)
    - Strip any `<think>...</think>` blocks from response (Qwen3 safety net)
    - Parse JSON response into `QEBatchResult` pydantic model
-   - Validate: correct count, sequential IDs, all scores in range
+   - Validate per-segment: correct IDs, all scores in range
    - Convert `overall_0to100` to 0–1 scale: `score / 100.0`
-5. **Retry logic**: Up to `max_retries + 3` attempts per batch
-   - Transient HTTP errors (timeouts, connection): exponential backoff `min(2^attempt, 60)` seconds
-   - JSON/validation errors: immediate retry
-6. **Failure handling**: Failed batches produce NaN scores (penalized as 0 in summary)
+5. **Retry logic**: Up to `max_retries` attempts for failed batches, at the same temperature
+6. **Failure handling**: Individual failed segments within a batch produce NaN (penalized as 0 in summary); successful segments in the same batch are kept
 
-**Default args**: `--model Qwen/Qwen3-14B`, `--batch-size 8`, `--temperature 0.0`, `--max-tokens 4096`, `--max-retries 5`, `--micro-batch-size 32`, `--concurrency 16`, `--api-base http://127.0.0.1:8000/v1`
+**Response format** (`--response-format`): Default is `json_schema` (per-token Pydantic schema enforcement, matching the original vLLM-server behaviour). Also supports `json_object` (valid JSON, no schema) and `none` (free generation). On ROCm/MI250X, the `outlines` structured-output backend is auto-selected (xgrammar crashes).
+
+**Default args**: `--model Qwen/Qwen3-14B`, `--batch-size 8`, `--temperature 0.0`, `--max-tokens 256`, `--max-retries 5`, `--prompt-mode detailed`, `--response-format` auto (`json_schema`)
 
 ---
 
@@ -553,7 +568,7 @@ The **production prompt** used by `score_llm_batched()`. Evaluates multiple segm
 - Assigns sequential IDs starting from `start_id`
 - Returns the complete prompt string
 
-There is also an older prompt version in `prompts/llm_prompt_old.py` with more verbose instructions (not used in production).
+The canonical prompt modules now live in `prompts/{detailed,simple,batch}.py`; the older `prompts/llm_prompt*.py` paths remain as compatibility shims.
 
 ---
 
@@ -570,22 +585,26 @@ File: `utils/args.py`
 | `--dataset` | str | `"flores200"` | No | Dataset identifier |
 | `--root` | str | None | No | Dataset root directory (falls back to adapter default) |
 | `--output-base` | str | — | **Yes** | Base output directory |
+| `--execution` | str | `"flores_array"` | No | Execution strategy |
 | `--batch-size` | int | varies | No | Batch size for prediction |
 | `--gpus` | int | varies | No | Number of GPUs |
-| `--manifest` | str | — | **Yes** | TSV manifest file path |
-| `--shard-id` | int | None | No | Worker shard ID (auto-detected from SLURM) |
-| `--num-shards` | int | None | No | Total shard count (auto-detected from SLURM) |
-| `--max-directions-per-part` | int | 25 | No | Rotate output file after N directions |
-| `--target-part-bytes` | int | 67108864 (64 MiB) | No | Target output file size before rotation |
 | `--max-rows` | int | None | No | Cap rows per direction (debugging) |
 
-Validation is in `utils/cli.py` — checks all required args are present and numeric constraints are met.
+When `--execution=flores_array`, the executor also registers `--manifest`,
+`--shard-id`, `--num-shards`, `--max-directions-per-part`, and
+`--target-part-bytes`.
+
+Validation is split between `utils/cli.py` (generic checks) and the selected
+execution strategy (for strategy-specific arguments).
 
 ### Runner (Pipeline Orchestrator)
 
-File: `utils/runner.py`
+Files: `execution/__init__.py` + `execution/flores_array/runner.py`
 
-The `run_scoring()` function is the **core pipeline loop** used by every scorer.
+Scorers resolve `executor = get_executor(args.execution)` and call
+`executor.run(...)`. For now that dispatch always lands in the
+`flores_array` executor, whose `run_scoring()` function remains the core
+pipeline loop.
 
 **Algorithm**:
 
@@ -614,11 +633,12 @@ The `run_scoring()` function is the **core pipeline loop** used by every scorer.
 
 4. **Cleanup**: Close all writers in `finally` block
 
-The `collect_directions()` function reads the manifest and validates splits against the dataset's allowed values.
+The `collect_directions()` function reads the manifest and validates splits
+against the dataset's allowed values.
 
 ### Stage Writer & Checkpointing
 
-File: `utils/stage_writer.py`
+File: `execution/flores_array/stage_writer.py`
 
 **`ShardStageWriter`** manages output files with automatic rotation and crash-safe checkpointing.
 
@@ -671,11 +691,12 @@ There are two types of rows, `summary`(mean, median and seen/unseen) and `detail
 **Column order** (OUTPUT_COLUMNS):
 `row_type`, `model_name`, `dataset`, `split`, `src_lang`, `tgt_lang`, `src_lang_seen`, `tgt_lang_seen`, `mean`, `median`, `score`, `src_txt`, `tgt_txt`
 
-The runner also adds `direction_key` and `shard_id` columns before writing.
+The executor runner also adds `direction_key` and `shard_id` columns before
+writing.
 
 ### Hashing & Sharding
 
-File: `utils/hashing.py`
+Files: `utils/hashing.py` + `execution/flores_array/hashing.py`
 
 - **`stable_hash_int(text)`** — BLAKE2b hash (16-byte digest) → unsigned big-endian integer. Deterministic and stable across runs.
 - **`direction_key(src, tgt)`** — Returns `"{src}->{tgt}"` string
@@ -720,20 +741,20 @@ Generate a manifest TSV that lists all language-pair directions with shard assig
 
 ```bash
 # Single shard (no parallelism)
-python -m dataset.make_manifest \
+python -m execution.flores_array.make_manifest \
     --dataset flores200 \
     --split all \
     --num-shards 1 \
     --out flores200_directions.tsv
 
 # Multi-shard examples for different models:
-python -m dataset.make_manifest --dataset flores200 --split all --num-shards 15  --out flores200_directions_bicleaner.tsv
+python -m execution.flores_array.make_manifest --dataset flores200 --split all --num-shards 15  --out flores200_directions_bicleaner.tsv
 
-python -m dataset.make_manifest --dataset flores200 --split all --num-shards 35  --out flores200_directions_metricx.tsv
+python -m execution.flores_array.make_manifest --dataset flores200 --split all --num-shards 35  --out flores200_directions_metricx.tsv
 
-python -m dataset.make_manifest --dataset flores200 --split all --num-shards 57  --out flores200_directions_xcomet.tsv
+python -m execution.flores_array.make_manifest --dataset flores200 --split all --num-shards 57  --out flores200_directions_xcomet.tsv
 
-python -m dataset.make_manifest --dataset flores200 --split all --num-shards 70  --out flores200_directions_comet23.tsv
+python -m execution.flores_array.make_manifest --dataset flores200 --split all --num-shards 70  --out flores200_directions_comet23.tsv
 ```
 
 ### Step 2: Submit SLURM Jobs
@@ -744,27 +765,27 @@ python -m dataset.make_manifest --dataset flores200 --split all --num-shards 70 
 # Bicleaner (15 shards)
 sbatch --array=0-14 \
     --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 \
-    scripts/run_slurm.sh --manifest flores200_directions_bicleaner.tsv --model bicleaner
+    scripts/flores/run_slurm.sh --manifest flores200_directions_bicleaner.tsv --model bicleaner
 
 # MetricX-24 (35 shards)
 sbatch --array=0-34 \
     --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 \
-    scripts/run_slurm.sh --manifest flores200_directions_metricx.tsv --model metricx24
+    scripts/flores/run_slurm.sh --manifest flores200_directions_metricx.tsv --model metricx24
 
 # XCOMET (57 shards)
 sbatch --array=0-56 \
     --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 \
-    scripts/run_slurm.sh --manifest flores200_directions_xcomet.tsv --model xcomet
+    scripts/flores/run_slurm.sh --manifest flores200_directions_xcomet.tsv --model xcomet
 
 # COMET-23 (70 shards)
 sbatch --array=0-69 \
     --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 \
-    scripts/run_slurm.sh --manifest flores200_directions_comet23.tsv --model comet23
+    scripts/flores/run_slurm.sh --manifest flores200_directions_comet23.tsv --model comet23
 
 # ReMedy (104 shards)
 sbatch --array=0-103 \
     --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 \
-    scripts/run_slurm.sh --manifest flores200_directions_remedy.tsv --model remedy
+    scripts/flores/run_slurm.sh --manifest flores200_directions_remedy.tsv --model remedy
 ```
 
 #### LUMI (AMD MI250X)
@@ -773,12 +794,12 @@ sbatch --array=0-103 \
 # M-Prometheus-7B (180 shards)
 sbatch --array=0-179 \
     --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 \
-    scripts/run_slurm_lumi.sh --manifest flores200_directions_prometheus.tsv --model m-prometheus-7b
+    scripts/flores/run_slurm_lumi.sh --manifest flores200_directions_prometheus.tsv --model m-prometheus-7b
 
 # Qwen3-4B (190 shards)
 sbatch --array=0-189 \
     --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 \
-    scripts/run_slurm_lumi.sh --manifest flores200_directions_qwen4b.tsv --model qwen3-4b
+    scripts/flores/run_slurm_lumi.sh --manifest flores200_directions_qwen4b.tsv --model qwen3-4b
 ```
 
 #### Rerunning Failed Shards
@@ -788,7 +809,7 @@ Specify only the failed shard IDs in the `--array` flag:
 ```bash
 sbatch --array=81,128 \
     --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 \
-    scripts/run_slurm_lumi.sh --manifest flores200_directions_qwen4b.tsv --model qwen3-4b --num-shards 190
+    scripts/flores/run_slurm_lumi.sh --manifest flores200_directions_qwen4b.tsv --model qwen3-4b --num-shards 190
 ```
 
 ### Step 3: Manual / Local Runs
@@ -799,6 +820,7 @@ Run a single shard directly (useful for debugging):
 python -m src.score_comet \
     --dataset flores200 \
     --root /scratch/project_2008161/downstream_benchmarks/flores200 \
+    --execution flores_array \
     --manifest flores200_directions.tsv \
     --output-base /scratch/project_2008161/QE_flores200_scores \
     --model xcomet \
@@ -808,7 +830,7 @@ python -m src.score_comet \
 
 ### SLURM Defaults (Mahti vs LUMI)
 
-| Parameter | Mahti (`run_slurm.sh`) | LUMI (`run_slurm_lumi.sh`) |
+| Parameter | Mahti (`scripts/flores/run_slurm.sh`) | LUMI (`scripts/flores/run_slurm_lumi.sh`) |
 |-----------|------------------------|---------------------------|
 | **Account** | `project_2008161` | `project_462001050` |
 | **Partition** | `gpusmall` | `small-g` |
@@ -821,14 +843,11 @@ python -m src.score_comet \
 | **vLLM dtype** | `bfloat16` | `bfloat16` |
 | **vLLM GPU utilization** | 0.90 | 0.90 |
 | **vLLM max-num-batched-tokens** | 4096 | 8192 |
-| **LLM concurrency** | 16 | 32 |
-| **LLM micro-batch size** | 32 | 16 |
 | **Temperature** | 0.0 | 0.0 |
-| **Max tokens** | 8192 | 8192 |
+| **Max tokens** | 256 | 256 |
 | **Max retries** | 5 | 5 |
 | **Execution method** | Direct `python` / `venv` | Singularity containers |
 | **Module loads** | `pytorch` | `LUMI`, `partition/G`, `rocm` |
-| **vLLM port range** | 40000–59999 | 40000–59999 |
 | **MASTER_PORT range** | (not set) | 20000–39999 |
 | **Retry attempts** | 3 (backoff: 30s, 60s, 120s) | 3 (backoff: 30s, 60s, 120s) |
 
@@ -846,15 +865,18 @@ These can be set before `sbatch` or exported via `--export`:
 | `MAX_DIRECTIONS_PER_PART` | 25 | Directions per output part file |
 | `TARGET_PART_BYTES` | 67108864 (64 MiB) | Target part file size |
 | `MODEL` | `wmt22-cometkiwi-da` | Model key or ID |
-| `VLLM_HOST` | `127.0.0.1` | vLLM server host |
-| `VLLM_PORT` | computed | vLLM server port |
 | `VLLM_DTYPE` | `bfloat16` | vLLM data type |
 | `VLLM_GPU_UTIL` | 0.90 | vLLM GPU memory utilization |
 | `TEMPERATURE` | 0.0 | LLM sampling temperature |
-| `MAX_TOKENS` | 8192 | LLM max output tokens |
+| `MAX_TOKENS` | 256 | LLM max output tokens per segment |
 | `MAX_RETRIES` | 5 | LLM retry count |
-| `CONCURRENCY` | 16 (Mahti) / 32 (LUMI) | Max concurrent LLM requests |
-| `MICRO_BATCH_SIZE` | 32 (Mahti) / 16 (LUMI) | Segments per LLM request |
+| `PROMPT_MODE` | `detailed` | Prompt variant: `detailed`, `simple`, `batch` |
+| `MAX_NUM_BATCHED_TOKENS` | 16384 | vLLM scheduler max tokens per step |
+| `MAX_NUM_SEQS` | 128 | vLLM scheduler max concurrent sequences |
+| `MAX_MODEL_LEN` | (auto) | Cap model context length (e.g. 8192) |
+| `RESPONSE_FORMAT` | (auto: `json_schema`) | `none`, `json_object`, or `json_schema` |
+| `ENFORCE_EAGER` | (off) | Set to `1` to disable CUDA graphs |
+| `STRUCTURED_OUTPUTS_BACKEND` | (auto) | `outlines` or `xgrammar`; auto-set on ROCm |
 
 # Stand alone modules/features
 
@@ -895,3 +917,212 @@ singularity run $SIF python -m stand_alone_modules.compact
   --target-part-bytes 671088640
   --workers 9
 ```
+
+---
+
+## OPUS dataset support
+
+The pipeline now supports a second dataset identifier, `opus`, alongside
+`flores200`. All five scoring backends (COMET, MetricX-24, ReMedy,
+Bicleaner, LLM) work with OPUS without any scorer-level changes; dataset
+selection is a single `--dataset opus` flag.
+
+### Data layout
+
+OPUS is expected on disk under a single root, with one sub-directory per
+translation direction and one or more parquet shards inside each:
+
+```text
+/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2/
+  abk_Cyrl-por_Latn/
+    abk_Cyrl-por_Latn_shard_0.parquet
+    abk_Cyrl-por_Latn_shard_1.parquet
+    ...
+  eng_Latn-fra_Latn/
+    eng_Latn-fra_Latn_shard_0.parquet
+  ...
+```
+
+Direction directory names must match the regex
+`^[a-z]{2,4}_[A-Za-z]{4}-[a-z]{2,4}_[A-Za-z]{4}$`. Each parquet file
+**must** contain at least the columns `source_text` and `target_text`;
+every other column in the file is preserved as-is and passed through to
+the pipeline's output (see _Output schema_ below).
+
+Unlike FLORES-200, OPUS has no split concept. The adapter uses the
+literal string `"all"` as a single placeholder split so the manifest, the
+stage writer's partitioning, and the output layout behave identically to
+FLORES.
+
+### Dataset module layout
+
+- [dataset/opus_scripts/discovery.py](dataset/opus_scripts/discovery.py) –
+  scans the root for direction directories, validates the name format,
+  and drops directions with zero parquet files.
+  `DEFAULT_OPUS_ROOT = /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2`,
+  `SPLIT_VALUES = ("all",)`.
+- [dataset/opus_scripts/opus_builder.py](dataset/opus_scripts/opus_builder.py) –
+  `load_opus_parallel(src_lang, tgt_lang, *, split, root)` streams parquet
+  files shard-by-shard and **row-group-by-row-group** via
+  `pyarrow.parquet.ParquetFile.read_row_group()` to keep peak memory
+  bounded, which matters for the most imbalanced OPUS directions that
+  can hold millions of sentence pairs. Returns a list of example dicts,
+  each containing the full original parquet row **plus** transient
+  `"src"` and `"tgt"` aliases that every scorer already reads.
+- [dataset/opus_scripts/langcodes.py](dataset/opus_scripts/langcodes.py) –
+  **placeholder dict** mapping OPUS language codes (`src_Script` /
+  `tgt_Script`) to display names. Populate incrementally; any codes
+  missing from the dict automatically surface as `support_status ==
+  False` in the language-support helpers.
+- [dataset/opus_scripts/langcode_mapping.py](dataset/opus_scripts/langcode_mapping.py) –
+  `build_model_language_mapping(model_languages)` wraps the shared
+  4-stage fuzzy matcher in
+  [dataset/flores200_scripts/langcode_mapping.py](dataset/flores200_scripts/langcode_mapping.py)
+  (via the new exported helper `build_mapping_from_codes`) so OPUS gets
+  the same exact/alias/left-trim/strip-qualifier matching pipeline as
+  FLORES-200 for free.
+- [dataset/opus_scripts/frames.py](dataset/opus_scripts/frames.py) –
+  OPUS-specific frame builder that produces summary + detail rows with
+  the OPUS output schema (see below).
+- [dataset/adapters/opus.py](dataset/adapters/opus.py) – wires every
+  hook into a single `OPUS_ADAPTER = DatasetAdapter(...)` instance that
+  is registered in [dataset/mediator.py](dataset/mediator.py) alongside
+  the FLORES adapter.
+
+### Per-dataset frame builders
+
+The `DatasetAdapter` dataclass gained one new optional field,
+`build_frames: FrameBuilder | None`, so each dataset can emit its own
+output schema without scorers caring which dataset they're processing.
+`src/common.py::get_frame_builder(dataset)` returns the adapter's
+builder and falls back to `utils.frames.build_frames` (the FLORES-200
+schema) when the adapter does not provide one. Every scorer calls
+`get_frame_builder(dataset)(...)` in place of the old direct
+`build_frames(...)` import.
+
+FLORES-200 explicitly wires `build_frames=utils.frames.build_frames`
+(unchanged schema, unchanged downstream behavior) so none of the
+existing SQL tooling in `stand_alone_modules/*` is affected.
+
+### NaN -> 0 score sanitization
+
+Both frame builders now call `utils.frames.sanitize_scores(scores)`,
+which replaces any NaN in the per-segment score list with `0.0`. This
+applies uniformly to FLORES-200 and OPUS output: failed segments (LLM
+timeouts, validation errors, etc.) surface as `0.0` on detail rows
+rather than `null`, matching the existing `summarize_scores` convention
+that already treated NaN as a 0-penalty when computing mean/median.
+
+### OPUS output schema
+
+Output files still live at
+`{output_base}/dataset=opus/model={model_tag}/split=all/shard={shard_id:03d}/…`
+and are still newline-delimited JSON, one row per line, with the same
+`part-{run_id}-NNNNNN.jsonl` + `checkpoint.jsonl` layout as FLORES.
+
+**Summary row** (one per direction):
+
+```json
+{
+  "row_type": "summary",
+  "dataset": "opus",
+  "split": "all",
+  "src_lang": "abk_Cyrl",
+  "tgt_lang": "por_Latn",
+  "qe_model": "Unbabel/wmt22-cometkiwi-da",
+  "src_seen": false,
+  "tgt_seen": true,
+  "mean": 0.4123,
+  "median": 0.3998,
+  "direction_key": "abk_Cyrl->por_Latn",
+  "shard_id": 0
+}
+```
+
+**Detail row** (one per sentence pair) – every original parquet column
+is preserved unchanged, plus the four QE fields:
+
+```json
+{
+  "source_text": "...",
+  "target_text": "...",
+  "<other parquet columns, e.g. corpus tags, confidence>": "...",
+  "row_type": "detail",
+  "dataset": "opus",
+  "split": "all",
+  "src_lang": "abk_Cyrl",
+  "tgt_lang": "por_Latn",
+  "qe_model": "Unbabel/wmt22-cometkiwi-da",
+  "qe_score": 0.42,
+  "src_seen": false,
+  "tgt_seen": true,
+  "direction_key": "abk_Cyrl->por_Latn",
+  "shard_id": 0
+}
+```
+
+The four new fields in every detail row are:
+
+| Field | Meaning |
+| ----- | ------- |
+| `qe_model` | The QE model used to score the pair (HF id or local path). |
+| `qe_score` | Per-segment QE score (NaN replaced with `0.0`). |
+| `src_seen` | Whether the QE model documents support for the source language. `true` / `false` / `"unknown"` when the language support data isn't wired up. |
+| `tgt_seen` | Same, for the target language. |
+
+Because `execution/flores_array/stage_writer.py` is schema-agnostic and the
+runner only appends `direction_key` / `shard_id` to whatever frame the dataset builder
+returns, adding OPUS required no changes to the runner, stage writer,
+CLI args, manifest code, or any scorer backend — only a new adapter
+plus a single-line edit per scorer to route through
+`get_frame_builder`.
+
+### Running OPUS
+
+```bash
+# 1) Generate an OPUS manifest (one row per direction, split=all)
+python -m execution.flores_array.make_manifest \
+    --dataset opus \
+    --split all \
+    --num-shards 64 \
+    --out opus_directions_cometkiwi.tsv
+
+# 2) Submit a SLURM array exactly like FLORES, only the --dataset and
+#    --manifest change. The --root flag is optional; the adapter default
+#    points at the LUMI OPUS scratch path.
+sbatch --array=0-63 \
+    --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=50,TARGET_PART_BYTES=134217728 \
+    scripts/flores/run_slurm.sh \
+    --dataset opus \
+    --manifest opus_directions_cometkiwi.tsv \
+    --model wmt22-cometkiwi-da
+
+# 3) Single-direction debug run
+python -m src.score_comet \
+    --dataset opus \
+    --root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 \
+    --execution flores_array \
+    --manifest opus_directions_cometkiwi.tsv \
+    --output-base /scratch/project_462001050/QE_opus_scores \
+    --model wmt22-cometkiwi-da \
+    --num-shards 1 --shard-id 0 \
+    --max-rows 5
+```
+
+### Notes / known limitations
+
+- [dataset/opus_scripts/langcodes.py](dataset/opus_scripts/langcodes.py)
+  ships empty. Populate it with the codes present under `DEFAULT_OPUS_ROOT`
+  to get meaningful `src_seen` / `tgt_seen` flags; until then they will
+  report `"unknown"` via the language-support base class.
+- The FLORES post-processing tools in `stand_alone_modules/`
+  (`mean_median_ensemble`, `normalized_scores`, `patch_remedy`,
+  `patch_results`) are written against the FLORES-200 column names
+  (`src_txt`, `tgt_txt`, `model_name`, `src_lang_seen`, `tgt_lang_seen`)
+  and are **not** updated for the OPUS schema. The `compact` module is
+  schema-agnostic and works for both datasets.
+- Bicleaner's `iso639_1_from_dataset` lookup relies on
+  `dataset.language_codes`; with the placeholder OPUS langcode map most
+  directions will fall through to the default English model with a
+  logged warning, which is already the expected behavior when source
+  languages can't be mapped.

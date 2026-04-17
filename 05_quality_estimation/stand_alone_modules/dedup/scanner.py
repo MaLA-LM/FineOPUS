@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from create_spreadsheet.discover import discover_checkpoint_files
+from stand_alone_modules.create_spreadsheet.discover import discover_checkpoint_files
 from utils.io import ROW_TYPE_SUMMARY
 
 DuplicateKey = tuple[str, str, str]  # (direction_key, model_name, split)

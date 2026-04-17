@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
-Example = dict[str, str]
+Example = dict[str, Any]
 DirectionSpec = tuple[str, str, str, Path]
 
 LoadParallel = Callable[[str | Path, str, str], list[Example]]
@@ -12,6 +12,7 @@ LimitRows = Callable[[list[Example], int | None], list[Example]]
 DiscoverDirections = Callable[[str | Path, str | None], list[DirectionSpec]]
 ExpectedDetailRows = Callable[[str | Path, str, str, int | None], int | None]
 LanguageCodeMapper = Callable[[set[str]], dict[str, list[object]]]
+FrameBuilder = Callable[..., Any]  # returns a pandas.DataFrame
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,14 @@ class DatasetAdapter:
     expected_detail_rows: ExpectedDetailRows
     language_codes: dict[str, str]
     langcode_to_name: LanguageCodeMapper
+    build_frames: FrameBuilder
+
+
+def limit_rows(examples: list[Example], max_rows: int | None) -> list[Example]:
+    """Shared default row limiter used by dataset adapters."""
+    if max_rows is None:
+        return examples
+    return examples[: min(max_rows, len(examples))]
 
 
 DEFAULT_DATASET_ID = "flores200"
@@ -47,6 +56,10 @@ def list_datasets() -> list[str]:
     return sorted(DATASETS.keys())
 
 
-from dataset.adapters.flores200 import FLORES200_ADAPTER  # noqa: E402
+from dataset.flores200 import FLORES200_ADAPTER  # noqa: E402
+from dataset.opus import OPUS_ADAPTER  # noqa: E402
 
-DATASETS = {FLORES200_ADAPTER.id: FLORES200_ADAPTER}
+DATASETS = {
+    FLORES200_ADAPTER.id: FLORES200_ADAPTER,
+    OPUS_ADAPTER.id: OPUS_ADAPTER,
+}

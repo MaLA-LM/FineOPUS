@@ -38,8 +38,20 @@ def validate_output(con, model_out: str, model: str) -> None:
     ).fetchone()
 
     (
-        n_detail, n_summary, null_scores, null_z, z_mean, z_std, bad_pct,
-        null_summary, score_min, score_max, mean_min, mean_max, median_min, median_max,
+        n_detail,
+        n_summary,
+        null_scores,
+        null_z,
+        z_mean,
+        z_std,
+        bad_pct,
+        null_summary,
+        score_min,
+        score_max,
+        mean_min,
+        mean_max,
+        median_min,
+        median_max,
     ) = row
 
     if n_detail == 0:
@@ -49,18 +61,28 @@ def validate_output(con, model_out: str, model: str) -> None:
     if null_scores > 0:
         fail(f"{null_scores} detail rows have NULL score")
     if null_z > 0:
-        fail(f"{null_z} detail rows have NULL/NaN z_score — check window frame / stddev=0")
+        fail(
+            f"{null_z} detail rows have NULL/NaN z_score — check window frame / stddev=0"
+        )
     if abs(z_mean) > 0.05:
         fail(f"z_score mean={z_mean:.4f} is too far from 0 (expected |mean| ≤ 0.05)")
     if z_std is None or not (0.9 <= z_std <= 1.1):
-        fail(f"z_score std={z_std:.4f} is outside [0.9, 1.1] — standardisation may be wrong")
+        fail(
+            f"z_score std={z_std:.4f} is outside [0.9, 1.1] — standardisation may be wrong"
+        )
     if bad_pct > 0:
         fail(f"{bad_pct} detail rows have rank_percentile outside [0, 1]")
     if null_summary > 0:
         fail(f"{null_summary} summary rows have NULL mean or median")
     if mean_min < score_min or mean_max > score_max:
-        warn(f"summary mean [{mean_min:.4f}, {mean_max:.4f}] outside score range [{score_min:.4f}, {score_max:.4f}]")
+        warn(
+            f"summary mean [{mean_min:.4f}, {mean_max:.4f}] outside score range [{score_min:.4f}, {score_max:.4f}]"
+        )
     if median_min < score_min or median_max > score_max:
-        warn(f"summary median [{median_min:.4f}, {median_max:.4f}] outside score range [{score_min:.4f}, {score_max:.4f}]")
+        warn(
+            f"summary median [{median_min:.4f}, {median_max:.4f}] outside score range [{score_min:.4f}, {score_max:.4f}]"
+        )
 
-    print(f"  All checks passed for model: {model} (z_score mean={z_mean:.4f}, std={z_std:.4f})")
+    print(
+        f"  All checks passed for model: {model} (z_score mean={z_mean:.4f}, std={z_std:.4f})"
+    )

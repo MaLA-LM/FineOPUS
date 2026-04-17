@@ -8,15 +8,15 @@ from pathlib import Path
 
 import pyarrow as pa
 
-from compact.buckets import (
+from .buckets import (
     discover_models,
     extract_stage_commit_key,
     iter_stage_files_for_model,
     load_stage_checkpoint,
 )
-from compact.cli import parse_args
-from compact.models import ModelStats, PendingRows
-from compact.writer import ModelPartWriter
+from .cli import parse_args
+from .models import ModelStats, PendingRows
+from .writer import ModelPartWriter
 from utils.io import ROW_TYPE_SUMMARY
 from utils.logger import logger
 

@@ -1,3 +1,5 @@
-from .normalize import run
+from stand_alone_modules.normalized_scores.cli import main
 
-run()
+
+if __name__ == "__main__":
+    main()
