@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING, Any
 
 from prompts.batch import render_batch_prompt
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
 __all__ = [
     "_build_sampling_params",
     "_build_structured_outputs",
+    "_resolve_structured_outputs_backend",
     "_render_prompt",
     "_retry_temperature",
     "build_engine",
@@ -89,6 +91,26 @@ def _build_structured_outputs(
     return StructuredOutputsParams(json=model_cls.model_json_schema())
 
 
+def _resolve_structured_outputs_backend(
+    response_format: ResponseFormat,
+    explicit_backend: str | None = None,
+) -> str | None:
+    if response_format == RESPONSE_FORMAT_NONE:
+        return None
+
+    backend = explicit_backend
+    if backend is None:
+        backend = os.environ.get("VLLM_STRUCTURED_OUTPUTS_BACKEND")
+    if backend is None:
+        backend = os.environ.get("STRUCTURED_OUTPUTS_BACKEND")
+
+    if backend is not None:
+        backend = backend.strip()
+    if backend:
+        return backend
+    return "outlines"
+
+
 def build_engine(
     model: str,
     dtype: str = "bfloat16",
@@ -97,6 +119,7 @@ def build_engine(
     max_num_batched_tokens: int = 16384,
     max_num_seqs: int = 128,
     max_model_len: int | None = None,
+    response_format: ResponseFormat = RESPONSE_FORMAT_NONE,
     extra_kwargs: dict[str, Any] | None = None,
 ) -> LLM:
     from vllm import LLM
@@ -116,13 +139,32 @@ def build_engine(
     if extra_kwargs:
         kwargs.update(extra_kwargs)
 
+    if "structured_outputs_config" not in kwargs:
+        structured_backend = _resolve_structured_outputs_backend(response_format)
+        if structured_backend is not None:
+            try:
+                from vllm.config.structured_outputs import StructuredOutputsConfig
+            except ImportError as exc:
+                import vllm
+
+                vllm_ver = getattr(vllm, "__version__", "unknown")
+                raise RuntimeError(
+                    f"vLLM structured outputs config API not found (vLLM {vllm_ver}). "
+                    "This code expects vllm.config.structured_outputs.StructuredOutputsConfig."
+                ) from exc
+
+            kwargs["structured_outputs_config"] = StructuredOutputsConfig(
+                backend=structured_backend
+            )
+
     logger.info(
-        "Loading vLLM engine: model=%s dtype=%s enforce_eager=%s max_num_batched_tokens=%d max_num_seqs=%d max_model_len=%s",
+        "Loading vLLM engine: model=%s dtype=%s enforce_eager=%s max_num_batched_tokens=%d max_num_seqs=%d max_model_len=%s structured_backend=%s",
         model,
         dtype,
         enforce_eager,
         max_num_batched_tokens,
         max_num_seqs,
         max_model_len or "auto",
+        _resolve_structured_outputs_backend(response_format),
     )
     return LLM(**kwargs)

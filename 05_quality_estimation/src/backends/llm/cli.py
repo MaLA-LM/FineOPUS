@@ -176,6 +176,7 @@ def main() -> None:
                 max_num_batched_tokens=args.max_num_batched_tokens,
                 max_num_seqs=args.max_num_seqs,
                 max_model_len=args.max_model_len,
+                response_format=args.response_format,
             )
             engine_holder["engine"] = engine
             logger.info(

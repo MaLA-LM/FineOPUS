@@ -92,7 +92,7 @@ bash scripts/opus/run_reaper.sh --db "$DB" --interval 300 --timeout-multiplier 2
 # If you see terminal failed shards caused by transient issues
 # (scheduler kill, filesystem glitch, model startup crash),
 # temporarily allow the reaper to move old failed rows back to pending.
-bash scripts/opus/run_reaper.sh --db "$DB" --interval 300 --timeout-multiplier 2 --reset-failed
+bash scripts/opus/run_reaper.sh --db "$DB" --interval 300 --timeout-multiplier 1 --reset-failed
 
 # Example check before using --reset-failed:
 sqlite3 "$DB" <<'EOF'
@@ -155,6 +155,101 @@ bash scripts/opus/submit_array.sh --model en-xx --array 0-31 --concurrency 16 --
 bash scripts/opus/submit_array.sh --model es-xx --array 0-31 --concurrency 16 --time 12:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model de-xx --array 0-31 --concurrency 16 --time 12:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 ```
+
+## 3b. Submit standard-g workers (whole-node, 8 GCDs per array task)
+
+`scripts/opus/submit_array_standard_g.sh` is the high-throughput companion
+to `submit_array.sh`. Each array task allocates a whole LUMI-G node
+(4x MI250X = 8 GCDs) and spawns 8 worker processes in parallel via `srun`,
+each pinned to its own GCD. Use it when you have a large pending queue
+and want more than the 200 GCDs that small-g caps at.
+
+Key differences vs `submit_array.sh`:
+
+- Partition is `standard-g` (whole-node billing; 200 running jobs cap;
+  walltime max 48h instead of 72h).
+- Each `--array` index = 1 node = 8 worker processes = 8 GCDs.
+- The two submitters can run side by side against the same DB; SQLite WAL
+  plus atomic claims handle concurrent workers safely (verified by
+  `execution/opus_queue/tests/test_concurrent_claim.py`).
+
+Throughput math:
+
+| `--array`      | `--concurrency` | Nodes in flight | **GCDs in flight** |
+| -------------- | --------------- | --------------- | ------------------ |
+| `0-49%50`      | 50              | 50              | 400                |
+| `0-99%100`     | 100             | 100             | **800**            |
+| `0-199%200`    | 200             | 200             | 1600               |
+
+Combine with `submit_array.sh` (200 GCDs on small-g) for up to ~1800 GCDs
+total across both partitions.
+
+Caveats before launching:
+
+- ReMedy / LLM workers must have their model files already populated under
+  the shared HF cache on `/scratch`. 8 workers booting at once on a cold
+  cache will all try to download in parallel.
+- Bicleaner is mostly CPU-bound and benefits little from 8x packing.
+  Prefer `submit_array.sh` (small-g) for bicleaner backends. The
+  standard-g task script will warn if you submit bicleaner anyway.
+- Each worker writes its own per-PID temp files and uses per-LOCALID
+  `TRITON_CACHE_DIR` / `TORCH_HOME` under
+  `/scratch/.../.cache/{triton,torch}/${SLURM_JOB_ID}.${SLURM_ARRAY_TASK_ID}/${LOCALID}`,
+  so caches don't race. These can be garbage-collected after the array
+  finishes if disk pressure becomes an issue.
+
+```bash
+# COMET family on standard-g.
+# 8 array tasks = 8 nodes = 64 GCDs in flight (matches the per-GCD
+# small-g pattern of --array 0-63 --concurrency 64 in section 3, but
+# with whole-node accounting).
+bash scripts/opus/submit_array_standard_g.sh --model wmt23-cometkiwi-da-xl --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+
+bash scripts/opus/submit_array_standard_g.sh --model xcomet-xl --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+
+# MetricX on standard-g (smaller jobs are usually fine on small-g; only
+# scale up to standard-g if MetricX has a large pending backlog).
+bash scripts/opus/submit_array_standard_g.sh --model metricx24 --array 0-7 --concurrency 8 --time 01:00:00 --batch-size 64 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+
+# Qwen family on standard-g (FLORES-known-good LLM recipe; --enforce-eager
+# is REQUIRED on LUMI/MI250X to avoid the vLLM 0.14 + ROCm torch.compile
+# autotuning crash).
+# 100 array tasks = 100 nodes = 800 GCDs in flight = the ~800-GCD target.
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-14b --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-8b --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+###
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-instruct-2507 --array 0-1 --concurrency 2 --time 01:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+###
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-instruct-2507-fp8 --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-fp8 --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-awq --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-1.7b --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-0.6b --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+
+# Prometheus family (same FLORES-known-good LLM recipe).
+bash scripts/opus/submit_array_standard_g.sh --model m-prometheus-7b --array 0-1 --concurrency 2 --time 01:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+
+# ReMedy on standard-g. Confirm /pfs/lustrep3/.../hf is pre-populated;
+# 8 workers booting on a cold cache at once will thrash the filesystem.
+bash scripts/opus/submit_array_standard_g.sh --model shaomutan_remedy-9b-22 --array 0-2 --concurrency 3 --time 01:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+
+# Combined throughput example: keep the existing small-g array (200 GCDs)
+# AND submit a standard-g array (800 GCDs) for the same model. They share
+# the DB; SQLite WAL handles concurrent claims atomically.
+# Step 1: existing small-g (already documented in section 3)
+bash scripts/opus/submit_array.sh --model qwen3-4b-instruct-2507-fp8 --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+# Step 2: add standard-g on top
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-instruct-2507-fp8 --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+```
+
+After adding new scripts, refresh permissions on LUMI:
+
+```bash
+chmod +x scripts/opus/run_worker_standard_g.sh scripts/opus/run_worker_standard_g_task.sh scripts/opus/submit_array_standard_g.sh
+```
+
+If a standard-g job complains about `/var/spool/slurmd/.../run_worker_standard_g_task.sh`,
+that is a path-resolution issue inside the batch job, not a missing `chmod` on the repo copy.
 
 ## 4. Useful LLM overrides
 
