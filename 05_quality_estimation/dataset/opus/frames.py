@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from utils.frames import sanitize_scores
-
 # Keys we strip from the example dict before emitting detail rows.
 # ``src`` / ``tgt`` are scorer-facing aliases; the original parquet columns
 # ``source_text`` / ``target_text`` are preserved as passthrough fields.
@@ -30,6 +28,11 @@ def build_frames(
     ``src``/``tgt`` aliases and append the four QE fields requested by the
     downstream OPUS pipeline.
 
+    Failed scores (NaN from the scorer) are preserved and surface as JSON
+    null on write — OPUS is the production application and must distinguish
+    "low quality" from "could not be scored". This differs from FLORES,
+    which is benchmarking and treats failures as worst-case 0.
+
     Shared scorer code still passes dataset metadata and summary statistics for
     API compatibility, but OPUS intentionally does not emit them into the row
     payload. The writer adds ``direction_key`` and ``shard_id`` later.
@@ -38,10 +41,9 @@ def build_frames(
 
     # kept for compatibility with shared scorer code, not used in OPUS frames
     _ = (dataset, split, src_lang, tgt_lang, mean, median)
-    sanitized = sanitize_scores(scores)
 
     detail_records: list[dict[str, Any]] = []
-    for example, score in zip(examples, sanitized):
+    for example, score in zip(examples, scores):
         record: dict[str, Any] = {
             key: value
             for key, value in example.items()

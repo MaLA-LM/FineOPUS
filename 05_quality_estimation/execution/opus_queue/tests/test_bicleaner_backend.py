@@ -10,7 +10,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import call, patch
 
-from src import bicleaner_backend
+from src.backends.bicleaner import backend as bicleaner_backend
 
 
 def test_run_bicleaner_uses_both_language_flags() -> None:

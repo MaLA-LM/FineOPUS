@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from execution.opus_queue import queue_db
+from execution.opus_queue import db as queue_db
 
 
 def _seed_job(

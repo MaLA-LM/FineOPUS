@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from execution.opus_queue import queue_db
+from execution.opus_queue import db as queue_db
 
 
 def _seed_jobs(conn, n: int, model: str) -> None:

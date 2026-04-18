@@ -18,9 +18,8 @@ from src.backends.llm.backend.constants import (
 from src.backends.llm.backend.engine import (
     _build_sampling_params,
     _build_structured_outputs,
-    _group_indices_by_retry_temperature,
-    _next_retry_temperature,
     _render_prompt,
+    _retry_temperature,
 )
 from src.backends.llm.backend.parsing import _parse_response
 
@@ -91,31 +90,25 @@ def score_llm_offline(
 
     scores: list[float] = []
     failed_indices: list[int] = []
-    retry_temperatures: dict[int, float] = {}
     for idx, output in enumerate(outputs):
-        text = output.outputs[0].text
-        score, had_structured_output_failure = _parse_response(text, prompt_mode)
+        score = _parse_response(output.outputs[0].text, prompt_mode)
         if score is not None:
             scores.append(score)
         else:
             scores.append(float("nan"))
             failed_indices.append(idx)
-            retry_temperatures[idx] = _next_retry_temperature(
-                temperature,
-                had_structured_output_failure=had_structured_output_failure,
-            )
 
-    for retry_round in range(max_retries):
-        if not failed_indices:
-            break
-        still_failed: list[int] = []
-        next_retry_temperatures: dict[int, float] = {}
-        for retry_temperature, retry_group_indices in (
-            _group_indices_by_retry_temperature(
-                failed_indices, retry_temperatures
-            )
-        ):
-            retry_conversations = [conversations[i] for i in retry_group_indices]
+    if failed_indices:
+        retry_temperature = _retry_temperature(temperature)
+        retry_sampling = _build_sampling_params(
+            temperature=retry_temperature,
+            max_tokens=max_tokens,
+            structured=structured,
+        )
+        for retry_round in range(max_retries):
+            if not failed_indices:
+                break
+            retry_conversations = [conversations[i] for i in failed_indices]
             logger.info(
                 "Retry round %d: %d failed segments (temperature=%s)",
                 retry_round + 1,
@@ -124,26 +117,17 @@ def score_llm_offline(
             )
             retry_outputs = engine.chat(
                 retry_conversations,
-                sampling_params=_build_sampling_params(
-                    temperature=retry_temperature,
-                    max_tokens=max_tokens,
-                    structured=structured,
-                ),
+                sampling_params=retry_sampling,
                 **chat_kwargs,
             )
-            for orig_idx, output in zip(retry_group_indices, retry_outputs):
-                text = output.outputs[0].text
-                score, had_structured_output_failure = _parse_response(text, prompt_mode)
+            still_failed: list[int] = []
+            for orig_idx, output in zip(failed_indices, retry_outputs):
+                score = _parse_response(output.outputs[0].text, prompt_mode)
                 if score is not None:
                     scores[orig_idx] = score
                 else:
                     still_failed.append(orig_idx)
-                    next_retry_temperatures[orig_idx] = _next_retry_temperature(
-                        retry_temperatures[orig_idx],
-                        had_structured_output_failure=had_structured_output_failure,
-                    )
-        failed_indices = still_failed
-        retry_temperatures = next_retry_temperatures
+            failed_indices = still_failed
 
     n_failed = sum(1 for s in scores if math.isnan(s))
     if n_failed:

@@ -79,7 +79,7 @@ fi
 setup_lumi_container
 cd "$WORKDIR"
 
-REAPER_CMD="$(quote_args python3 -m execution.opus_queue.reaper \
+REAPER_CMD="$(quote_args python3 -m execution.opus_queue.tools.reaper \
     --db "$DB" \
     --interval "$INTERVAL" \
     --timeout-multiplier "$TIMEOUT_MULTIPLIER")"

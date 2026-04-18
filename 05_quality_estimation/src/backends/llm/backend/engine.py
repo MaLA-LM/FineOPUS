@@ -8,7 +8,7 @@ from prompts.simple import render_simple_prompt
 from utils.logger import logger
 
 from src.backends.llm.backend.constants import (
-    _INVALID_JSON_RETRY_TEMPERATURE,
+    _RETRY_TEMPERATURE,
     PROMPT_MODE_SIMPLE,
     RESPONSE_FORMAT_JSON_OBJECT,
     RESPONSE_FORMAT_JSON_SCHEMA,
@@ -24,19 +24,14 @@ if TYPE_CHECKING:
 __all__ = [
     "_build_sampling_params",
     "_build_structured_outputs",
-    "_group_indices_by_retry_temperature",
-    "_next_retry_temperature",
     "_render_prompt",
+    "_retry_temperature",
     "build_engine",
 ]
 
 
-def _next_retry_temperature(
-    current_temperature: float, *, had_structured_output_failure: bool
-) -> float:
-    if had_structured_output_failure:
-        return max(current_temperature, _INVALID_JSON_RETRY_TEMPERATURE)
-    return current_temperature
+def _retry_temperature(initial_temperature: float) -> float:
+    return max(initial_temperature, _RETRY_TEMPERATURE)
 
 
 def _build_sampling_params(
@@ -51,15 +46,6 @@ def _build_sampling_params(
     if structured is not None:
         sampling_kwargs["structured_outputs"] = structured
     return SamplingParams(**sampling_kwargs)
-
-
-def _group_indices_by_retry_temperature(
-    indices: list[int], retry_temperatures: dict[int, float]
-) -> list[tuple[float, list[int]]]:
-    grouped: dict[float, list[int]] = {}
-    for idx in indices:
-        grouped.setdefault(retry_temperatures[idx], []).append(idx)
-    return list(grouped.items())
 
 
 def _render_prompt(

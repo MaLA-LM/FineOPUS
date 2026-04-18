@@ -10,7 +10,8 @@ import argparse
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from execution.opus_queue import queue_db, reaper
+from execution.opus_queue import db as queue_db
+from execution.opus_queue.tools import reaper
 
 
 def _seed_running_job(

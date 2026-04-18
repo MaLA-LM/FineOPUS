@@ -5,8 +5,7 @@
 DEFAULT_MODEL = "qwen3-4b-instruct-2507"
 METRICX_MODEL = "metricx24"
 QWEN_PREFIX = "qwen"
-FLORES_SENTS = 1000  # approximate sentence count per FLORES direction
-HIGH_RESOURCE_SENTENCE_THRESHOLD = 1_000_000
+HIGH_RESOURCE_SENTENCE_THRESHOLD = 2_000_000
 METRICX_QWEN_GAP_THRESHOLD = 0.1
 
 
@@ -68,6 +67,7 @@ def _assign_qwen_pair(
     direction_key,
     dir_name,
     metricx_supported_codes,
+    high_resource_threshold,
 ):
     """Split high-resource Qwen-winning directions between qwen3-4b and MetricX-24."""
     assigned_model = DEFAULT_MODEL
@@ -83,7 +83,7 @@ def _assign_qwen_pair(
     )
     support_condition = _metricx_supports_direction(dir_name, metricx_supported_codes)
     gap_condition = abs(metricx_mean - qwen4b_mean) < METRICX_QWEN_GAP_THRESHOLD
-    is_high_resource = num_sentences > HIGH_RESOURCE_SENTENCE_THRESHOLD
+    is_high_resource = num_sentences > high_resource_threshold
 
     if is_high_resource and (support_condition or gap_condition):
         assigned_model = METRICX_MODEL
@@ -116,6 +116,7 @@ def build_opus_rows(
     runtime_lookup,
     default_strategy="both",
     metricx_supported_codes=frozenset(),
+    high_resource_threshold=HIGH_RESOURCE_SENTENCE_THRESHOLD,
 ):
     """Match each OPUS direction against the FLORES lookup.
 
@@ -126,6 +127,7 @@ def build_opus_rows(
         runtime_lookup: dict from load_model_runtime()
         default_strategy: one of "qwen3", "metricx-24", or "both"
         metricx_supported_codes: set of FLORES language codes supported by MetricX-24
+        high_resource_threshold: sentence-count cutoff for qwen->metricx reassignment
 
     Returns:
         rows: list[dict] ready for CSV output
@@ -164,6 +166,7 @@ def build_opus_rows(
                     flores_key,
                     dir_name,
                     metricx_supported_codes,
+                    high_resource_threshold,
                 )
                 winner = qwen_assignment["assigned_model"]
                 score = qwen_assignment["assigned_score"]
@@ -222,4 +225,4 @@ def build_opus_rows(
 
 def _est_hours(num_sentences, rate):
     """Estimated wall-clock hours for scoring the full OPUS direction."""
-    return f"{num_sentences / (rate * FLORES_SENTS):.1f}"
+    return f"{num_sentences / rate:.1f}"

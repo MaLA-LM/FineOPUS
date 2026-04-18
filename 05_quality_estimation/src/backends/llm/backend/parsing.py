@@ -46,9 +46,7 @@ def _strip_thinking(text: str) -> str:
     return _THINK_RE.sub("", text).strip()
 
 
-def _parse_response(
-    text: str, prompt_mode: PromptMode
-) -> tuple[float | None, bool]:
+def _parse_response(text: str, prompt_mode: PromptMode) -> float | None:
     cleaned = _strip_thinking(text)
     model_cls = _get_result_model(prompt_mode)
     try:
@@ -56,26 +54,26 @@ def _parse_response(
         parsed = model_cls.model_validate(payload)
     except json.JSONDecodeError as exc:
         logger.debug("JSONDecodeError: %s", exc)
-        return None, True
+        return None
     except ValidationError as exc:
         logger.debug("ValidationError: %s", exc)
-        return None, True
-    return _overall_to_unit(int(parsed.overall_0to100)), False
+        return None
+    return _overall_to_unit(int(parsed.overall_0to100))
 
 
 def _parse_batch_response(
     text: str, expected_count: int
-) -> tuple[list[float | None], bool]:
+) -> list[float | None]:
     cleaned = _strip_thinking(text)
     try:
         payload = json.loads(cleaned)
         parsed = QEBatchResult.model_validate(payload)
     except json.JSONDecodeError as exc:
         logger.debug("Batch JSONDecodeError: %s", exc)
-        return [None] * expected_count, True
+        return [None] * expected_count
     except ValidationError as exc:
         logger.debug("Batch ValidationError: %s", exc)
-        return [None] * expected_count, True
+        return [None] * expected_count
 
     scores_by_id: dict[int, float] = {}
     for item in parsed.results:
@@ -84,4 +82,4 @@ def _parse_batch_response(
         except ValueError:
             pass
 
-    return [scores_by_id.get(i) for i in range(expected_count)], False
+    return [scores_by_id.get(i) for i in range(expected_count)]

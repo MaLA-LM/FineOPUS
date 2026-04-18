@@ -42,14 +42,14 @@ chmod +x envs/*.sh scripts/flores/*.sh scripts/opus/*.sh
   - `--concurrency`: Slurm `%N` cap
   - `--time`: walltime per worker
   - `--shard-size-override model:int`: sentences per shard when building or rebuilding the DB
-- `execution/opus_queue/shard_planner.py` is the canonical source of truth for OPUS shard-size seeds. Do not duplicate those values elsewhere; use `--shard-size-override model:int` when calibrating one model.
+- `execution/opus_queue/planning/shard_planner.py` is the canonical source of truth for OPUS shard-size seeds. Do not duplicate those values elsewhere; use `--shard-size-override model:int` when calibrating one model.
 
 ## 1. Create the queue database
 
 ```bash
 # Dry run: read data/lookups/lookup_OPUS.csv, inspect OPUS directions, compute shard counts,
 # but do not create or modify the SQLite DB.
-python -m execution.opus_queue.build_queue \
+python -m execution.opus_queue.ops.build_queue \
   --lookup data/lookups/lookup_OPUS.csv \
   --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 \
   --db /scratch/project_462001050/opus_qe/jobs.db \
@@ -60,11 +60,11 @@ module purge
 module use /appl/local/laifs/modules  
 module load lumi-aif-singularity-bindings  
 export SIF=/appl/local/laifs/containers/lumi-multitorch-u24r64f21m43t29-20260124_092648/lumi-multitorch-full-u24r64f21m43t29-20260124_092648.sif
-srun --account=project_462001050 --partition=small --time=01:00:00 --cpus-per-task=16 singularity exec $SIF bash  -c 'source /scratch/project_462001050/ibrahiam/envs/metric_venv/bin/activate && python -u -m execution.opus_queue.build_queue --lookup data/lookups/lookup_OPUS.csv --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 --db /scratch/project_462001050/opus_qe/jobs.db'
+srun --account=project_462001050 --partition=small --time=01:00:00 --cpus-per-task=16 singularity exec $SIF bash  -c 'source /scratch/project_462001050/ibrahiam/envs/metric_venv/bin/activate && python -u -m execution.opus_queue.ops.build_queue --lookup data/lookups/lookup_OPUS.csv --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 --db /scratch/project_462001050/opus_qe/jobs.db'
 
 # Rebuild one model after calibration.
 # Change --shard-size-override if shards are too short or too long.
-python -m execution.opus_queue.build_queue \
+python -m execution.opus_queue.ops.build_queue \
   --lookup "$LOOKUP" \
   --opus-root "$OPUS_ROOT" \
   --db "$DB" \
@@ -73,7 +73,7 @@ python -m execution.opus_queue.build_queue \
 
 # If the lookup CSV changed the assigned model for some directions, rebuild those rows.
 # Add --force only if you intentionally want to discard existing done rows.
-python -m execution.opus_queue.build_queue \
+python -m execution.opus_queue.ops.build_queue \
   --lookup "$LOOKUP" \
   --opus-root "$OPUS_ROOT" \
   --db "$DB" \
@@ -117,11 +117,11 @@ EOF
 
 # COMET family
 bash scripts/opus/submit_array.sh --model wmt22-cometkiwi-da --array 0-63 --concurrency 32 --time 24:00:00 --batch-size 8 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
-bash scripts/opus/submit_array.sh --model wmt23-cometkiwi-da-xl --array 0-2 --concurrency 3 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
-bash scripts/opus/submit_array.sh --model xcomet-xl --array 0-2 --concurrency 3 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array.sh --model wmt23-cometkiwi-da-xl --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array.sh --model xcomet-xl --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # MetricX
-bash scripts/opus/submit_array.sh --model metricx24 --array 0-2 --concurrency 3 --time 01:00:00 --batch-size 64 --gpus 1 --db /scratch/project_462001050/opus_qe/jobs.db --output-base /scratch/project_462001050/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2
+bash scripts/opus/submit_array.sh --model metricx24 --array 0 --concurrency 1 --time 01:00:00 --batch-size 64 --gpus 1 --db /scratch/project_462001050/opus_qe/jobs.db --output-base /scratch/project_462001050/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2
 
 # Qwen family
 # LLM runs use the FLORES-known-good recipe (run_commands.md:95):
@@ -132,7 +132,7 @@ bash scripts/opus/submit_array.sh --model metricx24 --array 0-2 --concurrency 3 
 bash scripts/opus/submit_array.sh --model qwen3-14b --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model qwen3-8b --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 ####
-bash scripts/opus/submit_array.sh --model qwen3-4b-instruct-2507 --array 0-2 --concurrency 3 --time 01:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array.sh --model qwen3-4b-instruct-2507 --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 ####
 bash scripts/opus/submit_array.sh --model qwen3-4b-instruct-2507-fp8 --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model qwen3-4b-fp8 --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
@@ -141,17 +141,16 @@ bash scripts/opus/submit_array.sh --model qwen3-1.7b --array 0-127 --concurrency
 bash scripts/opus/submit_array.sh --model qwen3-0.6b --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # Prometheus family (same FLORES-known-good LLM recipe)
-bash scripts/opus/submit_array.sh --model m-prometheus-7b --array 0-2 --concurrency 3 --time 01:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array.sh --model m-prometheus-7b --array 0 --concurrency 1 --time 01:00:00 --batch-size 16 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 ###
 bash scripts/opus/submit_array.sh --model m-prometheus-3b --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # ReMedy
-# If your DB stores shaomutan_remedy-9b-22 instead of remedy, use that exact string here.
 bash scripts/opus/submit_array.sh --model shaomutan_remedy-9b-22 --array 0-2 --concurrency 3 --time 01:00:00 --gpus 1 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # Bicleaner selectors
 # If your DB stores auto, use auto. If it stores en-xx / es-xx / de-xx, submit that exact selector.
-bash scripts/opus/submit_array.sh --model bicleaner-ai --array 0-2 --concurrency 3 --time 01:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array.sh --model bicleaner-ai --array 0 --concurrency 1 --time 01:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model en-xx --array 0-31 --concurrency 16 --time 12:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model es-xx --array 0-31 --concurrency 16 --time 12:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model de-xx --array 0-31 --concurrency 16 --time 12:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"

@@ -185,7 +185,7 @@ sbatch --array=81,128
 
 ---
 # 3) optional manual non-array run
-python -m src.score_comet 
+python -m src.backends.comet 
   --dataset flores200 
   --root /scratch/project_2008161/downstream_benchmarks/flores200 
   --manifest flores200_directions.tsv 

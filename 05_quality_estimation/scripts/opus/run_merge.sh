@@ -111,7 +111,7 @@ if [ "$FORCE" = "1" ]; then
     ARGS+=(--force)
 fi
 
-MERGE_CMD="$(quote_args python3 -m execution.opus_queue.merge "${ARGS[@]}")"
+MERGE_CMD="$(quote_args python3 -m execution.opus_queue.tools.merge "${ARGS[@]}")"
 WORKDIR_Q="$(printf '%q' "$WORKDIR")"
 ACTIVATE_Q="$(printf '%q' "${VENV_PATH}/bin/activate")"
 

@@ -67,6 +67,13 @@ def parse_args(argv=None):
         "both = metricx-24 where either source or target lang is supported "
         "else qwen3-4b (default: %(default)s)",
     )
+    parser.add_argument(
+        "--high-resource-threshold",
+        type=int,
+        default=HIGH_RESOURCE_SENTENCE_THRESHOLD,
+        help="Sentence-count cutoff for treating a direction as high-resource "
+        "when splitting qwen winners to metricx24 (default: %(default)s)",
+    )
     return parser.parse_args(argv)
 
 
@@ -85,7 +92,7 @@ def write_csv(rows, output_path: Path):
         writer.writerows(rows)
 
 
-def print_report(matched, unmatched, rows, strategy, stats):
+def print_report(matched, unmatched, rows, strategy, stats, high_resource_threshold):
     total = len(matched) + len(unmatched)
     final_metricx = sum(1 for row in rows if row["winner_model"] == METRICX_MODEL)
     qwen_total = stats["matched_qwen_winners"]
@@ -107,7 +114,7 @@ def print_report(matched, unmatched, rows, strategy, stats):
         print(f"  Matched Qwen winners      : {qwen_total}")
         print(
             "    high-resource qwen winners"
-            f" (>{HIGH_RESOURCE_SENTENCE_THRESHOLD:,}): {qwen_high_resource}"
+            f" (>{high_resource_threshold:,}): {qwen_high_resource}"
         )
         print(f"    reassigned -> metricx24 : {qwen_shifted_to_metricx}")
         if qwen_shifted_to_metricx:
@@ -117,10 +124,7 @@ def print_report(matched, unmatched, rows, strategy, stats):
         print(f"    kept on qwen3-4b        : {qwen_kept}")
         if qwen_high_resource:
             shifted_share = qwen_shifted_to_metricx / qwen_high_resource * 100
-            print(
-                "    high-resource kept on qwen3-4b:"
-                f" {qwen_high_resource_kept}"
-            )
+            print("    high-resource kept on qwen3-4b:" f" {qwen_high_resource_kept}")
             print(
                 "    qwen-split trigger rate :"
                 f" {shifted_share:.1f}% of high-resource qwen winners"
@@ -138,8 +142,7 @@ def print_report(matched, unmatched, rows, strategy, stats):
         n_metricx = sum(
             1
             for r in rows
-            if r["direction_key"] in unmatched_set
-            and r["winner_model"] == "metricx24"
+            if r["direction_key"] in unmatched_set and r["winner_model"] == "metricx24"
         )
         n_qwen = len(unmatched) - n_metricx
         print(f"  Unmatched (default models): {len(unmatched)}")
@@ -182,11 +185,13 @@ def main(argv=None):
         sys.exit(f"Error: no sub-directories found under {args.opus_path}")
 
     strategy = args.default_model
+    high_resource_threshold = args.high_resource_threshold
     metricx_supported_codes = frozenset()
     if strategy in ("metricx-24", "both"):
         metricx_supported_codes = _build_metricx_supported_codes()
         print(f"MetricX-24 covers {len(metricx_supported_codes)} FLORES codes")
     print(f"Default-model strategy: {strategy}")
+    print(f"High-resource threshold: {high_resource_threshold:,} sentences")
 
     print(f"Counting sentences across {len(opus_dirs)} directions (parallel)...")
     sentence_counts = count_all_directions(args.opus_path, opus_dirs)
@@ -198,9 +203,10 @@ def main(argv=None):
         runtime_lookup,
         default_strategy=strategy,
         metricx_supported_codes=metricx_supported_codes,
+        high_resource_threshold=high_resource_threshold,
     )
 
     write_csv(rows, output_path)
     print(f"Wrote {len(rows)} rows to {output_path}")
 
-    print_report(matched, unmatched, rows, strategy, stats)
+    print_report(matched, unmatched, rows, strategy, stats, high_resource_threshold)

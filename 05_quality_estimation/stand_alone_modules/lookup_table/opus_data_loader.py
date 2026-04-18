@@ -21,9 +21,7 @@ def _require_column_set(fieldnames, csv_path):
     missing = sorted(REQUIRED_FLORES_COLUMNS - set(fieldnames))
     if missing:
         missing_str = ", ".join(missing)
-        raise ValueError(
-            f"{csv_path} is missing required column(s): {missing_str}"
-        )
+        raise ValueError(f"{csv_path} is missing required column(s): {missing_str}")
 
 
 def _require_value(row, column_name, row_number):
@@ -31,9 +29,7 @@ def _require_value(row, column_name, row_number):
     value = row.get(column_name)
     if value in (None, ""):
         direction_key = row.get("direction_key", f"row {row_number}")
-        raise ValueError(
-            f"Missing value in column '{column_name}' for {direction_key}"
-        )
+        raise ValueError(f"Missing value in column '{column_name}' for {direction_key}")
     return value
 
 
@@ -60,11 +56,11 @@ def load_flores_lookup(csv_path):
 
 
 def load_model_runtime(csv_path):
-    """Load model_runtime.csv into a dict {model_name: pairs_per_hour}."""
+    """Load model_runtime.csv into a dict {model_name: sentences_per_hour}."""
     runtime = {}
     with open(csv_path, newline="") as fh:
         for row in csv.DictReader(fh, delimiter="\t"):
-            runtime[row["model"]] = int(row["pairs/hour"])
+            runtime[row["model"]] = int(row["sentences/hour"])
     return runtime
 
 

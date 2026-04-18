@@ -100,116 +100,116 @@ resolve_model() {
     case "$model_lower" in
         comet22|unbabel/wmt22-cometkiwi-da)
             BACKEND="comet"
-            MODULE="src.score_comet"
+            MODULE="src.backends.comet"
             MODEL_CANONICAL="Unbabel/wmt22-cometkiwi-da"
             VENV_PATH="${COMET_VENV:-${VENV_BASE}/comet_venv}"
             ;;
         comet23|unbabel/wmt23-cometkiwi-da-xl)
             BACKEND="comet"
-            MODULE="src.score_comet"
+            MODULE="src.backends.comet"
             MODEL_CANONICAL="Unbabel/wmt23-cometkiwi-da-xl"
             VENV_PATH="${COMET_VENV:-${VENV_BASE}/comet_venv}"
             ;;
         xcomet|unbabel/xcomet-xl)
             BACKEND="comet"
-            MODULE="src.score_comet"
+            MODULE="src.backends.comet"
             MODEL_CANONICAL="Unbabel/XCOMET-XL"
             VENV_PATH="${COMET_VENV:-${VENV_BASE}/comet_venv}"
             ;;
         metricx24|google/metricx-24-hybrid-xl-v2p6)
             BACKEND="metricx"
-            MODULE="src.score_metricx"
+            MODULE="src.backends.metricx"
             MODEL_CANONICAL="google/metricx-24-hybrid-xl-v2p6"
             VENV_PATH="${METRIC_VENV:-${VENV_BASE}/metric_venv}"
             ;;
         qwen3-14b|qwen/qwen3-14b)
             BACKEND="llm"
-            MODULE="src.score_llm"
+            MODULE="src.backends.llm"
             MODEL_CANONICAL="Qwen/Qwen3-14B"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         qwen3-8b|qwen/qwen3-8b)
             BACKEND="llm"
-            MODULE="src.score_llm"
+            MODULE="src.backends.llm"
             MODEL_CANONICAL="Qwen/Qwen3-8B"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         qwen3-4b-awq|qwen/qwen3-4b-awq)
             BACKEND="llm"
-            MODULE="src.score_llm"
+            MODULE="src.backends.llm"
             MODEL_CANONICAL="Qwen/Qwen3-4B-AWQ"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             MODEL_VLLM_ARGS="--quantization awq"
             ;;
         qwen3-4b-fp8|qwen/qwen3-4b-fp8)
             BACKEND="llm"
-            MODULE="src.score_llm"
+            MODULE="src.backends.llm"
             MODEL_CANONICAL="Qwen/Qwen3-4B-FP8"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         qwen3-4b|qwen3-4b-instruct-2507|qwen/qwen3-4b-instruct-2507)
             BACKEND="llm"
-            MODULE="src.score_llm"
+            MODULE="src.backends.llm"
             MODEL_CANONICAL="Qwen/Qwen3-4B-Instruct-2507"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         qwen3-4b-instruct-2507-fp8|qwen/qwen3-4b-instruct-2507-fp8)
             BACKEND="llm"
-            MODULE="src.score_llm"
+            MODULE="src.backends.llm"
             MODEL_CANONICAL="Qwen/Qwen3-4B-Instruct-2507-FP8"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         qwen3-1.7b|qwen/qwen3-1.7b)
             BACKEND="llm"
-            MODULE="src.score_llm"
+            MODULE="src.backends.llm"
             MODEL_CANONICAL="Qwen/Qwen3-1.7B"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         qwen3-0.6b|qwen/qwen3-0.6b)
             BACKEND="llm"
-            MODULE="src.score_llm"
+            MODULE="src.backends.llm"
             MODEL_CANONICAL="Qwen/Qwen3-0.6B"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         m-prometheus-7b|unbabel/m-prometheus-7b)
             BACKEND="llm"
-            MODULE="src.score_llm"
+            MODULE="src.backends.llm"
             MODEL_CANONICAL="Unbabel/M-Prometheus-7B"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         m-prometheus-3b|unbabel/m-prometheus-3b)
             BACKEND="llm"
-            MODULE="src.score_llm"
+            MODULE="src.backends.llm"
             MODEL_CANONICAL="Unbabel/M-Prometheus-3B"
             VENV_PATH="${LLM_VENV:-${VENV_BASE}/vllm_venv}"
             ;;
         remedy|shaomutan/remedy-9b-22)
             BACKEND="remedy"
-            MODULE="src.score_remedy"
+            MODULE="src.backends.remedy"
             MODEL_CANONICAL="remedy"
             REMEDY_INST="${REMEDY_VENV:-${VENV_BASE}/remedy_venv}"
             ;;
         bicleaner|auto)
             BACKEND="bicleaner"
-            MODULE="src.score_bicleaner"
+            MODULE="src.backends.bicleaner"
             MODEL_CANONICAL="auto"
             BICLEANER_INST="${BICLEANER_VENV:-${VENV_BASE}/bicleaner_venv}"
             ;;
         en-xx|bitextor/bicleaner-ai-full-en-xx)
             BACKEND="bicleaner"
-            MODULE="src.score_bicleaner"
+            MODULE="src.backends.bicleaner"
             MODEL_CANONICAL="en-xx"
             BICLEANER_INST="${BICLEANER_VENV:-${VENV_BASE}/bicleaner_venv}"
             ;;
         es-xx|bitextor/bicleaner-ai-full-es-xx)
             BACKEND="bicleaner"
-            MODULE="src.score_bicleaner"
+            MODULE="src.backends.bicleaner"
             MODEL_CANONICAL="es-xx"
             BICLEANER_INST="${BICLEANER_VENV:-${VENV_BASE}/bicleaner_venv}"
             ;;
         de-xx|bitextor/bicleaner-ai-full-de-xx)
             BACKEND="bicleaner"
-            MODULE="src.score_bicleaner"
+            MODULE="src.backends.bicleaner"
             MODEL_CANONICAL="de-xx"
             BICLEANER_INST="${BICLEANER_VENV:-${VENV_BASE}/bicleaner_venv}"
             ;;

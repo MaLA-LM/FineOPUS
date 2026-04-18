@@ -17,7 +17,8 @@ BuildFn = Callable[[argparse.Namespace, DatasetAdapter], tuple[ScoreEntry, str]]
 
 def _build_comet(args, dataset):
     from models.language_support import CometLanguages
-    from src.score_comet import load_comet_model, score_entry as comet_score_entry
+    from src.backends.comet.backend import load_comet_model
+    from src.backends.comet.runner import score_entry as comet_score_entry
 
     spec, model_key = resolve_model_spec(args.model, "comet")
     language_support = CometLanguages(dataset=dataset)
@@ -35,8 +36,8 @@ def _build_comet(args, dataset):
 
 def _build_metricx(args, dataset):
     from models.language_support import MetricX24Languages
-    from src.metricx_backend import load_metricx, select_device
-    from src.score_metricx import score_entry as metricx_score_entry
+    from src.backends.metricx.backend import load_metricx, select_device
+    from src.backends.metricx.runner import score_entry as metricx_score_entry
 
     spec, model_key = resolve_model_spec(args.model, "metricx")
     device = select_device(args.gpus)
@@ -59,8 +60,8 @@ def _build_llm(args, dataset):
         PrometheusLanguages,
         QwenLanguages,
     )
-    from src.llm_backend import RESPONSE_FORMAT_JSON_SCHEMA, build_engine
-    from src.score_llm import score_entry as llm_score_entry
+    from src.backends.llm.backend import RESPONSE_FORMAT_JSON_SCHEMA, build_engine
+    from src.backends.llm.runner import score_entry as llm_score_entry
 
     try:
         spec, model_key = resolve_model_spec(args.model, "llm")
@@ -102,8 +103,8 @@ def _build_llm(args, dataset):
 
 def _build_remedy(args, dataset):
     from models.language_support import RemedyLanguages
-    from src.score_remedy import resolve_model as resolve_remedy_model
-    from src.score_remedy import score_entry as remedy_score_entry
+    from src.backends.remedy.cli import resolve_model as resolve_remedy_model
+    from src.backends.remedy.runner import score_entry as remedy_score_entry
 
     spec, model_key = resolve_remedy_model(args.model)
     cache_dir = Path(getattr(args, "cache_dir", ".cache/huggingface/hub"))
@@ -128,11 +129,11 @@ def _build_remedy(args, dataset):
 
 def _build_bicleaner(args, dataset):
     from models.language_support import CometLanguages
-    from src.score_bicleaner import (
+    from src.backends.bicleaner.cli import (
         BICLEANER_MODEL_IDS,
         resolve_model as resolve_bicleaner_model,
-        score_entry as bicleaner_score_entry,
     )
+    from src.backends.bicleaner.runner import score_entry as bicleaner_score_entry
 
     model_selector, model_key = resolve_bicleaner_model(args.model)
     language_support = CometLanguages(dataset=dataset)

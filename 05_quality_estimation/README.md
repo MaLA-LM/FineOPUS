@@ -50,7 +50,7 @@ A distributed, multi-model quality estimation (QE) pipeline that scores translat
 ```
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                          CLI Entry Points                                │
-│   python -m src.score_comet / score_metricx / score_remedy / ...         |
+│   python -m src.backends.comet / metricx / remedy / bicleaner / llm      |
 └────────────────────────────────┬─────────────────────────────────────────┘
                                  │
                     ┌────────────▼─────────────┐
@@ -147,7 +147,7 @@ FLORES200_ADAPTER = DatasetAdapter(
 
 ### Language Code Mapping
 
-File: `dataset/flores200_scripts/langcode_mapping.py`
+File: `dataset/flores200/langcode_mapping.py`
 
 It matches FLORES-200 display names to model-supported language names using a **four-stage fuzzy matching pipeline**.
 
@@ -202,15 +202,15 @@ mapping = build_model_language_mapping({"English", "French"})
 ```
 ### Language codes
 
-1) `dataset/flores200_scripts/langcodes.py` — Maps all 200+ FLORES language codes to display names, are copied from the official flores200 repository
-2) `dataset/flores200_scripts/langfamily.py` created using `glottolog` library, maps codes to language families
+1) `dataset/flores200/langcodes.py` — Maps all 200+ FLORES language codes to display names, are copied from the official flores200 repository
+2) `dataset/flores200/langfamily.py` created using `glottolog` library, maps codes to language families
 
 **Note**: `Basque`, `chinese (simplified)` and `chinese (Traditional)` have no language families, thus were added manually in the `langfamily.py` dict.
 `chinese` as `Sino-Tibetan`, `Basque` as `Basque`.
 
 ### Discovery & Data Loading
 
-#### Discovery (`dataset/flores200_scripts/discovery.py`)
+#### Discovery (`dataset/flores200/discovery.py`)
 
 Discovers all available translation directions on disk by scanning the FLORES-200 directory structure.
 
@@ -229,7 +229,7 @@ EXPECTED_ROWS = {"dev": 997, "devtest": 1012}
 
 The `expected_detail_rows()` function reconciles these hardcoded expectations with actual file line counts. If the actual count differs, the actual count takes precedence.
 
-#### Data Loading (`dataset/flores200_scripts/flores200_builder.py`)
+#### Data Loading (`dataset/flores200/builder.py`)
 
 **`load_flores200_parallel(src_lang, tgt_lang, *, split, root)`**:
 1. Validates split is `"dev"` or `"devtest"`
@@ -338,11 +338,11 @@ def metricx_adjust(score: float) -> float:
 
 ### Language Support System
 
-File: `models/language_support.py`
+Package: `models/language_support/`
 
 Each model has a language support class that tracks which of the 200+ FLORES languages the model was trained on or supports.
 
-**Base class `_BaseLanguageSupport`**:
+**Base class `BaseLanguageSupport`**:
 - Receives a set of language name strings the model supports
 - Uses `build_model_language_mapping()` from the dataset module to map FLORES codes to model language names
 - Provides `is_code_supported(code)`, `support_status(code)`, `get_full_language_name(code)`
@@ -397,7 +397,7 @@ File: `src/common.py`
 
 ### COMET Scorer
 
-File: `src/score_comet.py`
+Package: `src/backends/comet/` (entry point: `python -m src.backends.comet`)
 
 Uses the official COMET library (Unbabel).
 
@@ -412,7 +412,7 @@ Uses the official COMET library (Unbabel).
 
 ### MetricX-24 Scorer
 
-File: `src/score_metricx.py` + `src/metricx_backend.py`
+Package: `src/backends/metricx/` (entry point: `python -m src.backends.metricx`)
 
 Uses `MT5ForRegression`.
 
@@ -430,7 +430,7 @@ Uses `MT5ForRegression`.
 
 ### ReMedy Scorer
 
-File: `src/score_remedy.py` + `src/remedy_backend.py`
+Package: `src/backends/remedy/` (entry point: `python -m src.backends.remedy`)
 
 Uses the `remedy-score` CLI tool, which internally uses vLLM.
 
@@ -453,7 +453,7 @@ port = 20000 + ((job_seed + task_seed + iteration) % 20000)
 
 ### Bicleaner Scorer
 
-File: `src/score_bicleaner.py` + `src/bicleaner_backend.py`
+Package: `src/backends/bicleaner/` (entry point: `python -m src.backends.bicleaner`)
 
 Uses the `bicleaner-ai-classify` CLI tool.
 
@@ -473,7 +473,7 @@ Uses the `bicleaner-ai-classify` CLI tool.
 
 ### LLM Scorer
 
-File: `src/score_llm.py` + `src/llm_backend.py`
+Package: `src/backends/llm/` (entry point: `python -m src.backends.llm`)
 
 Uses vLLM **offline mode** (`LLM.chat()` directly — no separate server process). The model is loaded once and reused across all directions in the shard.
 
@@ -516,7 +516,7 @@ Uses vLLM **offline mode** (`LLM.chat()` directly — no separate server process
 
 ### Single-Segment Prompt
 
-File: `prompts/llm_prompt.py`
+File: `prompts/detailed.py`
 
 Used by the legacy single-segment scoring path. Each source/target pair gets its own prompt:
 
@@ -552,7 +552,7 @@ Output: ONLY valid JSON, exactly this shape:
 
 ### Batch Prompt
 
-File: `prompts/llm_prompt_batch.py`
+File: `prompts/batch.py`
 
 The **production prompt** used by `score_llm_batched()`. Evaluates multiple segments in a single LLM call for efficiency.
 
@@ -568,7 +568,7 @@ The **production prompt** used by `score_llm_batched()`. Evaluates multiple segm
 - Assigns sequential IDs starting from `start_id`
 - Returns the complete prompt string
 
-The canonical prompt modules now live in `prompts/{detailed,simple,batch}.py`; the older `prompts/llm_prompt*.py` paths remain as compatibility shims.
+The prompt modules live in `prompts/{detailed,simple,batch}.py`.
 
 ---
 
@@ -817,7 +817,7 @@ sbatch --array=81,128 \
 Run a single shard directly (useful for debugging):
 
 ```bash
-python -m src.score_comet \
+python -m src.backends.comet \
     --dataset flores200 \
     --root /scratch/project_2008161/downstream_benchmarks/flores200 \
     --execution flores_array \
@@ -956,12 +956,12 @@ FLORES.
 
 ### Dataset module layout
 
-- [dataset/opus_scripts/discovery.py](dataset/opus_scripts/discovery.py) –
+- [dataset/opus/discovery.py](dataset/opus/discovery.py) –
   scans the root for direction directories, validates the name format,
   and drops directions with zero parquet files.
   `DEFAULT_OPUS_ROOT = /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2`,
   `SPLIT_VALUES = ("all",)`.
-- [dataset/opus_scripts/opus_builder.py](dataset/opus_scripts/opus_builder.py) –
+- [dataset/opus/builder.py](dataset/opus/builder.py) –
   `load_opus_parallel(src_lang, tgt_lang, *, split, root)` streams parquet
   files shard-by-shard and **row-group-by-row-group** via
   `pyarrow.parquet.ParquetFile.read_row_group()` to keep peak memory
@@ -969,19 +969,19 @@ FLORES.
   can hold millions of sentence pairs. Returns a list of example dicts,
   each containing the full original parquet row **plus** transient
   `"src"` and `"tgt"` aliases that every scorer already reads.
-- [dataset/opus_scripts/langcodes.py](dataset/opus_scripts/langcodes.py) –
+- [dataset/opus/langcodes.py](dataset/opus/langcodes.py) –
   **placeholder dict** mapping OPUS language codes (`src_Script` /
   `tgt_Script`) to display names. Populate incrementally; any codes
   missing from the dict automatically surface as `support_status ==
   False` in the language-support helpers.
-- [dataset/opus_scripts/langcode_mapping.py](dataset/opus_scripts/langcode_mapping.py) –
+- [dataset/opus/langcode_mapping.py](dataset/opus/langcode_mapping.py) –
   `build_model_language_mapping(model_languages)` wraps the shared
   4-stage fuzzy matcher in
-  [dataset/flores200_scripts/langcode_mapping.py](dataset/flores200_scripts/langcode_mapping.py)
+  [dataset/flores200/langcode_mapping.py](dataset/flores200/langcode_mapping.py)
   (via the new exported helper `build_mapping_from_codes`) so OPUS gets
   the same exact/alias/left-trim/strip-qualifier matching pipeline as
   FLORES-200 for free.
-- [dataset/opus_scripts/frames.py](dataset/opus_scripts/frames.py) –
+- [dataset/opus/frames.py](dataset/opus/frames.py) –
   OPUS-specific frame builder that produces summary + detail rows with
   the OPUS output schema (see below).
 - [dataset/adapters/opus.py](dataset/adapters/opus.py) – wires every
@@ -1098,7 +1098,7 @@ sbatch --array=0-63 \
     --model wmt22-cometkiwi-da
 
 # 3) Single-direction debug run
-python -m src.score_comet \
+python -m src.backends.comet \
     --dataset opus \
     --root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 \
     --execution flores_array \
@@ -1111,7 +1111,7 @@ python -m src.score_comet \
 
 ### Notes / known limitations
 
-- [dataset/opus_scripts/langcodes.py](dataset/opus_scripts/langcodes.py)
+- [dataset/opus/langcodes.py](dataset/opus/langcodes.py)
   ships empty. Populate it with the codes present under `DEFAULT_OPUS_ROOT`
   to get meaningful `src_seen` / `tgt_seen` flags; until then they will
   report `"unknown"` via the language-support base class.

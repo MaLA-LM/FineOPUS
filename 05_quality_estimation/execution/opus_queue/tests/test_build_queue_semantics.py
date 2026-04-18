@@ -9,7 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from execution.opus_queue import queue_db, queue_ops
+from execution.opus_queue import db as queue_db
+from execution.opus_queue.db import writes as queue_ops
 
 
 def _seed_job(conn, *, direction_key: str, model: str, shard_id: int, status: str) -> None:

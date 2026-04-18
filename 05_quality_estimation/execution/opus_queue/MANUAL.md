@@ -9,18 +9,12 @@ Package layout:
 
 ```text
 execution/opus_queue/
-|- db/
-|- ops/
-|- planning/
-|- scoring/
-|- tools/
-|- worker/
-|- build_queue.py
-|- merge.py
-|- queue_db.py
-|- queue_ops.py
-|- reaper.py
-|- worker.py
+|- db/            # queue_db / queue_ops helpers (package)
+|- ops/           # build_queue CLI + lookup_reader
+|- planning/      # shard_planner, count_cache
+|- scoring/       # scorer_factory
+|- tools/         # merge + reaper CLIs
+|- worker/        # worker CLI, run_loop, shard_io, shard_loader
 `- executor.py
 
 scripts/opus/
@@ -38,7 +32,7 @@ scripts/opus/
 3. Pre-flight with `--dry-run` to sanity-check the lookup CSV counts:
 
     ```bash
-    python -m execution.opus_queue.build_queue \
+    python -m execution.opus_queue.ops.build_queue \
         --lookup /path/to/lookup_OPUS.csv \
         --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 \
         --db /scratch/project_462001050/opus_qe/jobs.db \
@@ -48,7 +42,7 @@ scripts/opus/
 4. Populate the queue for real:
 
     ```bash
-    python -m execution.opus_queue.build_queue \
+    python -m execution.opus_queue.ops.build_queue \
         --lookup /path/to/lookup_OPUS.csv \
         --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 \
         --db /scratch/project_462001050/opus_qe/jobs.db
@@ -83,7 +77,7 @@ If shard runtimes are consistently far from the 20-40 minute target,
 adjust the planner seed or use overrides:
 
 ```bash
-python -m execution.opus_queue.build_queue \
+python -m execution.opus_queue.ops.build_queue \
     --lookup /path/to/lookup_OPUS.csv \
     --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 \
     --db /scratch/project_462001050/opus_qe/jobs.db \
@@ -202,14 +196,14 @@ single Parquet file per direction.
 
 ## Troubleshooting
 
-- SQLite locking: `queue_db.py` enables WAL, `busy_timeout=30000`, and
-  retries `SQLITE_BUSY` with randomized backoff. If locking still flakes
-  out on the cluster filesystem, move the DB or replace `queue_db.py`
-  with a different backend behind the same API.
+- SQLite locking: `execution/opus_queue/db/connection.py` enables WAL,
+  `busy_timeout=30000`, and retries `SQLITE_BUSY` with randomized backoff.
+  If locking still flakes out on the cluster filesystem, move the DB or
+  replace the `db/` package with a different backend behind the same API.
 - Worker walltime: the launcher computes remaining time with `scontrol`
   and passes `--walltime-seconds` so workers exit cleanly before a hard
   kill.
 - Merge ordering: merge sorts by parsed integer `shard_id`, not raw file
   name text.
-- Schema bumps: `queue_db.initialize` checks `PRAGMA user_version` and
+- Schema bumps: `execution.opus_queue.db.initialize` checks `PRAGMA user_version` and
   refuses incompatible DBs until a migration is added.

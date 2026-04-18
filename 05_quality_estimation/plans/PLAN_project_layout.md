@@ -1,5 +1,12 @@
 # Plan: Repository-Wide Reorganization
 
+> **Status note (2026-04-17):** The back-compat shims described in this plan —
+> `src/{bicleaner,llm,metricx,remedy}_backend.py` and
+> `prompts/llm_prompt{,_simple,_batch}.py` — have since been deleted. All
+> importers were updated to the canonical `src.backends.<name>.backend` /
+> `prompts.{detailed,simple,batch}` paths. References below are retained for
+> historical design context.
+
 ## Context
 
 The `05_quality_estimation` repo is a distributed FLORES-200 / OPUS QE pipeline (~5,500 LOC of Python + shell). Exploration confirms the user's complaint: several files exceed 250 lines and hold 4–8 independent concerns, and the top-level `execution/opus_queue/` directory has 14 flat files that cluster naturally into 6 layered subpackages.

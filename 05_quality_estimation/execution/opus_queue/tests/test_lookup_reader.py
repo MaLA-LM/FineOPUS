@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from tempfile import mkstemp
 
-from execution.opus_queue.lookup_reader import read_lookup_rows
+from execution.opus_queue.ops.lookup_reader import read_lookup_rows
 
 
 @contextmanager

@@ -11,9 +11,9 @@ import shutil
 from pathlib import Path
 
 from dataset.mediator import get_dataset
-from dataset.opus_scripts.discovery import DEFAULT_SPLIT, discover_directions
-from dataset.opus_scripts.frames import build_frames
-from dataset.opus_scripts.opus_builder import load_opus_parallel
+from dataset.opus.discovery import DEFAULT_SPLIT, discover_directions
+from dataset.opus.frames import build_frames
+from dataset.opus.builder import load_opus_parallel
 from execution.flores_array.runner import validate_flores_args
 
 try:
