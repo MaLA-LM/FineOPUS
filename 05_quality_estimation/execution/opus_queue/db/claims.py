@@ -17,6 +17,8 @@ __all__ = [
     "reset_stale_rows",
 ]
 
+_MAX_ERROR_CHARS = 1000
+
 _CLAIM_SQL = """
 UPDATE jobs
    SET status = 'running',
@@ -83,7 +85,7 @@ def mark_failed(
     error: str | None,
     max_attempts: int,
 ) -> FinalizeResult:
-    trimmed = (error or "")[:1000] or None
+    trimmed = _trim_error(error)
     row = conn.execute(
         """
         UPDATE jobs
@@ -118,6 +120,20 @@ def mark_failed(
     if row is None:
         return "stale_noop"
     return "failed" if row["status"] == "failed" else "requeued"
+
+
+def _trim_error(error: str | None) -> str | None:
+    if not error:
+        return None
+    if len(error) <= _MAX_ERROR_CHARS:
+        return error
+
+    separator = "\n...\n"
+    head_budget = 650
+    tail_budget = _MAX_ERROR_CHARS - head_budget - len(separator)
+    head = error[:head_budget].rstrip()
+    tail = error[-tail_budget:].lstrip()
+    return f"{head}{separator}{tail}"
 
 
 def reset_own_stale(conn: sqlite3.Connection, worker_id: str) -> int:

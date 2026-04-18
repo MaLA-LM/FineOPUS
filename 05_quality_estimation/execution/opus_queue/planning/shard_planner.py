@@ -10,7 +10,7 @@ from dataclasses import dataclass
 SEED_SHARD_SIZES: dict[str, int] = {
     "metricx24": 200_000,
     "wmt23-cometkiwi-da-xl": 50_000,
-    "xcomet-xl": 130_000,
+    "xcomet-xl": 100_000,
     "wmt22-cometkiwi-da": 50_000,
     "remedy": 16_500,
     "shaomutan_remedy-9b-22": 60_000,
@@ -38,8 +38,8 @@ EXPECTED_SHARD_SECONDS: dict[str, int] = {
     "wmt23-cometkiwi-da-xl": 1_500,
     "xcomet-xl": 1_500,
     "shaomutan_remedy-9b-22": 1_000,
-    "qwen3-4b-instruct-2507": 1_600,
-    "m-prometheus-7b": 1_600,
+    "qwen3-4b-instruct-2507": 2_000,
+    "m-prometheus-7b": 2_000,
     "m-prometheus-7b-detailed": 9_000,
     "bicleaner-ai": 300,
 }

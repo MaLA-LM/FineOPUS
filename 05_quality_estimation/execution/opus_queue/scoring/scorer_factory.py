@@ -90,6 +90,7 @@ def _build_llm(args, dataset):
         max_num_batched_tokens=getattr(args, "max_num_batched_tokens", 16384),
         max_num_seqs=getattr(args, "max_num_seqs", 128),
         max_model_len=getattr(args, "max_model_len", None),
+        response_format=getattr(args, "response_format", RESPONSE_FORMAT_JSON_SCHEMA),
     )
     logger.info("LLM scorer ready: model_id=%s prompt_mode=%s", model_id, prompt_mode)
 

@@ -31,6 +31,35 @@ def _make_worker_id() -> str:
     return f"{job}.{task}.{host}.{pid}"
 
 
+def _summarize_exception(exc: BaseException) -> str:
+    message = " ".join(str(exc).split()).strip()
+    if not message:
+        return type(exc).__name__
+    return f"{type(exc).__name__}: {message}"
+
+
+def _format_failure_detail(
+    exc: BaseException,
+    tb: str,
+    *,
+    direction_key: str,
+    shard_id: int,
+    start_idx: int,
+    end_idx: int,
+    attempt: int,
+    queue_model: str,
+    scorer_model: str,
+    backend: str,
+) -> str:
+    summary = _summarize_exception(exc)
+    context = (
+        f"context: queue_model={queue_model} scorer_model={scorer_model} "
+        f"backend={backend} direction={direction_key} shard={shard_id} "
+        f"range=[{start_idx},{end_idx}) attempt={attempt}"
+    )
+    return f"{summary}\n{context}\ntraceback:\n{tb.rstrip()}"
+
+
 def _score_shard(run_entry, context, entry, start_idx, end_idx, direction_key, shard_id):
     context.bounds.start = start_idx
     context.bounds.end = end_idx
@@ -175,16 +204,29 @@ def run_loop(args: argparse.Namespace) -> int:
                     shard_id, worker_id, elapsed,
                 ):
                     completed_shards += 1
-            except Exception:
+            except Exception as exc:
                 failed_shards += 1
                 tb = traceback.format_exc()
+                error_detail = _format_failure_detail(
+                    exc,
+                    tb,
+                    direction_key=direction_key,
+                    shard_id=shard_id,
+                    start_idx=start_idx,
+                    end_idx=end_idx,
+                    attempt=attempt,
+                    queue_model=queue_model,
+                    scorer_model=scorer_model,
+                    backend=backend,
+                )
+                error_summary = _summarize_exception(exc)
                 logger.error(
                     "Shard failed dir=%s shard=%d:\n%s",
-                    direction_key, shard_id, tb,
+                    direction_key, shard_id, error_detail,
                 )
                 finalize_result = queue_db.mark_failed(
                     conn, direction_key, queue_model, shard_id,
-                    worker_id, tb, args.max_attempts,
+                    worker_id, error_detail, args.max_attempts,
                 )
                 queue_db.log_event(
                     conn,
@@ -193,7 +235,7 @@ def run_loop(args: argparse.Namespace) -> int:
                     direction_key=direction_key,
                     model=queue_model,
                     shard_id=shard_id,
-                    detail=f"status={finalize_result}",
+                    detail=f"status={finalize_result} error={error_summary}",
                 )
             finally:
                 context.bounds.clear()

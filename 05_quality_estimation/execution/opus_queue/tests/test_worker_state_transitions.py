@@ -158,10 +158,36 @@ def test_mark_failed_requeues_then_fails_at_threshold() -> None:
             conn.close()
 
 
+def test_mark_failed_preserves_traceback_tail_when_trimmed() -> None:
+    with TemporaryDirectory() as tmp:
+        db_path = Path(tmp) / "queue.db"
+        conn = queue_db.connect(db_path)
+        try:
+            queue_db.initialize(conn)
+            _seed_job(conn)
+            claimed = queue_db.claim_next(conn, "metricx24", "w1")
+            assert claimed is not None
+
+            long_error = "Traceback head\n" + ("x" * 1200) + "\nRuntimeError: boom-tail"
+            assert queue_db.mark_failed(
+                conn, "eng_Latn-fra_Latn", "metricx24", 0, "w1", long_error, 2
+            ) == "requeued"
+
+            state = _job_state(conn)
+            assert state["last_error"] is not None
+            assert state["last_error"].startswith("Traceback head")
+            assert "\n...\n" in state["last_error"]
+            assert state["last_error"].endswith("RuntimeError: boom-tail")
+            assert len(state["last_error"]) <= 1000
+        finally:
+            conn.close()
+
+
 def run_test() -> None:
     test_stale_worker_cannot_requeue_done_row()
     test_stale_worker_cannot_mark_done_after_requeue()
     test_mark_failed_requeues_then_fails_at_threshold()
+    test_mark_failed_preserves_traceback_tail_when_trimmed()
     print("OK: worker-owned finalization prevents stale workers from clobbering shard state.")
 
 
