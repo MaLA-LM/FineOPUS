@@ -30,6 +30,7 @@ def run(args) -> None:
         total_shards = 0
         for direction_key, model in directions:
             ok, shards, rows = merge_direction(
+                conn,
                 output_base,
                 merged_base,
                 db_path,
@@ -43,7 +44,7 @@ def run(args) -> None:
                 total_rows += rows
                 total_shards += shards
         logger.info(
-            "Merge complete: directions=%d shards=%d rows=%d",
+            "Merge complete: directions=%d winning_shards=%d rows=%d",
             merged,
             total_shards,
             total_rows,

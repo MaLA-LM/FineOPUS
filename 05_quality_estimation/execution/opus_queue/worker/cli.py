@@ -26,7 +26,28 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override auto-detected backend (comet|metricx|llm|remedy|bicleaner).",
     )
-    parser.add_argument("--output-base", required=True, help="Shared-storage dir for shard JSONLs.")
+    parser.add_argument(
+        "--output-base",
+        required=True,
+        help="Shared-storage dir for legacy shard JSONLs or worker-owned part files.",
+    )
+    parser.add_argument(
+        "--part-writer",
+        action="store_true",
+        help="Append multiple shards into worker-owned part files instead of shard_*.jsonl.",
+    )
+    parser.add_argument(
+        "--part-max-bytes",
+        type=int,
+        default=512 * 1024 * 1024,
+        help="Rotate part files before the next shard would push them past this size.",
+    )
+    parser.add_argument(
+        "--part-max-shards",
+        type=int,
+        default=32,
+        help="Rotate part files before appending the next shard once this many shards are present.",
+    )
     parser.add_argument("--opus-root", default=None, help="OPUS root; defaults to adapter default.")
     parser.add_argument("--walltime-seconds", type=int, default=None,
                         help="Remaining walltime (seconds). Worker exits cleanly if time runs low.")

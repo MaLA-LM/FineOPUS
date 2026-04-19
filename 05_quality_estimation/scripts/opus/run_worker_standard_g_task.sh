@@ -89,6 +89,9 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-}"
 RESPONSE_FORMAT="${RESPONSE_FORMAT:-}"
 STRUCTURED_OUTPUTS_BACKEND="${STRUCTURED_OUTPUTS_BACKEND:-}"
 ENFORCE_EAGER="${ENFORCE_EAGER:-}"
+PART_WRITER="${PART_WRITER:-}"
+PART_MAX_BYTES="${PART_MAX_BYTES:-}"
+PART_MAX_SHARDS="${PART_MAX_SHARDS:-}"
 
 mkdir -p "${WORKDIR}/logs"
 cd "$WORKDIR"
@@ -259,6 +262,7 @@ if [ -n "$WALLTIME_SECONDS" ]; then
 else
     echo "GCD=${LOCAL_ID}: remaining walltime seconds unknown"
 fi
+echo "GCD=${LOCAL_ID}: part_writer=${PART_WRITER:-0} part_max_bytes=${PART_MAX_BYTES:-<worker-default>} part_max_shards=${PART_MAX_SHARDS:-<worker-default>}"
 
 WORKER_ARGS=(
     --db "$DB"
@@ -276,6 +280,15 @@ fi
 
 if [ -n "$WALLTIME_SECONDS" ]; then
     WORKER_ARGS+=(--walltime-seconds "$WALLTIME_SECONDS")
+fi
+if [ -n "$PART_WRITER" ]; then
+    WORKER_ARGS+=(--part-writer)
+fi
+if [ -n "$PART_MAX_BYTES" ]; then
+    WORKER_ARGS+=(--part-max-bytes "$PART_MAX_BYTES")
+fi
+if [ -n "$PART_MAX_SHARDS" ]; then
+    WORKER_ARGS+=(--part-max-shards "$PART_MAX_SHARDS")
 fi
 
 case "$BACKEND" in

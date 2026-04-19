@@ -2,30 +2,237 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Iterator
 
-from execution.opus_queue.tools.merge.collect import sorted_shard_files
+from execution.opus_queue.tools.merge.collect import done_jobs_for_direction, sorted_part_files
 from utils.logger import logger
 
 __all__ = ["merge_direction"]
 
+# Rows per Arrow batch when streaming shards into the ParquetWriter. Large
+# enough to keep row-group overhead low; small enough that peak memory is
+# bounded (~tens of MB per batch of detail rows) regardless of shard count.
+_MERGE_BATCH_ROWS = 20_000
+# Split merged outputs once the current parquet part reaches roughly 5 GB.
+# Rotation is checked after each written batch, so a single file can exceed the
+# cap by up to one merge batch.
+_MAX_PARQUET_FILE_BYTES = 5_000_000_000
+_DROP_OUTPUT_COLUMNS = ("shard_id", "worker_id", "direction_key")
 
-def _read_shard_records(path: Path) -> list[dict]:
-    records: list[dict] = []
+
+@dataclass
+class _MergeScanStats:
+    rows_kept: int = 0
+    rows_dropped: int = 0
+    matched_shard_ids: set[int] = field(default_factory=set)
+
+
+@dataclass(frozen=True)
+class _CompletedPart:
+    tmp_path: Path
+    final_path: Path
+    rows: int
+
+
+def _drop_output_columns(record: dict) -> dict:
+    for column in _DROP_OUTPUT_COLUMNS:
+        record.pop(column, None)
+    return record
+
+
+def _merged_legacy_file(merged_model_dir: Path, direction_key: str) -> Path:
+    return merged_model_dir / f"{direction_key}.parquet"
+
+
+def _merged_meta_file(merged_model_dir: Path, direction_key: str) -> Path:
+    return merged_model_dir / f"{direction_key}.meta.json"
+
+
+def _merged_part_file(merged_model_dir: Path, direction_key: str, part_idx: int) -> Path:
+    return merged_model_dir / f"{direction_key}.part-{part_idx:04d}.parquet"
+
+
+def _existing_merged_part_files(merged_model_dir: Path, direction_key: str) -> list[Path]:
+    return sorted(
+        path
+        for path in merged_model_dir.glob(f"{direction_key}.part-*.parquet")
+        if path.is_file()
+    )
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    os.replace(tmp_path, path)
+
+
+class _SplitParquetWriter:
+
+    def __init__(self, pq, merged_model_dir: Path, direction_key: str) -> None:
+        self._pq = pq
+        self._merged_model_dir = merged_model_dir
+        self._direction_key = direction_key
+        self._schema = None
+        self._writer = None
+        self._handle = None
+        self._current_tmp_path: Path | None = None
+        self._current_final_path: Path | None = None
+        self._rows_in_current = 0
+        self._next_part_idx = 0
+        self._completed_parts: list[_CompletedPart] = []
+
+    def _open_part(self) -> None:
+        if self._writer is not None:
+            return
+        if self._schema is None:
+            raise ValueError("schema must be initialized before opening a parquet part")
+        final_path = _merged_part_file(
+            self._merged_model_dir, self._direction_key, self._next_part_idx
+        )
+        self._next_part_idx += 1
+        self._current_final_path = final_path
+        self._current_tmp_path = final_path.with_suffix(final_path.suffix + ".tmp")
+        self._handle = self._current_tmp_path.open("wb")
+        self._writer = self._pq.ParquetWriter(self._handle, self._schema)
+        self._rows_in_current = 0
+
+    def write_batch(self, pa, batch: list[dict]) -> int:
+        if not batch:
+            return 0
+        if self._schema is None:
+            table = pa.Table.from_pylist(batch)
+            self._schema = table.schema
+        else:
+            table = pa.Table.from_pylist(batch, schema=self._schema)
+        self._open_part()
+        assert self._writer is not None
+        assert self._handle is not None
+        self._writer.write_table(table)
+        self._handle.flush()
+        self._rows_in_current += table.num_rows
+        if self._handle.tell() >= _MAX_PARQUET_FILE_BYTES:
+            self._close_current_part()
+        return table.num_rows
+
+    def _close_current_part(self) -> None:
+        if self._writer is None:
+            return
+        assert self._handle is not None
+        assert self._current_tmp_path is not None
+        assert self._current_final_path is not None
+        self._writer.close()
+        self._handle.flush()
+        os.fsync(self._handle.fileno())
+        self._handle.close()
+        self._completed_parts.append(
+            _CompletedPart(
+                tmp_path=self._current_tmp_path,
+                final_path=self._current_final_path,
+                rows=self._rows_in_current,
+            )
+        )
+        self._writer = None
+        self._handle = None
+        self._current_tmp_path = None
+        self._current_final_path = None
+        self._rows_in_current = 0
+
+    def finalize(self) -> list[_CompletedPart]:
+        self._close_current_part()
+        return list(self._completed_parts)
+
+    def cleanup(self) -> None:
+        current_tmp_path = self._current_tmp_path
+        if self._writer is not None:
+            self._writer.close()
+        if self._handle is not None and not self._handle.closed:
+            self._handle.close()
+        self._writer = None
+        self._handle = None
+        self._current_tmp_path = None
+        self._current_final_path = None
+        self._rows_in_current = 0
+        paths_to_remove = [part.tmp_path for part in self._completed_parts]
+        if current_tmp_path is not None:
+            paths_to_remove.append(current_tmp_path)
+        for path in paths_to_remove:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                logger.warning("Failed to remove merge temp file: %s", path)
+
+
+def _iter_filtered_records(
+    path: Path,
+    *,
+    winners: dict[int, str] | None = None,
+    legacy_shard_id: int | None = None,
+    stats: _MergeScanStats | None = None,
+) -> Iterator[dict]:
     with path.open("r", encoding="utf-8") as reader:
         for line_no, raw_line in enumerate(reader, start=1):
             line = raw_line.strip()
             if not line:
                 continue
             try:
-                records.append(json.loads(line))
+                record = json.loads(line)
             except json.JSONDecodeError:
                 logger.warning("Skipping malformed JSON at %s:%s", path, line_no)
-    return records
+                if stats is not None:
+                    stats.rows_dropped += 1
+                continue
+
+            if legacy_shard_id is not None:
+                record = _drop_output_columns(record)
+                if stats is not None:
+                    stats.rows_kept += 1
+                yield record
+                continue
+
+            if winners is None:
+                raise ValueError("part-file filtering requires winners")
+
+            raw_shard_id = record.get("shard_id")
+            raw_worker_id = record.get("worker_id")
+            if raw_shard_id is None or raw_worker_id is None:
+                logger.warning(
+                    "Skipping malformed part row missing shard_id/worker_id at %s:%s",
+                    path,
+                    line_no,
+                )
+                if stats is not None:
+                    stats.rows_dropped += 1
+                continue
+            try:
+                shard_id = int(raw_shard_id)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Skipping malformed part row with non-integer shard_id at %s:%s",
+                    path,
+                    line_no,
+                )
+                if stats is not None:
+                    stats.rows_dropped += 1
+                continue
+            worker_id = str(raw_worker_id)
+            if winners.get(shard_id) != worker_id:
+                if stats is not None:
+                    stats.rows_dropped += 1
+                continue
+            record = _drop_output_columns(record)
+            if stats is not None:
+                stats.rows_kept += 1
+                stats.matched_shard_ids.add(shard_id)
+            yield record
 
 
 def merge_direction(
+    conn,
     output_base: Path,
     merged_base: Path,
     source_db: Path,
@@ -43,59 +250,142 @@ def merge_direction(
         logger.warning("No shard dir for %s/%s at %s", model, direction_key, shard_dir)
         return False, 0, 0
 
-    shards = sorted_shard_files(shard_dir)
-    if not shards:
+    winners = done_jobs_for_direction(conn, direction_key, model)
+    if not winners:
+        logger.warning("No done jobs found for %s/%s; skipping merge.", model, direction_key)
+        return False, 0, 0
+
+    part_files = sorted_part_files(shard_dir)
+    if not part_files:
         logger.warning("No shard files in %s", shard_dir)
         return False, 0, 0
 
-    out_file = merged_base / model / f"{direction_key}.parquet"
-    meta_file = merged_base / model / f"{direction_key}.meta.json"
-    out_file.parent.mkdir(parents=True, exist_ok=True)
+    merged_model_dir = merged_base / model
+    merged_model_dir.mkdir(parents=True, exist_ok=True)
+    legacy_out_file = _merged_legacy_file(merged_model_dir, direction_key)
+    meta_file = _merged_meta_file(merged_model_dir, direction_key)
+    existing_part_files = _existing_merged_part_files(merged_model_dir, direction_key)
+    existing_output_files = list(existing_part_files)
+    if legacy_out_file.exists():
+        existing_output_files.append(legacy_out_file)
 
-    if out_file.exists() and not force:
-        logger.info("Skipping merged direction (exists): %s", out_file)
+    if existing_output_files and meta_file.exists() and not force:
+        logger.info("Skipping merged direction (exists): %s", meta_file)
         return False, 0, 0
 
-    records: list[dict] = []
-    for _shard_id, path in shards:
-        records.extend(_read_shard_records(path))
+    writer = _SplitParquetWriter(pq, merged_model_dir, direction_key)
+    total_rows = 0
+    rows_kept = 0
+    rows_dropped = 0
+    part_file_count = sum(1 for item in part_files if item.kind == "part")
+    legacy_file_count = len(part_files) - part_file_count
+    seen_shard_ids_from_new_layout: set[int] = set()
+    batch: list[dict] = []
 
-    if not records:
+    def flush_batch() -> None:
+        nonlocal total_rows
+        if not batch:
+            return
+        total_rows += writer.write_batch(pa, batch)
+        batch.clear()
+
+    try:
+        for item in part_files:
+            if item.kind == "part":
+                stats = _MergeScanStats()
+                for record in _iter_filtered_records(
+                    item.path, winners=winners, stats=stats
+                ):
+                    batch.append(record)
+                    if len(batch) >= _MERGE_BATCH_ROWS:
+                        flush_batch()
+                seen_shard_ids_from_new_layout.update(stats.matched_shard_ids)
+                rows_kept += stats.rows_kept
+                rows_dropped += stats.rows_dropped
+                continue
+
+            assert item.shard_id is not None
+            if item.shard_id in seen_shard_ids_from_new_layout:
+                logger.info(
+                    "Skipping legacy shard file shadowed by winning part rows: %s",
+                    item.path,
+                )
+                continue
+            if item.shard_id not in winners:
+                logger.warning(
+                    "Skipping legacy shard file not present in done-job set: %s",
+                    item.path,
+                )
+                continue
+
+            stats = _MergeScanStats()
+            for record in _iter_filtered_records(
+                item.path,
+                legacy_shard_id=item.shard_id,
+                stats=stats,
+            ):
+                batch.append(record)
+                if len(batch) >= _MERGE_BATCH_ROWS:
+                    flush_batch()
+            rows_kept += stats.rows_kept
+            rows_dropped += stats.rows_dropped
+        flush_batch()
+        completed_parts = writer.finalize()
+    except Exception:
+        writer.cleanup()
+        raise
+
+    if not completed_parts:
+        # No records across any shard: nothing to write.
         logger.warning("No records found in %s; skipping merge.", shard_dir)
-        return False, len(shards), 0
+        return False, len(winners), 0
 
-    table = pa.Table.from_pylist(records)
-    tmp_file = out_file.with_suffix(out_file.suffix + ".tmp")
-    with tmp_file.open("wb") as writer:
-        pq.write_table(table, writer)
-        writer.flush()
-        os.fsync(writer.fileno())
-    os.replace(tmp_file, out_file)
+    final_output_files = [part.final_path for part in completed_parts]
+    for part in completed_parts:
+        os.replace(part.tmp_path, part.final_path)
+    for stale_path in existing_output_files:
+        if stale_path in final_output_files:
+            continue
+        try:
+            stale_path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            logger.warning("Failed to remove stale merged parquet: %s", stale_path)
 
-    total_rows = int(table.num_rows)
     meta = {
-        "n_shards": len(shards),
+        "n_shards": len(winners),
         "n_rows": total_rows,
         "source_db": str(source_db),
         "merged_at": datetime.now(timezone.utc).isoformat(),
         "direction_key": direction_key,
         "model": model,
+        "n_parquet_files": len(final_output_files),
+        "parquet_files": [path.name for path in final_output_files],
     }
-    meta_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    _write_json_atomic(meta_file, meta)
 
     if delete_shards:
-        for _shard_id, path in shards:
+        for item in part_files:
             try:
-                path.unlink()
+                item.path.unlink()
             except OSError:
-                logger.warning("Failed to delete shard file: %s", path)
+                logger.warning("Failed to delete shard file: %s", item.path)
 
     logger.info(
-        "Merged %s/%s: shards=%d rows=%d -> %s",
+        (
+            "Merged %s/%s: winners=%d rows=%d parquet_files=%d part_inputs=%d "
+            "legacy_inputs=%d rows_kept=%d rows_dropped=%d -> %s"
+        ),
         model,
         direction_key,
-        len(shards),
+        len(winners),
         total_rows,
-        out_file,
+        len(final_output_files),
+        part_file_count,
+        legacy_file_count,
+        rows_kept,
+        rows_dropped,
+        final_output_files[0],
     )
-    return True, len(shards), total_rows
+    return True, len(winners), total_rows

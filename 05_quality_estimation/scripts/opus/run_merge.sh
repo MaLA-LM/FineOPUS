@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Post-run merge: concatenate per-shard OPUS outputs into one file per
-# direction. Run as a regular (non-array) SLURM job after the workers drain.
+# Post-run merge: concatenate per-shard OPUS outputs into one or more parquet
+# files per direction. Run as a regular (non-array) SLURM job after the
+# workers drain.
 #
 #SBATCH --job-name=opus_merge
 #SBATCH --account=project_462001050
@@ -33,13 +34,13 @@ Usage: run_merge.sh [args]
 
 Required:
   --db <path>          Shared SQLite queue DB.
-  --output-base <dir>  Base dir of shard JSONLs (<model>/<direction>/shard_*.jsonl).
-  --merged-base <dir>  Destination dir for merged files.
+  --output-base <dir>  Base dir of worker JSONLs (<model>/<direction>/*.jsonl).
+  --merged-base <dir>  Destination dir for merged parquet files.
 
 Optional:
   --model <key>        Restrict merge to a single model.
   --delete-shards      Delete source shard files after successful merge.
-  --force              Re-merge directions whose output file already exists.
+  --force              Re-merge directions whose parquet outputs already exist.
   --workdir <dir>      cd into this dir before running.
   --venv-base <dir>    Base directory containing metric_venv.
   --metric-venv <dir>  Full path to the metric virtual environment.

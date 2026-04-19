@@ -37,6 +37,11 @@ chmod +x envs/*.sh scripts/flores/*.sh scripts/opus/*.sh
   - `--response-format`
   - `--structured-outputs-backend`
   - `--enforce-eager`
+  - `--part-writer`
+  - `--part-max-bytes`
+  - `--part-max-shards`
+- `scripts/opus/submit_array_standard_g.sh` exposes the same worker runtime knobs as `submit_array.sh`, including the part-writer flags.
+- `scripts/opus/run_merge.sh` reads both legacy `shard_*.jsonl` files and worker-owned `part-*.jsonl` files from `OUTPUT_BASE`.
 - Main knobs to change for queue planning:
   - `--array`: how many worker tasks you submit, for example `0-63` or `0-127`
   - `--concurrency`: Slurm `%N` cap
@@ -121,7 +126,10 @@ bash scripts/opus/submit_array.sh --model wmt23-cometkiwi-da-xl --array 0 --conc
 bash scripts/opus/submit_array.sh --model xcomet-xl --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # MetricX
-bash scripts/opus/submit_array.sh --model metricx24 --array 0 --concurrency 1 --time 01:00:00 --batch-size 64 --gpus 1 --db /scratch/project_462001050/opus_qe/jobs.db --output-base /scratch/project_462001050/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2
+bash scripts/opus/submit_array.sh --model metricx24 --array 0-1 --concurrency 2 --time 01:00:00 --batch-size 64 --gpus 1 --db /scratch/project_462001050/opus_qe/jobs.db --output-base /scratch/project_462001050/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2
+
+# MetricX with worker-owned part files enabled.
+bash scripts/opus/submit_array.sh --model metricx24 --array 0-31 --concurrency 16 --time 12:00:00 --batch-size 64 --gpus 1 --part-writer --part-max-bytes 536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # Qwen family
 # LLM runs use the FLORES-known-good recipe (run_commands.md:95):
@@ -134,6 +142,7 @@ bash scripts/opus/submit_array.sh --model qwen3-8b --array 0-127 --concurrency 6
 ####
 bash scripts/opus/submit_array.sh --model qwen3-4b-instruct-2507 --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 ####
+bash scripts/opus/submit_array.sh --model qwen3-4b-instruct-2507 --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --part-writer --part-max-bytes 536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model qwen3-4b-instruct-2507-fp8 --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model qwen3-4b-fp8 --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model qwen3-4b-awq --array 0-127 --concurrency 64 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
@@ -209,7 +218,10 @@ bash scripts/opus/submit_array_standard_g.sh --model xcomet-xl --array 0 --concu
 
 # MetricX on standard-g (smaller jobs are usually fine on small-g; only
 # scale up to standard-g if MetricX has a large pending backlog).
-bash scripts/opus/submit_array_standard_g.sh --model metricx24 --array 0-7 --concurrency 8 --time 01:00:00 --batch-size 64 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model metricx24 --array 0-1 --concurrency 2 --time 01:00:00 --batch-size 64 --part-writer --part-max-bytes 536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+
+# Standard-g with part consolidation enabled.
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-instruct-2507 --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --part-writer --part-max-bytes 536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # Qwen family on standard-g (FLORES-known-good LLM recipe; --enforce-eager
 # is REQUIRED on LUMI/MI250X to avoid the vLLM 0.14 + ROCm torch.compile
@@ -218,7 +230,7 @@ bash scripts/opus/submit_array_standard_g.sh --model metricx24 --array 0-7 --con
 bash scripts/opus/submit_array_standard_g.sh --model qwen3-14b --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array_standard_g.sh --model qwen3-8b --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 ###
-bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-instruct-2507 --array 0-1 --concurrency 2 --time 01:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-instruct-2507 --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --part-writer --part-max-bytes 1536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 ###
 bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-instruct-2507-fp8 --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-fp8 --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
@@ -231,7 +243,7 @@ bash scripts/opus/submit_array_standard_g.sh --model m-prometheus-7b --array 0-1
 
 # ReMedy on standard-g. Confirm /pfs/lustrep3/.../hf is pre-populated;
 # 8 workers booting on a cold cache at once will thrash the filesystem.
-bash scripts/opus/submit_array_standard_g.sh --model shaomutan_remedy-9b-22 --array 0-2 --concurrency 3 --time 01:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model shaomutan_remedy-9b-22 --array 0 --concurrency 1 --time 01:00:00 --part-writer --part-max-bytes 1536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # Combined throughput example: keep the existing small-g array (200 GCDs)
 # AND submit a standard-g array (800 GCDs) for the same model. They share
@@ -285,7 +297,10 @@ python -m execution.opus_queue.worker \
   --gpu-memory-utilization 0.90 \
   --max-num-batched-tokens 16384 \
   --max-num-seqs 128 \
-  --max-model-len 8192
+  --max-model-len 8192 \
+  --part-writer \
+  --part-max-bytes 536870912 \
+  --part-max-shards 32
 ```
 
 ## 6. Monitoring
@@ -307,6 +322,10 @@ sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --mer
 # Merge everything that is complete.
 sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE"
 
-# Add --delete-shards if you want to remove shard_*.jsonl after a successful merge.
+# Add --delete-shards if you want to remove legacy shard files and new part files after a successful merge.
 sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model metricx24 --delete-shards
+
+# Merge a model after a part-writer run. Merge automatically reads both
+# part-*.jsonl and any leftover legacy shard_*.jsonl files in OUTPUT_BASE.
+sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model qwen3-4b-instruct-2507 --force
 ```

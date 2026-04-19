@@ -15,7 +15,7 @@ from execution.opus_queue.planning import (
 )
 from execution.opus_queue.scoring import build_scorer, resolve_backend
 from execution.opus_queue.worker.commit import commit_shard
-from execution.opus_queue.worker.shard_io import shard_output_path
+from execution.opus_queue.worker.shard_io import DirectionPartWriter, shard_output_path
 from execution.opus_queue.worker.shard_loader import build_sharding_opus_adapter
 from execution.opus_queue.worker.walltime import remaining_seconds
 from utils.logger import logger
@@ -116,7 +116,10 @@ def run_loop(args: argparse.Namespace) -> int:
         worker_id,
         "start",
         model=queue_model,
-        detail=f"queue_model={queue_model} scorer_model={scorer_model} backend={backend}",
+        detail=(
+            f"queue_model={queue_model} scorer_model={scorer_model} "
+            f"backend={backend} part_writer={args.part_writer}"
+        ),
     )
     reset_count = queue_db.reset_own_stale(conn, worker_id)
     if reset_count:
@@ -124,6 +127,17 @@ def run_loop(args: argparse.Namespace) -> int:
 
     completed_shards = 0
     failed_shards = 0
+    writer = (
+        DirectionPartWriter(
+            output_base=output_base,
+            model=queue_model,
+            worker_id=worker_id,
+            max_bytes=args.part_max_bytes,
+            max_shards_per_part=args.part_max_shards,
+        )
+        if args.part_writer
+        else None
+    )
 
     try:
         while True:
@@ -198,10 +212,22 @@ def run_loop(args: argparse.Namespace) -> int:
                 frame, elapsed = _score_shard(
                     run_entry, context, entry, start_idx, end_idx, direction_key, shard_id
                 )
-                out_path = shard_output_path(output_base, args.model, direction_key, shard_id)
+                frame["worker_id"] = worker_id
+                out_path = None
+                if writer is None:
+                    out_path = shard_output_path(
+                        output_base, args.model, direction_key, shard_id
+                    )
                 if commit_shard(
-                    conn, frame, out_path, direction_key, queue_model,
-                    shard_id, worker_id, elapsed,
+                    conn,
+                    frame,
+                    direction_key,
+                    queue_model,
+                    shard_id,
+                    worker_id,
+                    elapsed,
+                    out_path=out_path,
+                    writer=writer,
                 ):
                     completed_shards += 1
             except Exception as exc:
@@ -243,6 +269,8 @@ def run_loop(args: argparse.Namespace) -> int:
         queue_db.log_event(
             conn, worker_id, "exit", detail=f"completed={completed_shards} failed={failed_shards}"
         )
+        if writer is not None:
+            writer.close_all()
         conn.close()
 
     logger.info(

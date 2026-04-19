@@ -175,6 +175,9 @@ sbatch --array=0 --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TAR
 
 ---
 
+#lookup table
+srun --account=project_462001050 --partition=small --time=01:00:00 --cpus-per-task=16 --mem=256G singularity exec $SIF bash -c 'source /scratch/project_462001050/ibrahiam/envs/metric_venv/bin/activate && python -u -m stand_alone_modules.lookup_table --opus-path /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 --tables-dir ./stand_alone_modules/lookup_table/tables --default-model both'
+
 # reruns
 sbatch --array=81,128 
   --export=ALL,HF_TOKEN=$HF_TOKEN,MAX_DIRECTIONS_PER_PART=200,TARGET_PART_BYTES=134217728 

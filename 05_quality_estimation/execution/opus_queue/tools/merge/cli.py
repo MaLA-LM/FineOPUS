@@ -9,18 +9,22 @@ __all__ = ["main", "parse_args"]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Merge completed per-shard OPUS outputs into one Parquet file per direction."
+        description="Merge completed per-shard OPUS outputs into one or more Parquet files per direction."
     )
     parser.add_argument("--db", required=True, help="Shared jobs SQLite file.")
     parser.add_argument(
         "--output-base",
         required=True,
-        help="Base dir of shard JSONLs (<model>/<direction>/shard_*.jsonl).",
+        help="Base dir of shard JSONLs / part files (<model>/<direction>/*.jsonl).",
     )
     parser.add_argument(
         "--merged-base",
         required=True,
-        help="Destination dir; merged files go to <merged-base>/<model>/<direction>.parquet.",
+        help=(
+            "Destination dir; merged files go to "
+            "<merged-base>/<model>/<direction>.part-0000.parquet "
+            "(and more parts if the direction exceeds 5 GB)."
+        ),
     )
     parser.add_argument(
         "--model", default=None, help="Optional: restrict merge to a single model."
@@ -33,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Re-merge directions even if the output file exists.",
+        help="Re-merge directions even if merged parquet outputs already exist.",
     )
     return parser.parse_args()
 

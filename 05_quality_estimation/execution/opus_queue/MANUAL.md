@@ -64,6 +64,13 @@ bash scripts/opus/submit_array.sh \
     --output-base /scratch/project_462001050/opus_qe/shards
 ```
 
+To test the worker-owned part writer, pass `--part-writer` through to the
+worker wrapper and optionally tune `--part-max-bytes` / `--part-max-shards`
+(defaults: 512 MiB and 32 shards). In that mode each worker appends multiple
+completed shards for one direction into `part-<worker>-<seq>.jsonl` files
+instead of writing one `shard_<NNNNN>.jsonl` per shard. Merge accepts both
+layouts, so partially migrated runs are safe.
+
 Inspect `run_events` for `done` rows and shard elapsed times:
 
 ```sql
@@ -167,12 +174,13 @@ sbatch ./scripts/opus/run_merge.sh \
 Each direction gets:
 
 ```text
-<merged-base>/<model>/<direction_key>.parquet
+<merged-base>/<model>/<direction_key>.part-0000.parquet
+<merged-base>/<model>/<direction_key>.part-0001.parquet  # if needed; max 5 GB per file
 <merged-base>/<model>/<direction_key>.meta.json
 ```
 
 The merge metadata records the source DB path and the shard count used to
-produce the merged file.
+produce the merged parquet files.
 
 ## Output layout summary
 
@@ -180,19 +188,22 @@ produce the merged file.
 <output-base>/
     <model>/
         <direction_key>/
-            shard_00000.jsonl
+            shard_00000.jsonl          # legacy layout
             shard_00001.jsonl
+            part-<worker>-0000.jsonl   # --part-writer layout
+            part-<worker>-0001.jsonl
             ...
 <merged-base>/
     <model>/
-        <direction_key>.parquet
+        <direction_key>.part-0000.parquet
+        <direction_key>.part-0001.parquet
         <direction_key>.meta.json
 ```
 
 This layout is intentionally flatter than the FLORES hive-style layout.
 The `<model>` directory is always the queue/DB model key, and merge
-reads `shard_*.jsonl` in numeric shard order and writes them as a
-single Parquet file per direction.
+reads both legacy `shard_*.jsonl` files and worker-owned `part-*.jsonl`
+files before writing one or more Parquet files per direction.
 
 ## Troubleshooting
 

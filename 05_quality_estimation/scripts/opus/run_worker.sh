@@ -63,6 +63,9 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-}"
 RESPONSE_FORMAT="${RESPONSE_FORMAT:-}"
 STRUCTURED_OUTPUTS_BACKEND="${STRUCTURED_OUTPUTS_BACKEND:-}"
 ENFORCE_EAGER="${ENFORCE_EAGER:-}"
+PART_WRITER="${PART_WRITER:-}"
+PART_MAX_BYTES="${PART_MAX_BYTES:-}"
+PART_MAX_SHARDS="${PART_MAX_SHARDS:-}"
 
 mkdir -p "${WORKDIR}/logs"
 cd "$WORKDIR"
@@ -74,6 +77,7 @@ echo "Job ID: ${SLURM_JOB_ID:-N/A}  Array task: ${SLURM_ARRAY_TASK_ID:-N/A}"
 echo "Start time: $(date)"
 echo "Master Port: $MASTER_PORT"
 echo "Batch size: $BATCH_SIZE  GPUs: $GPUS"
+echo "Part writer: ${PART_WRITER:-0}  Part max bytes: ${PART_MAX_BYTES:-<worker-default>}  Part max shards: ${PART_MAX_SHARDS:-<worker-default>}"
 echo "=================================="
 
 quote_args() {
@@ -247,6 +251,15 @@ fi
 
 if [ -n "$WALLTIME_SECONDS" ]; then
     WORKER_ARGS+=(--walltime-seconds "$WALLTIME_SECONDS")
+fi
+if [ -n "$PART_WRITER" ]; then
+    WORKER_ARGS+=(--part-writer)
+fi
+if [ -n "$PART_MAX_BYTES" ]; then
+    WORKER_ARGS+=(--part-max-bytes "$PART_MAX_BYTES")
+fi
+if [ -n "$PART_MAX_SHARDS" ]; then
+    WORKER_ARGS+=(--part-max-shards "$PART_MAX_SHARDS")
 fi
 
 # Backend-specific extras

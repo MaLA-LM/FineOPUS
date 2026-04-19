@@ -46,6 +46,9 @@ MAX_MODEL_LEN="${MAX_MODEL_LEN:-}"
 RESPONSE_FORMAT="${RESPONSE_FORMAT:-}"
 STRUCTURED_OUTPUTS_BACKEND="${STRUCTURED_OUTPUTS_BACKEND:-}"
 ENFORCE_EAGER="${ENFORCE_EAGER:-}"
+PART_WRITER="${PART_WRITER:-}"
+PART_MAX_BYTES="${PART_MAX_BYTES:-}"
+PART_MAX_SHARDS="${PART_MAX_SHARDS:-}"
 
 print_usage() {
     cat <<'EOF'
@@ -58,7 +61,7 @@ Required:
   --model <key>          Model key (e.g. metricx24, qwen3-4b-instruct-2507).
   --array <a-b>          SLURM array spec (e.g. 0-99). Each index = 1 node.
   --db <path>            Path to shared SQLite queue database.
-  --output-base <dir>    Shared-storage dir for shard JSONLs.
+  --output-base <dir>    Shared-storage dir for shard JSONLs / part files.
 
 Optional:
   --concurrency <int>    SLURM %N cap (joined to --array as a-b%N).
@@ -86,6 +89,9 @@ Optional:
   --response-format <fmt>  none|json_object|json_schema.
   --structured-outputs-backend <name>  outlines|xgrammar.
   --enforce-eager        Disable CUDA graphs / torch.compile in vLLM.
+  --part-writer          Append multiple shards into worker-owned part files.
+  --part-max-bytes <int> Rotate part files before the next shard would exceed this size.
+  --part-max-shards <int>  Rotate part files after this many shards per part.
   --extra <str>          Extra args appended verbatim to sbatch.
 EOF
 }
@@ -116,6 +122,9 @@ while [ $# -gt 0 ]; do
         --response-format) RESPONSE_FORMAT="${2:-}"; shift 2 ;;
         --structured-outputs-backend) STRUCTURED_OUTPUTS_BACKEND="${2:-}"; shift 2 ;;
         --enforce-eager) ENFORCE_EAGER=1; shift ;;
+        --part-writer)   PART_WRITER=1; shift ;;
+        --part-max-bytes) PART_MAX_BYTES="${2:-}"; shift 2 ;;
+        --part-max-shards) PART_MAX_SHARDS="${2:-}"; shift 2 ;;
         --extra)         EXTRA_SBATCH="${2:-}"; shift 2 ;;
         -h|--help)       print_usage; exit 0 ;;
         *) echo "Unknown argument: $1" >&2; print_usage >&2; exit 1 ;;
@@ -181,7 +190,7 @@ SBATCH_ARGS=(
     --job-name="opus_g_${MODEL}"
     --array="$ARRAY_ARG"
     --time="$TIME_LIMIT"
-    --export=ALL,MODEL="$MODEL",DB="$DB",OUTPUT_BASE="$OUTPUT_BASE",OPUS_ROOT="$OPUS_ROOT",PLATFORM="$PLATFORM",BATCH_SIZE="$BATCH_SIZE",GPUS="$GPUS",PROMPT_MODE="$PROMPT_MODE",TEMPERATURE="$TEMPERATURE",MAX_TOKENS="$MAX_TOKENS",MAX_RETRIES="$MAX_RETRIES",VLLM_DTYPE="$VLLM_DTYPE",VLLM_GPU_UTIL="$VLLM_GPU_UTIL",MAX_NUM_BATCHED_TOKENS="$MAX_NUM_BATCHED_TOKENS",MAX_NUM_SEQS="$MAX_NUM_SEQS",MAX_MODEL_LEN="$MAX_MODEL_LEN",RESPONSE_FORMAT="$RESPONSE_FORMAT",STRUCTURED_OUTPUTS_BACKEND="$STRUCTURED_OUTPUTS_BACKEND",ENFORCE_EAGER="$ENFORCE_EAGER",OPUS_STANDARD_G_SCRIPT_DIR="$SCRIPT_DIR"
+    --export=ALL,MODEL="$MODEL",DB="$DB",OUTPUT_BASE="$OUTPUT_BASE",OPUS_ROOT="$OPUS_ROOT",PLATFORM="$PLATFORM",BATCH_SIZE="$BATCH_SIZE",GPUS="$GPUS",PROMPT_MODE="$PROMPT_MODE",TEMPERATURE="$TEMPERATURE",MAX_TOKENS="$MAX_TOKENS",MAX_RETRIES="$MAX_RETRIES",VLLM_DTYPE="$VLLM_DTYPE",VLLM_GPU_UTIL="$VLLM_GPU_UTIL",MAX_NUM_BATCHED_TOKENS="$MAX_NUM_BATCHED_TOKENS",MAX_NUM_SEQS="$MAX_NUM_SEQS",MAX_MODEL_LEN="$MAX_MODEL_LEN",RESPONSE_FORMAT="$RESPONSE_FORMAT",STRUCTURED_OUTPUTS_BACKEND="$STRUCTURED_OUTPUTS_BACKEND",ENFORCE_EAGER="$ENFORCE_EAGER",PART_WRITER="$PART_WRITER",PART_MAX_BYTES="$PART_MAX_BYTES",PART_MAX_SHARDS="$PART_MAX_SHARDS",OPUS_STANDARD_G_SCRIPT_DIR="$SCRIPT_DIR"
 )
 
 if [ -n "$ACCOUNT" ]; then
