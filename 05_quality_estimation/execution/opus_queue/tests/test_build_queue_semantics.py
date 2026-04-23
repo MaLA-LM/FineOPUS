@@ -7,10 +7,10 @@ Run with:
 from __future__ import annotations
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from execution.opus_queue import db as queue_db
 from execution.opus_queue.db import writes as queue_ops
+from execution.opus_queue.tests._tmp import workspace_temp_dir
 
 
 def _seed_job(conn, *, direction_key: str, model: str, shard_id: int, status: str) -> None:
@@ -51,7 +51,7 @@ def _count_rows(conn, table: str, *, direction_key: str | None = None, model: st
 
 
 def test_reset_pending_for_model_blocks_done_without_force() -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("build_queue") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:
@@ -83,7 +83,7 @@ def test_reset_pending_for_model_blocks_done_without_force() -> None:
 
 
 def test_reset_pending_for_model_force_drops_done_rows() -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("build_queue") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:
@@ -103,7 +103,7 @@ def test_reset_pending_for_model_force_drops_done_rows() -> None:
 
 
 def test_reset_pending_for_model_without_done_deletes_non_done_rows() -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("build_queue") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:
@@ -130,7 +130,7 @@ def test_reset_pending_for_model_without_done_deletes_non_done_rows() -> None:
 
 
 def test_reassign_preserves_done_rows_without_force_and_drops_with_force() -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("build_queue") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:
@@ -169,7 +169,7 @@ def test_reassign_preserves_done_rows_without_force_and_drops_with_force() -> No
 
 
 def test_reassign_without_done_deletes_only_old_non_done_pair() -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("build_queue") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:

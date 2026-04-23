@@ -123,14 +123,14 @@ Never introduce hardcoded path alternatives. All paths stay configurable via CLI
 │       ├── __init__.py             # re-exports OpusQueueExecutor (unchanged)
 │       ├── MANUAL.md               # unchanged (content) but cross-refs updated
 │       ├── executor.py             # unchanged (strategy wrapper)
-│       ├── schema.sql              # moved under db/ (see below)
+│       ├── db/                     # contains the canonical schema.sql and DB helpers
 │       ├── worker.py               # SHIM — runs worker/cli.py for `python -m execution.opus_queue.worker`
 │       ├── build_queue.py          # SHIM — runs ops/build_queue/cli.py
 │       ├── merge.py                # SHIM — runs tools/merge/cli.py
 │       ├── reaper.py               # SHIM — runs tools/reaper/cli.py
 │       ├── db/                     # NEW SUBPACKAGE — persistence layer
 │       │   ├── __init__.py         # re-exports public ops used today (see section 4)
-│       │   ├── schema.sql          # moved from execution/opus_queue/schema.sql
+│       │   ├── schema.sql          # canonical CREATE TABLE statements
 │       │   ├── connection.py       # connect(), initialize(), pragma setup  (~60 LOC)
 │       │   ├── retry.py            # _execute_with_retry() decorator         (~40 LOC)
 │       │   ├── claims.py           # claim_next(), mark_done(), mark_failed(), reset_own_stale(), reset_stale_rows()  (~120 LOC)
@@ -487,7 +487,7 @@ Six new subpackages (`db/`, `ops/`, `worker/`, `planning/`, `scoring/`, `tools/`
 
 ### 3.3 `execution/opus_queue/db/` — persistence layer
 
-Source: [execution/opus_queue/queue_db.py](execution/opus_queue/queue_db.py) (295 LOC), [queue_ops.py](execution/opus_queue/queue_ops.py) (115 LOC), [schema.sql](execution/opus_queue/schema.sql).
+Source: [execution/opus_queue/queue_db.py](execution/opus_queue/queue_db.py) (295 LOC), [queue_ops.py](execution/opus_queue/queue_ops.py) (115 LOC), [schema.sql](execution/opus_queue/db/schema.sql).
 
 Split `queue_db.py` along its five internal responsibilities:
 
@@ -505,7 +505,7 @@ Split `queue_db.py` along its five internal responsibilities:
 - `events.py`:
   - `log_event(conn, event_type, payload, …)` — observability.
 - `writes.py` — renamed from current `queue_ops.py`. Contents unchanged: `fetch_existing_models`, `count_done_jobs`, `reset_pending_for_model`, `delete_pending_for_pair`. Rename because "ops" is now a sibling package name and would collide semantically.
-- `schema.sql` — moved here (was at `execution/opus_queue/schema.sql`). Update `connection.initialize()` to load from `pathlib.Path(__file__).with_name("schema.sql")`.
+- `schema.sql` — canonical schema file at `execution/opus_queue/db/schema.sql`, loaded by `connection.initialize()` via `pathlib.Path(__file__).with_name("schema.sql")`.
 
 `db/__init__.py`:
 
@@ -535,7 +535,7 @@ Back-compat shims at the old module paths to keep tests/callers working:
 
 - `execution/opus_queue/queue_db.py` — shim: `from execution.opus_queue.db import *`.
 - `execution/opus_queue/queue_ops.py` — shim: `from execution.opus_queue.db.writes import *`.
-- `execution/opus_queue/schema.sql` — delete only after confirming no callers reference it via that path (grep reveals none, safe to delete).
+- `execution/opus_queue/schema.sql` — removed; `execution/opus_queue/db/schema.sql` is the only schema file now.
 
 ### 3.4 `execution/opus_queue/ops/` — queue population
 

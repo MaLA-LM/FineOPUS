@@ -7,9 +7,9 @@ Run with:
 from __future__ import annotations
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from execution.opus_queue import db as queue_db
+from execution.opus_queue.tests._tmp import workspace_temp_dir
 
 
 def _seed_job(
@@ -41,7 +41,8 @@ def _seed_job(
 def _job_state(conn, direction_key: str = "eng_Latn-fra_Latn", model: str = "metricx24") -> dict:
     row = conn.execute(
         """
-        SELECT status, worker_id, attempts, started_at, finished_at, out_path, last_error
+        SELECT status, worker_id, attempts, started_at, finished_at, out_path, last_error,
+               claim_gpu_count, gpu_seconds_total
           FROM jobs
          WHERE direction_key=? AND model=? AND shard_id=0
         """,
@@ -63,7 +64,7 @@ def _requeue_job(conn, direction_key: str = "eng_Latn-fra_Latn", model: str = "m
 
 
 def test_stale_worker_cannot_requeue_done_row() -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("worker_state") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:
@@ -96,7 +97,7 @@ def test_stale_worker_cannot_requeue_done_row() -> None:
 
 
 def test_stale_worker_cannot_mark_done_after_requeue() -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("worker_state") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:
@@ -126,7 +127,7 @@ def test_stale_worker_cannot_mark_done_after_requeue() -> None:
 
 
 def test_mark_failed_requeues_then_fails_at_threshold() -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("worker_state") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:
@@ -134,32 +135,51 @@ def test_mark_failed_requeues_then_fails_at_threshold() -> None:
             _seed_job(conn)
             first = queue_db.claim_next(conn, "metricx24", "w1")
             assert first is not None
+            conn.execute(
+                """
+                UPDATE jobs
+                   SET started_at = started_at - 120
+                 WHERE direction_key='eng_Latn-fra_Latn' AND model='metricx24' AND shard_id=0
+                """
+            )
             assert queue_db.mark_failed(
                 conn, "eng_Latn-fra_Latn", "metricx24", 0, "w1", "boom-1", 2
             ) == "requeued"
             state = _job_state(conn)
             assert state["status"] == "pending"
             assert state["worker_id"] is None
+            assert state["started_at"] is None
             assert state["finished_at"] is None
+            assert state["claim_gpu_count"] == 1
             assert state["last_error"] == "boom-1"
+            assert 115 <= float(state["gpu_seconds_total"]) <= 125
 
             second = queue_db.claim_next(conn, "metricx24", "w2")
             assert second is not None
             assert int(second["attempts"]) == 2
+            conn.execute(
+                """
+                UPDATE jobs
+                   SET started_at = started_at - 30
+                 WHERE direction_key='eng_Latn-fra_Latn' AND model='metricx24' AND shard_id=0
+                """
+            )
             assert queue_db.mark_failed(
                 conn, "eng_Latn-fra_Latn", "metricx24", 0, "w2", "boom-2", 2
             ) == "failed"
             state = _job_state(conn)
             assert state["status"] == "failed"
             assert state["worker_id"] is None
+            assert state["started_at"] is not None
             assert state["finished_at"] is not None
             assert state["last_error"] == "boom-2"
+            assert 145 <= float(state["gpu_seconds_total"]) <= 155
         finally:
             conn.close()
 
 
 def test_mark_failed_preserves_traceback_tail_when_trimmed() -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("worker_state") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:

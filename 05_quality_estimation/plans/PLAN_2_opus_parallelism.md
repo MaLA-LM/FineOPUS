@@ -34,7 +34,7 @@ execution/opus_queue/
 ├── reaper.py            # CLI / daemon: reset stale 'running' rows to 'pending'
 ├── merge.py             # CLI: concatenate completed shard outputs into one file per direction
 ├── shard_planner.py     # pure function: (direction, n_sentences, model) → list of (start, end)
-└── schema.sql           # canonical CREATE TABLE statements
+└── db/schema.sql        # canonical CREATE TABLE statements
 
 scripts/opus/
 ├── submit_array.sh      # sbatch wrapper: one array per model
@@ -49,7 +49,7 @@ The database file lives on shared cluster storage at a path the user configures 
 
 ### Schema
 
-The database holds three tables. A coding agent implementing this should write the exact SQL in `execution/opus_queue/schema.sql` and load it on first connection.
+The database holds three tables. A coding agent implementing this should write the exact SQL in `execution/opus_queue/db/schema.sql` and load it on first connection.
 
 **Table `directions`** — one row per (model, source language, target language), populated once from `lookup_OPUS.xlsx`.
 

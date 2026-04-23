@@ -18,12 +18,23 @@ __all__ = [
 ]
 
 _MAX_ERROR_CHARS = 1000
+_NOW_SQL = "CAST(strftime('%s','now') AS INTEGER)"
+_GPU_SECONDS_EXPR = (
+    "CASE "
+    "WHEN started_at IS NULL THEN gpu_seconds_total "
+    "ELSE gpu_seconds_total + "
+    f"(({_NOW_SQL} - started_at) * "
+    "CASE WHEN claim_gpu_count < 1 THEN 1 ELSE claim_gpu_count END) "
+    "END"
+)
 
 _CLAIM_SQL = """
 UPDATE jobs
    SET status = 'running',
        worker_id = ?,
        started_at = CAST(strftime('%s','now') AS INTEGER),
+       finished_at = NULL,
+       claim_gpu_count = ?,
        attempts = attempts + 1
  WHERE rowid = (
            SELECT rowid FROM jobs
@@ -31,7 +42,7 @@ UPDATE jobs
             ORDER BY (end_idx - start_idx) DESC
             LIMIT 1
        )
-RETURNING direction_key, model, shard_id, start_idx, end_idx, attempts
+RETURNING direction_key, model, shard_id, start_idx, end_idx, attempts, started_at
 """
 
 
@@ -41,10 +52,20 @@ def claim_next(
     worker_id: str,
     *,
     retries: int = DEFAULT_CLAIM_RETRIES,
+    slurm_job_id: str | None = None,
+    slurm_array_task_id: str | None = None,
+    node_host: str | None = None,
+    gpu_count: int = 1,
 ) -> dict | None:
-    cursor = execute_with_retry(conn, _CLAIM_SQL, (worker_id, model), attempts=retries)
+    del slurm_job_id, slurm_array_task_id, node_host
+    cursor = execute_with_retry(
+        conn,
+        _CLAIM_SQL,
+        (worker_id, max(1, int(gpu_count)), model),
+        attempts=retries,
+    )
     row = cursor.fetchone()
-    return dict(row) if row else None
+    return None if row is None else dict(row)
 
 
 def mark_done(
@@ -56,10 +77,11 @@ def mark_done(
     out_path: str | Path,
 ) -> FinalizeResult:
     row = conn.execute(
-        """
+        f"""
         UPDATE jobs
            SET status = 'done',
-               finished_at = CAST(strftime('%s','now') AS INTEGER),
+               finished_at = {_NOW_SQL},
+               gpu_seconds_total = {_GPU_SECONDS_EXPR},
                out_path = ?,
                last_error = NULL
          WHERE direction_key = ?
@@ -87,16 +109,25 @@ def mark_failed(
 ) -> FinalizeResult:
     trimmed = _trim_error(error)
     row = conn.execute(
-        """
+        f"""
         UPDATE jobs
            SET status = CASE
                             WHEN attempts >= ? THEN 'failed'
                             ELSE 'pending'
                         END,
                finished_at = CASE
-                                 WHEN attempts >= ? THEN CAST(strftime('%s','now') AS INTEGER)
+                                 WHEN attempts >= ? THEN {_NOW_SQL}
                                  ELSE NULL
                              END,
+               started_at = CASE
+                                WHEN attempts >= ? THEN started_at
+                                ELSE NULL
+                            END,
+               claim_gpu_count = CASE
+                                     WHEN attempts >= ? THEN claim_gpu_count
+                                     ELSE 1
+                                 END,
+               gpu_seconds_total = {_GPU_SECONDS_EXPR},
                worker_id = NULL,
                out_path = NULL,
                last_error = ?
@@ -108,6 +139,8 @@ def mark_failed(
         RETURNING status
         """,
         (
+            max_attempts,
+            max_attempts,
             max_attempts,
             max_attempts,
             trimmed,
@@ -138,10 +171,13 @@ def _trim_error(error: str | None) -> str | None:
 
 def reset_own_stale(conn: sqlite3.Connection, worker_id: str) -> int:
     cursor = conn.execute(
-        """
+        f"""
         UPDATE jobs
            SET status = 'pending',
                worker_id = NULL,
+               started_at = NULL,
+               claim_gpu_count = 1,
+               gpu_seconds_total = {_GPU_SECONDS_EXPR},
                last_error = 'reset_own_stale'
          WHERE status = 'running' AND worker_id = ?
         """,
@@ -176,10 +212,13 @@ def reset_stale_rows(
         ).fetchall()
         if rows:
             conn.execute(
-                """
+                f"""
                 UPDATE jobs
                    SET status = 'pending',
                        worker_id = NULL,
+                       started_at = NULL,
+                       claim_gpu_count = 1,
+                       gpu_seconds_total = {_GPU_SECONDS_EXPR},
                        last_error = 'reaped'
                  WHERE status = 'running' AND model = ? AND started_at < ?
                 """,
@@ -206,7 +245,9 @@ def reset_stale_rows(
                SET status = 'pending',
                    attempts = 0,
                    worker_id = NULL,
-                   finished_at = NULL
+                   started_at = NULL,
+                   finished_at = NULL,
+                   claim_gpu_count = 1
              WHERE status = 'failed' AND model = ? AND finished_at < ?
             """,
             (model, cutoff_ts),

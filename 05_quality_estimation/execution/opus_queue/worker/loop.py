@@ -77,6 +77,10 @@ def _score_shard(run_entry, context, entry, start_idx, end_idx, direction_key, s
 def run_loop(args: argparse.Namespace) -> int:
     start_ts = time.time()
     worker_id = _make_worker_id()
+    slurm_job_id = os.environ.get("SLURM_JOB_ID")
+    slurm_array_task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
+    node_host = socket.gethostname()
+    gpu_count = max(1, int(args.gpus))
     queue_model = args.model
     scorer_model = args.scorer_model or queue_model
     backend = args.backend or resolve_backend(scorer_model)
@@ -150,7 +154,16 @@ def run_loop(args: argparse.Namespace) -> int:
                 queue_db.log_event(conn, worker_id, "exit", detail="walltime_budget")
                 break
 
-            job = queue_db.claim_next(conn, queue_model, worker_id, retries=args.claim_retries)
+            job = queue_db.claim_next(
+                conn,
+                queue_model,
+                worker_id,
+                retries=args.claim_retries,
+                slurm_job_id=slurm_job_id,
+                slurm_array_task_id=slurm_array_task_id,
+                node_host=node_host,
+                gpu_count=gpu_count,
+            )
             if job is None:
                 counts = queue_db.count_by_status(conn, queue_model)
                 if counts:

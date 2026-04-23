@@ -13,9 +13,9 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from execution.opus_queue import db as queue_db
+from execution.opus_queue.tests._tmp import workspace_temp_dir
 
 
 def _seed_jobs(conn, n: int, model: str) -> None:
@@ -64,7 +64,7 @@ def _worker(db_path: str, model: str, worker_id: str,
 
 
 def run_test(n_jobs: int = 50, n_workers: int = 4) -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("concurrent_claim") as tmp:
         db_path = str(Path(tmp) / "test.db")
         conn = queue_db.connect(db_path)
         queue_db.initialize(conn)

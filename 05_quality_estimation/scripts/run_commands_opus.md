@@ -218,7 +218,7 @@ bash scripts/opus/submit_array_standard_g.sh --model xcomet-xl --array 0 --concu
 
 # MetricX on standard-g (smaller jobs are usually fine on small-g; only
 # scale up to standard-g if MetricX has a large pending backlog).
-bash scripts/opus/submit_array_standard_g.sh --model metricx24 --array 0-1 --concurrency 2 --time 01:00:00 --batch-size 64 --part-writer --part-max-bytes 536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model metricx24 --array 0 --concurrency 1 --time 00:30:00 --batch-size 64 --part-writer --part-max-bytes 536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # Standard-g with part consolidation enabled.
 bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-instruct-2507 --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --part-writer --part-max-bytes 536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"

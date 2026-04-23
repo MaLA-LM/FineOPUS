@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     attempts INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
     out_path TEXT,
+    claim_gpu_count INTEGER NOT NULL DEFAULT 1,
+    gpu_seconds_total REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (direction_key, model, shard_id),
     FOREIGN KEY (direction_key, model) REFERENCES directions(direction_key, model)
 );

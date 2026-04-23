@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from execution.opus_queue import db as queue_db
+from execution.opus_queue.tests._tmp import workspace_temp_dir
 from execution.opus_queue.tools import reaper
 
 
@@ -74,7 +74,7 @@ def _seed_failed_job(
 
 
 def run_test() -> None:
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("reaper") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:
@@ -144,7 +144,8 @@ def run_test() -> None:
 
             rows = conn.execute(
                 """
-                SELECT direction_key, model, shard_id, status, worker_id, last_error
+                SELECT direction_key, model, shard_id, status, worker_id, last_error,
+                       started_at, claim_gpu_count, gpu_seconds_total
                   FROM jobs
                  ORDER BY model, shard_id
                 """
@@ -155,7 +156,10 @@ def run_test() -> None:
             }
             assert states[("eng_Latn-fra_Latn", "metricx24", 0)]["status"] == "pending"
             assert states[("eng_Latn-fra_Latn", "metricx24", 0)]["worker_id"] is None
+            assert states[("eng_Latn-fra_Latn", "metricx24", 0)]["started_at"] is None
+            assert states[("eng_Latn-fra_Latn", "metricx24", 0)]["claim_gpu_count"] == 1
             assert states[("eng_Latn-fra_Latn", "metricx24", 0)]["last_error"] == "reaped"
+            assert 55 <= float(states[("eng_Latn-fra_Latn", "metricx24", 0)]["gpu_seconds_total"]) <= 65
 
             assert states[("eng_Latn-deu_Latn", "metricx24", 1)]["status"] == "running"
             assert states[("eng_Latn-deu_Latn", "metricx24", 1)]["worker_id"] == "metricx-fresh"
@@ -163,6 +167,8 @@ def run_test() -> None:
             assert states[("eng_Latn-por_Latn", "metricx24", 2)]["last_error"] == "metricx boom"
 
             assert states[("eng_Latn-spa_Latn", "qwen3-4b-instruct-2507", 0)]["status"] == "pending"
+            assert states[("eng_Latn-spa_Latn", "qwen3-4b-instruct-2507", 0)]["started_at"] is None
+            assert 395 <= float(states[("eng_Latn-spa_Latn", "qwen3-4b-instruct-2507", 0)]["gpu_seconds_total"]) <= 405
             assert states[("eng_Latn-ita_Latn", "qwen3-4b-instruct-2507", 1)]["status"] == "running"
             assert states[("eng_Latn-nld_Latn", "qwen3-4b-instruct-2507", 2)]["status"] == "failed"
 
@@ -181,7 +187,8 @@ def run_test() -> None:
 
             rows = conn.execute(
                 """
-                SELECT direction_key, model, shard_id, status, attempts, finished_at, last_error
+                SELECT direction_key, model, shard_id, status, attempts, started_at,
+                       finished_at, claim_gpu_count, last_error
                   FROM jobs
                  WHERE shard_id = 2
                  ORDER BY model, shard_id
@@ -193,13 +200,15 @@ def run_test() -> None:
             }
             assert failed_states[("eng_Latn-por_Latn", "metricx24", 2)]["status"] == "pending"
             assert failed_states[("eng_Latn-por_Latn", "metricx24", 2)]["attempts"] == 0
+            assert failed_states[("eng_Latn-por_Latn", "metricx24", 2)]["started_at"] is None
             assert failed_states[("eng_Latn-por_Latn", "metricx24", 2)]["finished_at"] is None
+            assert failed_states[("eng_Latn-por_Latn", "metricx24", 2)]["claim_gpu_count"] == 1
             assert failed_states[("eng_Latn-por_Latn", "metricx24", 2)]["last_error"] == "metricx boom"
             assert failed_states[("eng_Latn-nld_Latn", "qwen3-4b-instruct-2507", 2)]["status"] == "failed"
         finally:
             conn.close()
 
-    with TemporaryDirectory() as tmp:
+    with workspace_temp_dir("reaper") as tmp:
         db_path = Path(tmp) / "queue.db"
         conn = queue_db.connect(db_path)
         try:
@@ -213,7 +222,7 @@ def run_test() -> None:
                 conn,
                 direction_key="eng_Latn-swe_Latn",
                 model="unknown-model",
-                finished_at=now_ts - 120,
+                finished_at=now_ts - 4_000,
                 last_error="transient infra issue",
             )
         finally:
@@ -234,7 +243,7 @@ def run_test() -> None:
         try:
             row = conn.execute(
                 """
-                SELECT status, attempts, finished_at, last_error
+                SELECT status, attempts, started_at, finished_at, claim_gpu_count, last_error
                   FROM jobs
                  WHERE direction_key='eng_Latn-swe_Latn'
                    AND model='unknown-model'
@@ -245,7 +254,9 @@ def run_test() -> None:
             state = dict(row)
             assert state["status"] == "pending"
             assert state["attempts"] == 0
+            assert state["started_at"] is None
             assert state["finished_at"] is None
+            assert state["claim_gpu_count"] == 1
             assert state["last_error"] == "transient infra issue"
         finally:
             conn.close()
