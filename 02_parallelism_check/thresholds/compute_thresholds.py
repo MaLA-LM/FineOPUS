@@ -31,7 +31,20 @@ Threshold formula (per language pair):
       # to a pure percentile of the data and flag the row as 'low_mrr'.
       T_raw = data_p01
 
-  T = clip(T_raw, T_floor, T_cap)                       # sanity bounds
+  # Sanity bounds. eff_cap uses gold_{--gold_cap_quantile} so the cap is
+  # "never filter higher than (100-K)% of gold-parallel passes", which is
+  # both more interpretable and more robust than the old gold_mean−0.5σ rule.
+  eff_cap   = min(t_cap, gold_{gold_cap_quantile})      # default: gold_p25
+  T_clipped = clip(T_raw, t_floor, eff_cap)
+
+  # Last-line-of-defense caps (applied as min, so the tightest one wins):
+  data_sanity_cap = data_{--data_sanity_quantile}       # default: data_p50
+                                                         # (never filter > 50%)
+  if --min_keep_fraction > 0:
+      T_keep_cap = data_quantile(1 - min_keep_fraction) # inverse of kept-est
+  else:
+      T_keep_cap = +inf
+  T = min(T_clipped, data_sanity_cap, T_keep_cap)
 
 Outputs:
   - thresholds.csv    : per-pair final threshold + the intermediate components
@@ -57,7 +70,6 @@ Run:
 
 import argparse
 import logging
-import math
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -162,6 +174,41 @@ def estimate_kept_fraction(row: pd.Series, T: float) -> float:
     return 0.0
 
 
+def threshold_for_kept_fraction(row: pd.Series, min_keep: float) -> float:
+    """Inverse of estimate_kept_fraction(): return the score T at which the
+    estimated kept fraction equals `min_keep` (i.e. CDF == 1 - min_keep),
+    using the same linear interpolation over stored quantiles.
+
+    Used to enforce a per-pair lower bound on the kept fraction: the caller
+    caps the final T at this value so that each pair retains >= min_keep
+    of its data.
+    """
+    if not np.isfinite(min_keep) or min_keep <= 0.0:
+        return float("inf")
+    if min_keep >= 1.0:
+        return float(row["min"])
+
+    target_cdf = 1.0 - min_keep
+    xs: List[Tuple[float, float]] = [(row["min"], 0.0)]
+    for q, col in zip(QUANTILES, QUANTILE_COLS):
+        xs.append((float(row[col]), q))
+    xs.append((row["max"], 1.0))
+    xs.sort(key=lambda t: t[0])
+
+    if target_cdf <= xs[0][1]:
+        return xs[0][0]
+    if target_cdf >= xs[-1][1]:
+        return xs[-1][0]
+    for i in range(1, len(xs)):
+        if target_cdf <= xs[i][1]:
+            x0, y0 = xs[i - 1]
+            x1, y1 = xs[i]
+            if y1 == y0:
+                return x0
+            return float(x0 + (x1 - x0) * (target_cdf - y0) / (y1 - y0))
+    return xs[-1][0]
+
+
 # ---------------------------------------------------------------------------
 # Threshold derivation
 # ---------------------------------------------------------------------------
@@ -173,11 +220,14 @@ def derive_threshold(
     *,
     data_quantile: str = "p10",
     gold_quantile: str = "p01",
+    gold_cap_quantile: str = "p25",
     gold_std_k: float = 2.0,
     low_mrr: float = 0.80,
     high_mrr: float = 0.95,
     t_floor: float = 0.30,
     t_cap: float = 0.95,
+    min_keep_fraction: float = 0.0,
+    data_sanity_quantile: str = "p50",
 ) -> Dict[str, float]:
     """Apply the hybrid formula and return all the intermediate components."""
     data_q_value = float(data_row[data_quantile])
@@ -210,7 +260,8 @@ def derive_threshold(
     # Formula
     if confidence in ("low", "no_benchmark"):
         # Either we know the model struggles (low MRR), or we have no
-        # benchmark signal at all. Use a very conservative data-only floor.
+        # benchmark signal at all. Fall back to a very conservative
+        # data-only floor.
         T_raw = data_p01
     elif has_gold:
         if confidence == "high":
@@ -219,26 +270,51 @@ def derive_threshold(
             T_raw = max(T_gold - 0.02, data_q_value)
     else:
         # High/mid confidence but no gold stats recorded for this pair.
-        # Use the data quantile conservatively.
         T_raw = data_q_value
 
-    # Dynamic cap so we never threshold above the gold typical range
-    if has_gold and np.isfinite(gold_mean) and np.isfinite(gold_std):
-        dynamic_cap = gold_mean - 0.5 * gold_std
-        eff_cap = min(t_cap, dynamic_cap) if np.isfinite(dynamic_cap) else t_cap
+    # Dynamic gold-side cap: never filter higher than gold_{gold_cap_quantile},
+    # i.e. always let at least (100 - K)% of gold-parallel sentences pass.
+    if has_gold:
+        gold_cap_value = float(gold_row[gold_cap_quantile])
+        eff_cap = min(t_cap, gold_cap_value) if np.isfinite(gold_cap_value) else t_cap
     else:
+        gold_cap_value = float("nan")
         eff_cap = t_cap
     eff_cap = max(eff_cap, t_floor)  # never invert
 
-    T = float(min(max(T_raw, t_floor), eff_cap))
+    T_clipped = float(min(max(T_raw, t_floor), eff_cap))
+
+    # Data-side sanity cap: T must not exceed this percentile of the actual
+    # data. With the default p50 this means "never throw away more than half
+    # the data for a single pair" -- a last-line-of-defense against broken
+    # gold stats or MRR noise. Set data_sanity_quantile='none' to disable.
+    if data_sanity_quantile and data_sanity_quantile != "none":
+        data_sanity_cap = float(data_row[data_sanity_quantile])
+    else:
+        data_sanity_cap = float("inf")
+
+    # Per-pair "keep >= X%" cap. We invert the data CDF to find the score at
+    # which kept_fraction == min_keep_fraction, and force T <= that value.
+    # This intentionally wins over t_floor so the promise is preserved even
+    # when the pair's distribution is very low.
+    if min_keep_fraction and min_keep_fraction > 0.0:
+        T_keep_cap = threshold_for_kept_fraction(data_row, min_keep_fraction)
+    else:
+        T_keep_cap = float("inf")
+
+    T = float(min(T_clipped, data_sanity_cap, T_keep_cap))
 
     return {
         "confidence": confidence,
         "T_gold": T_gold,
         "T_data": data_q_value,
         "T_raw": float(T_raw),
+        "T_clipped": T_clipped,
+        "data_sanity_cap": float(data_sanity_cap) if np.isfinite(data_sanity_cap) else float("nan"),
+        "T_keep_cap": float(T_keep_cap) if np.isfinite(T_keep_cap) else float("nan"),
         "T": T,
         "eff_cap": float(eff_cap),
+        "gold_cap_value": gold_cap_value,
         "gold_mean": gold_mean,
         "gold_std": gold_std,
         "gold_q_value": gold_q_value,
@@ -319,8 +395,12 @@ def build_thresholds(
             "T_gold": res["T_gold"],
             "T_data": res["T_data"],
             "T_raw": res["T_raw"],
+            "T_clipped": res["T_clipped"],
+            "data_sanity_cap": res["data_sanity_cap"],
+            "T_keep_cap": res["T_keep_cap"],
             "T": res["T"],
             "eff_cap": res["eff_cap"],
+            "gold_cap_value": res["gold_cap_value"],
             "confidence": res["confidence"],
             "has_benchmark": bm is not None,
             "has_gold": gold_row is not None,
@@ -499,7 +579,7 @@ def plot_pair_candlestick(
         ax.set_xlabel("similarity_score")
         ax.set_title(
             f"Diagnostic candlesticks — {selection}  ({start + 1}-{start + len(chunk)} / {len(pairs)})\n"
-            "blue = data distribution, orange = gold distribution, red ▼ = threshold"
+            "blue = data, orange = gold, red ▼ = T"
         )
         ax.invert_yaxis()
         ax.grid(True, axis="x", alpha=0.3)
@@ -565,12 +645,32 @@ def main() -> None:
         help="Gold-side empirical percentile used in T_gold = max(gold_{q}, μ−kσ). "
              "Higher (e.g. p10) → stricter threshold. Default: p01.",
     )
+    parser.add_argument(
+        "--gold_cap_quantile", default="p25", choices=QUANTILE_COLS,
+        help="Gold-side percentile used as eff_cap (hard upper bound on T). "
+             "Guarantees at least (100-K)%% of gold-parallel sentences "
+             "survive the threshold. Lower (e.g. p10) => more permissive "
+             "ceiling. Default: p25.",
+    )
     parser.add_argument("--gold_std_k", type=float, default=2.0)
     parser.add_argument("--low_mrr", type=float, default=0.80)
     parser.add_argument("--high_mrr", type=float, default=0.95)
     parser.add_argument("--t_floor", type=float, default=0.30)
     parser.add_argument("--t_cap", type=float, default=0.95)
-
+    parser.add_argument(
+        "--min_keep_fraction", type=float, default=0.0,
+        help="Per-pair lower bound on retained data. If > 0, T is capped so "
+             "that each pair keeps at least this fraction of its rows "
+             "(interpolated from the recorded data quantiles). "
+             "E.g. 0.85 => every pair keeps >= 85%%. Default 0.0 (disabled).",
+    )
+    parser.add_argument(
+        "--data_sanity_quantile", default="p50",
+        choices=QUANTILE_COLS + ["none"],
+        help="Hard last-line-of-defense cap: T <= data_{quantile}. Default "
+             "p50 (never filter more than half a pair's data, regardless of "
+             "gold/MRR). Use 'none' to disable.",
+    )
     parser.add_argument("--n_diag_worst", type=int, default=30)
     parser.add_argument("--n_diag_biggest", type=int, default=30)
     parser.add_argument("--n_diag_random", type=int, default=20)
@@ -586,9 +686,14 @@ def main() -> None:
     logger.info(f"plots_dir      : {args.plots_dir}")
     logger.info(f"data_quantile  : {args.data_quantile}")
     logger.info(f"gold_quantile  : {args.gold_quantile}")
+    logger.info(f"gold_cap_q     : {args.gold_cap_quantile}")
+    logger.info(f"data_sanity_q  : {args.data_sanity_quantile}")
     logger.info(f"gold_std_k     : {args.gold_std_k}")
     logger.info(f"low/high MRR   : {args.low_mrr} / {args.high_mrr}")
     logger.info(f"T floor/cap    : {args.t_floor} / {args.t_cap}")
+    logger.info(f"min_keep       : {args.min_keep_fraction:.2%}"
+                if args.min_keep_fraction > 0 else
+                "min_keep       : disabled")
     logger.info("=" * 70)
 
     data_df = load_data_stats(Path(args.data_stats))
@@ -599,11 +704,14 @@ def main() -> None:
         data_df, gold_df, best_df,
         data_quantile=args.data_quantile,
         gold_quantile=args.gold_quantile,
+        gold_cap_quantile=args.gold_cap_quantile,
         gold_std_k=args.gold_std_k,
         low_mrr=args.low_mrr,
         high_mrr=args.high_mrr,
         t_floor=args.t_floor,
         t_cap=args.t_cap,
+        min_keep_fraction=args.min_keep_fraction,
+        data_sanity_quantile=args.data_sanity_quantile,
     )
 
     out_path = Path(args.output)
