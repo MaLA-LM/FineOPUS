@@ -217,7 +217,7 @@ cython_debug/
 /02_parallelism_check/results_embedding_norm
 /02_parallelism_check/results_multi
 /02_parallelism_check/manifests
-/02_parallelism_check/thresholds/stats
-/02_parallelism_check/filter/stats
+/02_parallelism_check/thresholds/stats*
+/02_parallelism_check/filter/stats*
 /*/*/hostfiles/*
 models/*
