@@ -45,6 +45,35 @@ UPDATE jobs
 RETURNING direction_key, model, shard_id, start_idx, end_idx, attempts, started_at
 """
 
+_CLAIM_DIRECTION_SQL = """
+UPDATE jobs
+   SET status = 'running',
+       worker_id = ?,
+       started_at = CAST(strftime('%s','now') AS INTEGER),
+       finished_at = NULL,
+       claim_gpu_count = ?,
+       attempts = attempts + 1
+ WHERE rowid = (
+           SELECT rowid FROM jobs
+            WHERE status = 'pending' AND model = ? AND direction_key = ?
+            ORDER BY (end_idx - start_idx) DESC
+            LIMIT 1
+       )
+RETURNING direction_key, model, shard_id, start_idx, end_idx, attempts, started_at
+"""
+
+
+def _claim_with_sql(
+    conn: sqlite3.Connection,
+    sql: str,
+    params: tuple,
+    *,
+    retries: int,
+) -> dict | None:
+    cursor = execute_with_retry(conn, sql, params, attempts=retries)
+    row = cursor.fetchone()
+    return None if row is None else dict(row)
+
 
 def claim_next(
     conn: sqlite3.Connection,
@@ -56,16 +85,26 @@ def claim_next(
     slurm_array_task_id: str | None = None,
     node_host: str | None = None,
     gpu_count: int = 1,
+    preferred_direction_key: str | None = None,
 ) -> dict | None:
     del slurm_job_id, slurm_array_task_id, node_host
-    cursor = execute_with_retry(
+    claim_gpu_count = max(1, int(gpu_count))
+    if preferred_direction_key:
+        row = _claim_with_sql(
+            conn,
+            _CLAIM_DIRECTION_SQL,
+            (worker_id, claim_gpu_count, model, preferred_direction_key),
+            retries=retries,
+        )
+        if row is not None:
+            return row
+
+    return _claim_with_sql(
         conn,
         _CLAIM_SQL,
-        (worker_id, max(1, int(gpu_count)), model),
-        attempts=retries,
+        (worker_id, claim_gpu_count, model),
+        retries=retries,
     )
-    row = cursor.fetchone()
-    return None if row is None else dict(row)
 
 
 def mark_done(

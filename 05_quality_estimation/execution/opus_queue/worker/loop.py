@@ -143,6 +143,7 @@ def run_loop(args: argparse.Namespace) -> int:
         else None
     )
 
+    preferred_direction_key: str | None = None
     try:
         while True:
             time_left = remaining_seconds(start_ts, args.walltime_seconds)
@@ -163,6 +164,7 @@ def run_loop(args: argparse.Namespace) -> int:
                 slurm_array_task_id=slurm_array_task_id,
                 node_host=node_host,
                 gpu_count=gpu_count,
+                preferred_direction_key=preferred_direction_key,
             )
             if job is None:
                 counts = queue_db.count_by_status(conn, queue_model)
@@ -243,7 +245,9 @@ def run_loop(args: argparse.Namespace) -> int:
                     writer=writer,
                 ):
                     completed_shards += 1
+                    preferred_direction_key = direction_key
             except Exception as exc:
+                preferred_direction_key = None
                 failed_shards += 1
                 tb = traceback.format_exc()
                 error_detail = _format_failure_detail(
