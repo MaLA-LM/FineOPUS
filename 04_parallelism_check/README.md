@@ -1,4 +1,4 @@
-# 02_parallelism_check
+# 04_parallelism_check
 
 Embedding-based parallelism quality filter for FineOPUS-Filtered-Stage2.
 
@@ -88,7 +88,7 @@ distribution (when available) and the benchmark MRR score.
 | `stats/gold_score_stats.csv` | `collect_gold_stats.py` (percentile stats over gold-parallel test sets) |
 | `../results/best_model_per_lang_pair_by_flores_bouquet_combined_selected_models.csv` | Step 1 |
 
-**Threshold formula (simplified)**
+**Threshold formula**
 
 ```
 T_gold = max(gold_p01, gold_mean − k·gold_std)
@@ -102,8 +102,30 @@ else (low MRR):        T_raw = data_p01               # distrust model
 T = clip(T_raw, t_floor, min(gold_p25, t_cap, data_p50, keep_cap))
 ```
 
-Confidence levels (`high` / `medium` / `low_mrr` / `no_benchmark`) are recorded
-in the output CSV.
+We use:
+```
+data_quantile  : p10
+gold_quantile  : p01
+gold_cap_q     : p25
+data_sanity_q  : p50
+gold_std_k     : 4.0
+low/high MRR   : 0.8 / 0.99
+T floor/cap    : 0.3 / 0.95
+min_keep       : 85.00%
+======================================================================
+Confidence tier distribution:
+  high    :   2804  T median=0.762  keep median=85.0%
+  low     :    112  T median=0.723  keep median=99.0%
+  mid     :   3738  T median=0.767  keep median=87.1%
+  no_benchmark:   3081  T median=0.702  keep median=99.0%
+
+  pairs with benchmark   : 6,654
+  pairs without benchmark: 3,081
+  pairs with gold anchor : 6,654
+  pairs without gold     : 3,081
+  median T               : 0.732
+  median kept fraction   : 90.0%
+```
 
 **Key scripts**
 
