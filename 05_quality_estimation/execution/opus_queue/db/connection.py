@@ -5,7 +5,7 @@ from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 SCHEMA_VERSION = 2
-BUSY_TIMEOUT_MS = 30_000
+BUSY_TIMEOUT_MS = 120_000
 
 __all__ = ["BUSY_TIMEOUT_MS", "SCHEMA_PATH", "SCHEMA_VERSION", "connect", "initialize"]
 
@@ -30,7 +30,7 @@ def _ensure_jobs_gpu_columns(conn: sqlite3.Connection) -> None:
 def connect(db_path: str | Path) -> sqlite3.Connection:
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path), isolation_level=None, timeout=60.0)
+    conn = sqlite3.connect(str(path), isolation_level=None, timeout=120.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
     conn.execute("PRAGMA synchronous=NORMAL;")

@@ -11,7 +11,26 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Merge completed per-shard OPUS outputs into one or more Parquet files per direction."
     )
-    parser.add_argument("--db", required=True, help="Shared jobs SQLite file.")
+    parser.add_argument(
+        "--db",
+        default=None,
+        help="Legacy shared jobs SQLite file. Required unless manifest trace args are provided.",
+    )
+    parser.add_argument(
+        "--manifest-root",
+        default=None,
+        help="Manifest root containing <build_tag>/manifest.jsonl.",
+    )
+    parser.add_argument(
+        "--build-tag",
+        default=None,
+        help="Manifest build tag to merge from.",
+    )
+    parser.add_argument(
+        "--trace-root",
+        default=None,
+        help="Trace root containing <build_tag>/<worker_slot>/state.jsonl.",
+    )
     parser.add_argument(
         "--output-base",
         required=True,
@@ -22,7 +41,7 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help=(
             "Destination dir; merged files go to "
-            "<merged-base>/<model>/<direction>.part-0000.parquet "
+            "<merged-base>/<model>/<direction>/<direction>.part-0000.parquet "
             "(and more parts if the direction exceeds 5 GB)."
         ),
     )
@@ -38,6 +57,12 @@ def parse_args() -> argparse.Namespace:
         "--force",
         action="store_true",
         help="Re-merge directions even if merged parquet outputs already exist.",
+    )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="Number of directions to merge in parallel. Default: 1.",
     )
     return parser.parse_args()
 

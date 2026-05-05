@@ -4,7 +4,11 @@ import sqlite3
 from pathlib import Path
 from typing import Literal
 
-from execution.opus_queue.db.retry import DEFAULT_CLAIM_RETRIES, execute_with_retry
+from execution.opus_queue.db.retry import (
+    DEFAULT_CLAIM_RETRIES,
+    FINALIZE_RETRIES,
+    execute_with_retry,
+)
 
 FinalizeResult = Literal["done", "requeued", "failed", "stale_noop"]
 
@@ -115,7 +119,8 @@ def mark_done(
     worker_id: str,
     out_path: str | Path,
 ) -> FinalizeResult:
-    row = conn.execute(
+    row = execute_with_retry(
+        conn,
         f"""
         UPDATE jobs
            SET status = 'done',
@@ -131,6 +136,7 @@ def mark_done(
         RETURNING status
         """,
         (str(out_path), direction_key, model, shard_id, worker_id),
+        attempts=FINALIZE_RETRIES,
     ).fetchone()
     if row is None:
         return "stale_noop"
@@ -147,7 +153,8 @@ def mark_failed(
     max_attempts: int,
 ) -> FinalizeResult:
     trimmed = _trim_error(error)
-    row = conn.execute(
+    row = execute_with_retry(
+        conn,
         f"""
         UPDATE jobs
            SET status = CASE
@@ -188,6 +195,7 @@ def mark_failed(
             shard_id,
             worker_id,
         ),
+        attempts=FINALIZE_RETRIES,
     ).fetchone()
     if row is None:
         return "stale_noop"
@@ -209,7 +217,8 @@ def _trim_error(error: str | None) -> str | None:
 
 
 def reset_own_stale(conn: sqlite3.Connection, worker_id: str) -> int:
-    cursor = conn.execute(
+    cursor = execute_with_retry(
+        conn,
         f"""
         UPDATE jobs
            SET status = 'pending',
@@ -250,7 +259,8 @@ def reset_stale_rows(
             (model, cutoff_ts),
         ).fetchall()
         if rows:
-            conn.execute(
+            execute_with_retry(
+                conn,
                 f"""
                 UPDATE jobs
                    SET status = 'pending',
@@ -278,7 +288,8 @@ def reset_stale_rows(
         ).fetchall()
         if not failed_rows:
             continue
-        conn.execute(
+        execute_with_retry(
+            conn,
             """
             UPDATE jobs
                SET status = 'pending',

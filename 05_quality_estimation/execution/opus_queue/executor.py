@@ -7,7 +7,7 @@ from execution.opus_queue.worker import run_loop
 
 
 class OpusQueueExecutor:
-    """ExecutionStrategy wrapper that drives the OPUS SQLite queue worker.
+    """ExecutionStrategy wrapper that drives the OPUS queue worker.
 
     Unlike the FLORES executor this strategy ignores the passed-in
     score_entry and dataset because shard-aware loading has to happen
@@ -20,10 +20,26 @@ class OpusQueueExecutor:
 
     @classmethod
     def add_cli_args(cls, parser: argparse.ArgumentParser) -> None:
+        parser.add_argument("--mode", choices=("auto", "manifest", "db"), default="auto")
         parser.add_argument(
             "--db",
             default=None,
-            help="Path to the shared SQLite queue database (required for opus_queue).",
+            help="Legacy SQLite queue DB path (only used with --mode db).",
+        )
+        parser.add_argument(
+            "--manifest-root",
+            default=None,
+            help="Root containing <build_tag>/manifest.jsonl for manifest mode.",
+        )
+        parser.add_argument(
+            "--trace-root",
+            default="/scratch/project_462001050/opus_qe/shard_trace",
+            help="Root for per-worker trace files in manifest mode.",
+        )
+        parser.add_argument(
+            "--build-tag",
+            default=None,
+            help="Manifest build tag to read.",
         )
         parser.add_argument(
             "--opus-root",
@@ -40,7 +56,7 @@ class OpusQueueExecutor:
             "--max-attempts",
             type=int,
             default=3,
-            help="Attempts before a shard is marked 'failed' (default: 3).",
+            help="Legacy DB mode only: attempts before a shard is marked 'failed'.",
         )
         parser.add_argument(
             "--claim-retries",
@@ -76,14 +92,24 @@ class OpusQueueExecutor:
             raise SystemExit(
                 f"Execution 'opus_queue' requires --dataset opus, got '{dataset.id}'."
             )
-        if not getattr(args, "db", None):
-            raise SystemExit("--db is required for execution='opus_queue'.")
+        mode = getattr(args, "mode", "auto")
+        if mode == "auto":
+            mode = "manifest" if getattr(args, "manifest_root", None) else "db"
+        if mode == "db" and not getattr(args, "db", None):
+            raise SystemExit("--db is required for execution='opus_queue' in db mode.")
+        if mode == "manifest":
+            if not getattr(args, "manifest_root", None):
+                raise SystemExit("--manifest-root is required for manifest mode.")
+            if not getattr(args, "build_tag", None):
+                raise SystemExit("--build-tag is required for manifest mode.")
+            if not getattr(args, "trace_root", None):
+                raise SystemExit("--trace-root is required for manifest mode.")
         if not getattr(args, "output_base", None):
             raise SystemExit("--output-base is required for execution='opus_queue'.")
         walltime = getattr(args, "walltime_seconds", None)
         if walltime is not None and walltime <= 0:
             raise SystemExit("--walltime-seconds must be > 0 when provided.")
-        if getattr(args, "max_attempts", 1) <= 0:
+        if mode == "db" and getattr(args, "max_attempts", 1) <= 0:
             raise SystemExit("--max-attempts must be > 0.")
-        if getattr(args, "claim_retries", 1) <= 0:
+        if mode == "db" and getattr(args, "claim_retries", 1) <= 0:
             raise SystemExit("--claim-retries must be > 0.")

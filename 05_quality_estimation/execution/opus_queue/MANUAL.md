@@ -1,9 +1,17 @@
 # OPUS queue execution - operator manual
 
-The `opus_queue` execution strategy scores OPUS sub-direction shards by
-claiming work from a shared SQLite queue. Unlike FLORES, the unit of work
-is a fixed-size sentence slice inside one direction, and workers pull
-shards dynamically from the DB.
+The `opus_queue` execution strategy scores OPUS sub-direction shards. Unlike
+FLORES, the unit of work is a fixed-size sentence slice inside one direction.
+Legacy DB mode claims work from a shared SQLite queue.
+
+The current SLURM submitters use manifest mode instead of live DB claims:
+`migrate_to_manifest` packs pending/failed DB rows into static worker
+assignments, each worker writes its owned shard list to `assignment.json`,
+and successful completions are appended to `state.jsonl`. Manifest workers
+do not write `claim`, `running`, or `failed` trace states; a shard exception
+exits the worker nonzero so the operator can inspect logs, fix the cause,
+and resubmit the same manifest. Resume skips only shards present in the
+completion ledger.
 
 Package layout:
 
@@ -155,13 +163,31 @@ SELECT model, status, COUNT(*) FROM jobs GROUP BY model, status;
 
 ## 4. Resume after failures
 
-If jobs die, just resubmit the arrays. Workers only claim `pending` rows,
-the reaper reclaims stale `running` rows, and stale workers are prevented
-from re-finalizing shards they no longer own.
+In manifest mode, fix the error and resubmit the same manifest/build tag.
+Workers skip shards already recorded in their `state.jsonl` completion
+ledger. There is no retry or `failed` state in the trace; a shard exception
+exits the worker nonzero.
+
+In legacy DB mode, workers only claim `pending` rows, the reaper reclaims
+stale `running` rows, and stale workers are prevented from re-finalizing
+shards they no longer own.
 
 ## 5. Completion
 
-When every row for a model is `done`, run the merge job:
+For manifest mode, run merge against the static manifest and completion
+trace:
+
+```bash
+sbatch ./scripts/opus/run_merge.sh \
+    --manifest-root /scratch/.../opus_qe/manifests \
+    --build-tag <build_tag> \
+    --trace-root /scratch/.../opus_qe/shard_trace \
+    --output-base /scratch/.../opus_qe/shards \
+    --merged-base /scratch/.../opus_qe/merged \
+    --model metricx24
+```
+
+For legacy DB mode, when every row for a model is `done`, run:
 
 ```bash
 sbatch ./scripts/opus/run_merge.sh \
@@ -174,13 +200,14 @@ sbatch ./scripts/opus/run_merge.sh \
 Each direction gets:
 
 ```text
-<merged-base>/<model>/<direction_key>.part-0000.parquet
-<merged-base>/<model>/<direction_key>.part-0001.parquet  # if needed; max 5 GB per file
-<merged-base>/<model>/<direction_key>.meta.json
+<merged-base>/<model>/<direction_key>/<direction_key>.part-0000.parquet
+<merged-base>/<model>/<direction_key>/<direction_key>.part-0001.parquet  # if needed; max 5 GB per file
+<merged-base>/<model>/<direction_key>/<direction_key>.meta.json
 ```
 
 The merge metadata records the source DB path and the shard count used to
-produce the merged parquet files.
+produce the merged parquet files. The direction subdirectory is the merge
+completion marker used to skip already-merged directions on later runs.
 
 ## Output layout summary
 
@@ -195,15 +222,15 @@ produce the merged parquet files.
             ...
 <merged-base>/
     <model>/
-        <direction_key>.part-0000.parquet
-        <direction_key>.part-0001.parquet
-        <direction_key>.meta.json
+        <direction_key>/
+            <direction_key>.part-0000.parquet
+            <direction_key>.part-0001.parquet
+            <direction_key>.meta.json
 ```
 
-This layout is intentionally flatter than the FLORES hive-style layout.
-The `<model>` directory is always the queue/DB model key, and merge
-reads both legacy `shard_*.jsonl` files and worker-owned `part-*.jsonl`
-files before writing one or more Parquet files per direction.
+The `<model>` directory is always the queue/DB model key, and merge reads
+both legacy `shard_*.jsonl` files and worker-owned `part-*.jsonl` files
+before writing one or more Parquet files per direction.
 
 ## Troubleshooting
 

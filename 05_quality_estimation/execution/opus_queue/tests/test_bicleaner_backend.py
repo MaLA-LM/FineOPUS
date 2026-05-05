@@ -8,14 +8,20 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import call, patch
 
 from src.backends.bicleaner import backend as bicleaner_backend
 
 
+def _run_bicleaner(*args, **kwargs) -> None:
+    with patch.object(bicleaner_backend, "sleep"):
+        bicleaner_backend.run_bicleaner(*args, **kwargs)
+
+
 def test_run_bicleaner_uses_both_language_flags() -> None:
     with patch.object(bicleaner_backend.subprocess, "run") as run_mock:
-        bicleaner_backend.run_bicleaner(
+        _run_bicleaner(
             Path("input.tsv"),
             Path("output.tsv"),
             "model-id",
@@ -45,7 +51,7 @@ def test_run_bicleaner_uses_both_language_flags() -> None:
 
 def test_run_bicleaner_uses_source_only_flag() -> None:
     with patch.object(bicleaner_backend.subprocess, "run") as run_mock:
-        bicleaner_backend.run_bicleaner(
+        _run_bicleaner(
             Path("input.tsv"),
             Path("output.tsv"),
             "model-id",
@@ -73,7 +79,7 @@ def test_run_bicleaner_uses_source_only_flag() -> None:
 
 def test_run_bicleaner_uses_target_only_flag() -> None:
     with patch.object(bicleaner_backend.subprocess, "run") as run_mock:
-        bicleaner_backend.run_bicleaner(
+        _run_bicleaner(
             Path("input.tsv"),
             Path("output.tsv"),
             "model-id",
@@ -101,7 +107,7 @@ def test_run_bicleaner_uses_target_only_flag() -> None:
 
 def test_run_bicleaner_omits_language_flags_when_none_present() -> None:
     with patch.object(bicleaner_backend.subprocess, "run") as run_mock:
-        bicleaner_backend.run_bicleaner(
+        _run_bicleaner(
             Path("input.tsv"),
             Path("output.tsv"),
             "model-id",
@@ -134,7 +140,7 @@ def test_run_bicleaner_retries_without_language_flags_after_failure() -> None:
             subprocess.CompletedProcess(["bicleaner-ai-classify"], 0),
         ],
     ) as run_mock:
-        bicleaner_backend.run_bicleaner(
+        _run_bicleaner(
             Path("input.tsv"),
             Path("output.tsv"),
             "model-id",
@@ -176,13 +182,30 @@ def test_run_bicleaner_retries_without_language_flags_after_failure() -> None:
     ]
 
 
+def test_write_tsv_flattens_embedded_row_breakers() -> None:
+    examples = [
+        {
+            "src": 'hola\t"mundo"\nlinea\x00dos',
+            "tgt": "target\rline",
+        }
+    ]
+
+    with TemporaryDirectory(dir=Path.cwd()) as tmp_dir:
+        path = Path(tmp_dir) / "input.tsv"
+        bicleaner_backend.write_tsv(examples, path)
+        content = path.read_text(encoding="utf-8")
+
+    assert content == '"hola ""mundo"" linea dos"\ttarget line\n'
+
+
 def run_test() -> None:
     test_run_bicleaner_uses_both_language_flags()
     test_run_bicleaner_uses_source_only_flag()
     test_run_bicleaner_uses_target_only_flag()
     test_run_bicleaner_omits_language_flags_when_none_present()
     test_run_bicleaner_retries_without_language_flags_after_failure()
-    print("OK: bicleaner language flags cover both, partial, none, and fallback modes.")
+    test_write_tsv_flattens_embedded_row_breakers()
+    print("OK: bicleaner backend regression tests passed.")
 
 
 if __name__ == "__main__":

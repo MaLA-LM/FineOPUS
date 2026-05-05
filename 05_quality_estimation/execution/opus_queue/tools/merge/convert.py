@@ -2,12 +2,18 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
-from execution.opus_queue.tools.merge.collect import done_jobs_for_direction, sorted_part_files
+from execution.opus_queue.tools.merge.collect import (
+    CompletedShard,
+    done_jobs_for_direction,
+    sorted_part_files,
+)
 from utils.logger import logger
 
 __all__ = ["merge_direction"]
@@ -20,7 +26,7 @@ _MERGE_BATCH_ROWS = 20_000
 # Rotation is checked after each written batch, so a single file can exceed the
 # cap by up to one merge batch.
 _MAX_PARQUET_FILE_BYTES = 5_000_000_000
-_DROP_OUTPUT_COLUMNS = ("shard_id", "worker_id", "direction_key")
+_DROP_OUTPUT_COLUMNS = ("shard_id", "worker_id", "worker_run_id", "direction_key")
 
 
 @dataclass
@@ -47,15 +53,23 @@ def _merged_legacy_file(merged_model_dir: Path, direction_key: str) -> Path:
     return merged_model_dir / f"{direction_key}.parquet"
 
 
-def _merged_meta_file(merged_model_dir: Path, direction_key: str) -> Path:
-    return merged_model_dir / f"{direction_key}.meta.json"
+def _merged_direction_dir(merged_model_dir: Path, direction_key: str) -> Path:
+    return merged_model_dir / direction_key
 
 
-def _merged_part_file(merged_model_dir: Path, direction_key: str, part_idx: int) -> Path:
-    return merged_model_dir / f"{direction_key}.part-{part_idx:04d}.parquet"
+def _temporary_direction_dir(merged_model_dir: Path, direction_key: str) -> Path:
+    return merged_model_dir / f".{direction_key}.tmp-{os.getpid()}-{uuid.uuid4().hex}"
 
 
-def _existing_merged_part_files(merged_model_dir: Path, direction_key: str) -> list[Path]:
+def _merged_meta_file(direction_dir: Path, direction_key: str) -> Path:
+    return direction_dir / f"{direction_key}.meta.json"
+
+
+def _merged_part_file(direction_dir: Path, direction_key: str, part_idx: int) -> Path:
+    return direction_dir / f"{direction_key}.part-{part_idx:04d}.parquet"
+
+
+def _existing_flat_part_files(merged_model_dir: Path, direction_key: str) -> list[Path]:
     return sorted(
         path
         for path in merged_model_dir.glob(f"{direction_key}.part-*.parquet")
@@ -69,11 +83,47 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     os.replace(tmp_path, path)
 
 
+def _remove_path(path: Path) -> None:
+    if path.is_dir():
+        shutil.rmtree(path)
+        return
+    path.unlink()
+
+
+def _install_completed_direction(
+    tmp_direction_dir: Path, final_direction_dir: Path, *, force: bool
+) -> None:
+    if final_direction_dir.exists():
+        if not force:
+            raise FileExistsError(
+                f"merged direction directory already exists: {final_direction_dir}"
+            )
+        _remove_path(final_direction_dir)
+    os.replace(tmp_direction_dir, final_direction_dir)
+
+
+def _remove_flat_outputs(merged_model_dir: Path, direction_key: str) -> None:
+    stale_paths = _existing_flat_part_files(merged_model_dir, direction_key)
+    legacy_out_file = _merged_legacy_file(merged_model_dir, direction_key)
+    legacy_meta_file = merged_model_dir / f"{direction_key}.meta.json"
+    if legacy_out_file.exists():
+        stale_paths.append(legacy_out_file)
+    if legacy_meta_file.exists():
+        stale_paths.append(legacy_meta_file)
+    for stale_path in stale_paths:
+        try:
+            stale_path.unlink()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            logger.warning("Failed to remove stale flat merged output: %s", stale_path)
+
+
 class _SplitParquetWriter:
 
-    def __init__(self, pq, merged_model_dir: Path, direction_key: str) -> None:
+    def __init__(self, pq, direction_dir: Path, direction_key: str) -> None:
         self._pq = pq
-        self._merged_model_dir = merged_model_dir
+        self._direction_dir = direction_dir
         self._direction_key = direction_key
         self._schema = None
         self._writer = None
@@ -90,7 +140,7 @@ class _SplitParquetWriter:
         if self._schema is None:
             raise ValueError("schema must be initialized before opening a parquet part")
         final_path = _merged_part_file(
-            self._merged_model_dir, self._direction_key, self._next_part_idx
+            self._direction_dir, self._direction_key, self._next_part_idx
         )
         self._next_part_idx += 1
         self._current_final_path = final_path
@@ -170,7 +220,7 @@ class _SplitParquetWriter:
 def _iter_filtered_records(
     path: Path,
     *,
-    winners: dict[int, str] | None = None,
+    winners: dict[int, CompletedShard] | None = None,
     legacy_shard_id: int | None = None,
     stats: _MergeScanStats | None = None,
 ) -> Iterator[dict]:
@@ -220,7 +270,15 @@ def _iter_filtered_records(
                     stats.rows_dropped += 1
                 continue
             worker_id = str(raw_worker_id)
-            if winners.get(shard_id) != worker_id:
+            winner = winners.get(shard_id)
+            if winner is None or winner.worker_id != worker_id:
+                if stats is not None:
+                    stats.rows_dropped += 1
+                continue
+            if (
+                winner.worker_run_id is not None
+                and record.get("worker_run_id") != winner.worker_run_id
+            ):
                 if stats is not None:
                     stats.rows_dropped += 1
                 continue
@@ -235,12 +293,13 @@ def merge_direction(
     conn,
     output_base: Path,
     merged_base: Path,
-    source_db: Path,
+    source_ref: Path | str,
     direction_key: str,
     model: str,
     *,
     force: bool,
     delete_shards: bool,
+    winners: dict[int, CompletedShard] | None = None,
 ) -> tuple[bool, int, int]:
     import pyarrow as pa
     import pyarrow.parquet as pq
@@ -250,9 +309,16 @@ def merge_direction(
         logger.warning("No shard dir for %s/%s at %s", model, direction_key, shard_dir)
         return False, 0, 0
 
-    winners = done_jobs_for_direction(conn, direction_key, model)
+    if winners is None:
+        if conn is None:
+            raise ValueError("merge_direction requires conn when winners are not provided")
+        winners = done_jobs_for_direction(conn, direction_key, model)
     if not winners:
-        logger.warning("No done jobs found for %s/%s; skipping merge.", model, direction_key)
+        logger.warning(
+            "No completion markers found for %s/%s; skipping merge.",
+            model,
+            direction_key,
+        )
         return False, 0, 0
 
     part_files = sorted_part_files(shard_dir)
@@ -262,18 +328,21 @@ def merge_direction(
 
     merged_model_dir = merged_base / model
     merged_model_dir.mkdir(parents=True, exist_ok=True)
-    legacy_out_file = _merged_legacy_file(merged_model_dir, direction_key)
-    meta_file = _merged_meta_file(merged_model_dir, direction_key)
-    existing_part_files = _existing_merged_part_files(merged_model_dir, direction_key)
-    existing_output_files = list(existing_part_files)
-    if legacy_out_file.exists():
-        existing_output_files.append(legacy_out_file)
+    final_direction_dir = _merged_direction_dir(merged_model_dir, direction_key)
 
-    if existing_output_files and meta_file.exists() and not force:
-        logger.info("Skipping merged direction (exists): %s", meta_file)
+    if final_direction_dir.is_dir() and not force:
+        logger.info(
+            "Skipping merged direction directory (exists): %s", final_direction_dir
+        )
         return False, 0, 0
+    if final_direction_dir.exists() and not final_direction_dir.is_dir():
+        raise NotADirectoryError(
+            f"merged direction path exists but is not a directory: {final_direction_dir}"
+        )
 
-    writer = _SplitParquetWriter(pq, merged_model_dir, direction_key)
+    tmp_direction_dir = _temporary_direction_dir(merged_model_dir, direction_key)
+    tmp_direction_dir.mkdir()
+    writer = _SplitParquetWriter(pq, tmp_direction_dir, direction_key)
     total_rows = 0
     rows_kept = 0
     rows_dropped = 0
@@ -313,7 +382,7 @@ def merge_direction(
                 continue
             if item.shard_id not in winners:
                 logger.warning(
-                    "Skipping legacy shard file not present in done-job set: %s",
+                    "Skipping legacy shard file not present in completion set: %s",
                     item.path,
                 )
                 continue
@@ -333,37 +402,41 @@ def merge_direction(
         completed_parts = writer.finalize()
     except Exception:
         writer.cleanup()
+        shutil.rmtree(tmp_direction_dir, ignore_errors=True)
         raise
 
     if not completed_parts:
         # No records across any shard: nothing to write.
         logger.warning("No records found in %s; skipping merge.", shard_dir)
+        shutil.rmtree(tmp_direction_dir, ignore_errors=True)
         return False, len(winners), 0
 
     final_output_files = [part.final_path for part in completed_parts]
     for part in completed_parts:
         os.replace(part.tmp_path, part.final_path)
-    for stale_path in existing_output_files:
-        if stale_path in final_output_files:
-            continue
-        try:
-            stale_path.unlink()
-        except FileNotFoundError:
-            continue
-        except OSError:
-            logger.warning("Failed to remove stale merged parquet: %s", stale_path)
 
     meta = {
         "n_shards": len(winners),
         "n_rows": total_rows,
-        "source_db": str(source_db),
+        "source": str(source_ref),
+        "source_db": str(source_ref),
         "merged_at": datetime.now(timezone.utc).isoformat(),
         "direction_key": direction_key,
         "model": model,
         "n_parquet_files": len(final_output_files),
         "parquet_files": [path.name for path in final_output_files],
     }
+    meta_file = _merged_meta_file(tmp_direction_dir, direction_key)
     _write_json_atomic(meta_file, meta)
+
+    try:
+        _install_completed_direction(
+            tmp_direction_dir, final_direction_dir, force=force
+        )
+    except Exception:
+        shutil.rmtree(tmp_direction_dir, ignore_errors=True)
+        raise
+    _remove_flat_outputs(merged_model_dir, direction_key)
 
     if delete_shards:
         for item in part_files:
@@ -386,6 +459,6 @@ def merge_direction(
         legacy_file_count,
         rows_kept,
         rows_dropped,
-        final_output_files[0],
+        final_direction_dir / final_output_files[0].name,
     )
     return True, len(winners), total_rows

@@ -9,9 +9,34 @@ __all__ = ["main", "parse_args"]
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="OPUS queue worker: claim -> score -> commit."
+        description="OPUS queue worker: manifest assignment -> score -> trace commit."
     )
-    parser.add_argument("--db", required=True, help="Path to the shared jobs SQLite file.")
+    parser.add_argument(
+        "--mode",
+        choices=("auto", "manifest", "db"),
+        default="auto",
+        help="Worker coordination mode. auto selects manifest when --manifest-root is provided.",
+    )
+    parser.add_argument(
+        "--db",
+        default=None,
+        help="Legacy SQLite jobs DB path (only used with --mode db).",
+    )
+    parser.add_argument(
+        "--manifest-root",
+        default=None,
+        help="Root containing <build_tag>/manifest.jsonl for manifest mode.",
+    )
+    parser.add_argument(
+        "--trace-root",
+        default="/scratch/project_462001050/opus_qe/shard_trace",
+        help="Root for per-worker trace files in manifest mode.",
+    )
+    parser.add_argument(
+        "--build-tag",
+        default=None,
+        help="Manifest build tag to read.",
+    )
     parser.add_argument("--model", required=True, help="Model key (e.g. metricx24).")
     parser.add_argument(
         "--scorer-model",
@@ -51,8 +76,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--opus-root", default=None, help="OPUS root; defaults to adapter default.")
     parser.add_argument("--walltime-seconds", type=int, default=None,
                         help="Remaining walltime (seconds). Worker exits cleanly if time runs low.")
-    parser.add_argument("--max-attempts", type=int, default=3)
-    parser.add_argument("--claim-retries", type=int, default=5)
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=3,
+        help="Legacy DB mode only: attempts before a shard is marked failed.",
+    )
+    parser.add_argument(
+        "--claim-retries",
+        type=int,
+        default=30,
+        help="Legacy DB-mode retries on SQLITE_BUSY.",
+    )
     parser.add_argument(
         "--shard-size-override",
         action="append",

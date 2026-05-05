@@ -68,7 +68,9 @@ def _write_jsonl(path: Path, records: list[dict]) -> None:
     path.write_text(payload, encoding="utf-8")
 
 
-def _run_merge(db_path: Path, output_base: Path, merged_base: Path, model: str) -> None:
+def _run_merge(
+    db_path: Path, output_base: Path, merged_base: Path, model: str, *, jobs: int = 1
+) -> None:
     merge.run(
         argparse.Namespace(
             db=str(db_path),
@@ -77,16 +79,41 @@ def _run_merge(db_path: Path, output_base: Path, merged_base: Path, model: str) 
             model=model,
             delete_shards=False,
             force=False,
+            jobs=jobs,
+        )
+    )
+
+
+def _run_manifest_merge(
+    manifest_root: Path,
+    build_tag: str,
+    trace_root: Path,
+    output_base: Path,
+    merged_base: Path,
+    model: str,
+) -> None:
+    merge.run(
+        argparse.Namespace(
+            db=None,
+            manifest_root=str(manifest_root),
+            build_tag=build_tag,
+            trace_root=str(trace_root),
+            output_base=str(output_base),
+            merged_base=str(merged_base),
+            model=model,
+            delete_shards=False,
+            force=False,
+            jobs=1,
         )
     )
 
 
 def _merged_parquet_files(merged_base: Path, model: str, direction_key: str) -> list[Path]:
-    merged_model_dir = merged_base / model
-    part_files = sorted(merged_model_dir.glob(f"{direction_key}.part-*.parquet"))
+    merged_direction_dir = merged_base / model / direction_key
+    part_files = sorted(merged_direction_dir.glob(f"{direction_key}.part-*.parquet"))
     if part_files:
         return [path for path in part_files if path.is_file()]
-    legacy_file = merged_model_dir / f"{direction_key}.parquet"
+    legacy_file = merged_direction_dir / f"{direction_key}.parquet"
     return [legacy_file] if legacy_file.is_file() else []
 
 
@@ -102,6 +129,7 @@ def _read_merged_records(merged_base: Path, model: str, direction_key: str) -> l
 def _assert_merge_only_columns_removed(records: list[dict]) -> None:
     assert all("shard_id" not in record for record in records)
     assert all("worker_id" not in record for record in records)
+    assert all("worker_run_id" not in record for record in records)
     assert all("direction_key" not in record for record in records)
 
 
@@ -197,7 +225,7 @@ def test_merge_uses_queue_model_directory() -> None:
         _run_merge(db_path, output_base, merged_base, model)
 
         merged_files = _merged_parquet_files(merged_base, model, direction_key)
-        meta_file = merged_base / model / f"{direction_key}.meta.json"
+        meta_file = merged_base / model / direction_key / f"{direction_key}.meta.json"
         assert len(merged_files) == 1
         assert meta_file.exists()
 
@@ -493,7 +521,9 @@ def test_merge_splits_large_directions_into_multiple_parquet_files() -> None:
 
         merged_files = _merged_parquet_files(merged_base, model, direction_key)
         meta = json.loads(
-            (merged_base / model / f"{direction_key}.meta.json").read_text(encoding="utf-8")
+            (
+                merged_base / model / direction_key / f"{direction_key}.meta.json"
+            ).read_text(encoding="utf-8")
         )
         records = _read_merged_records(merged_base, model, direction_key)
         assert len(merged_files) == 3
@@ -507,6 +537,143 @@ def test_merge_splits_large_directions_into_multiple_parquet_files() -> None:
         assert meta["parquet_files"] == [path.name for path in merged_files]
 
 
+def test_parallel_merge_processes_multiple_directions() -> None:
+    with _scratch_dir() as root:
+        db_path = root / "queue.db"
+        output_base = root / "shards"
+        merged_base = root / "merged"
+        model = "metricx24"
+        directions = ["eng_Latn-swe_Latn", "eng_Latn-nld_Latn"]
+
+        conn = queue_db.connect(db_path)
+        try:
+            queue_db.initialize(conn)
+            for direction_key in directions:
+                _seed_direction(
+                    conn, direction_key=direction_key, model=model, n_sentences=1
+                )
+                _seed_done_job(
+                    conn,
+                    direction_key=direction_key,
+                    model=model,
+                    shard_id=0,
+                    worker_id="wid_parallel",
+                    out_path="/tmp/part-wid_parallel-0000.jsonl",
+                )
+        finally:
+            conn.close()
+
+        for direction_key in directions:
+            _write_jsonl(
+                output_base / model / direction_key / "part-wid_parallel-0000.jsonl",
+                [
+                    {
+                        "source_text": f"parallel-{direction_key}",
+                        "target_text": f"parallel-{direction_key}",
+                        "qe_score": 1,
+                        "shard_id": 0,
+                        "worker_id": "wid_parallel",
+                        "direction_key": direction_key,
+                    }
+                ],
+            )
+
+        _run_merge(db_path, output_base, merged_base, model, jobs=2)
+
+        for direction_key in directions:
+            records = _read_merged_records(merged_base, model, direction_key)
+            assert [record["source_text"] for record in records] == [
+                f"parallel-{direction_key}"
+            ]
+            _assert_merge_only_columns_removed(records)
+
+
+def test_manifest_merge_uses_completion_trace() -> None:
+    with _scratch_dir() as root:
+        manifest_root = root / "manifests"
+        build_tag = "unit"
+        trace_root = root / "trace"
+        output_base = root / "shards"
+        merged_base = root / "merged"
+        model = "metricx24"
+        direction_key = "eng_Latn-fra_Latn"
+        worker_slot_id = "metricx24-a00000-l0"
+
+        _write_jsonl(
+            manifest_root / build_tag / "manifest.jsonl",
+            [
+                {
+                    "worker_slot_id": worker_slot_id,
+                    "model": model,
+                    "array_task_id": 0,
+                    "local_id": 0,
+                    "assignment_seq": 0,
+                    "direction_key": direction_key,
+                    "src_lang": "eng_Latn",
+                    "tgt_lang": "fra_Latn",
+                    "shard_id": 0,
+                    "start_idx": 0,
+                    "end_idx": 1,
+                    "shard_size": 1,
+                    "expected_seconds": 600,
+                }
+            ],
+        )
+        _write_jsonl(
+            trace_root / build_tag / worker_slot_id / "state.jsonl",
+            [
+                {
+                    "event": "done",
+                    "worker_slot_id": worker_slot_id,
+                    "worker_run_id": "run",
+                    "model": model,
+                    "direction_key": direction_key,
+                    "shard_id": 0,
+                    "start_idx": 0,
+                    "end_idx": 1,
+                    "finished_at": 123,
+                    "gpu_count": 1,
+                    "gpu_seconds_delta": 1.0,
+                    "out_path": "part-metricx24-a00000-l0-0000.jsonl",
+                }
+            ],
+        )
+        _write_jsonl(
+            output_base / model / direction_key / "part-metricx24-a00000-l0-0000.jsonl",
+            [
+                {
+                    "source_text": "manifest-src",
+                    "target_text": "manifest-tgt",
+                    "qe_score": 0,
+                    "shard_id": 0,
+                    "worker_id": worker_slot_id,
+                    "worker_run_id": "run",
+                    "direction_key": direction_key,
+                }
+            ],
+        )
+
+        _run_manifest_merge(
+            manifest_root,
+            build_tag,
+            trace_root,
+            output_base,
+            merged_base,
+            model,
+        )
+
+        records = _read_merged_records(merged_base, model, direction_key)
+        assert [record["source_text"] for record in records] == ["manifest-src"]
+        _assert_merge_only_columns_removed(records)
+        meta = json.loads(
+            (
+                merged_base / model / direction_key / f"{direction_key}.meta.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert meta["n_shards"] == 1
+        assert meta["source"].endswith("manifest.jsonl")
+
+
 def run_test() -> None:
     test_merge_uses_queue_model_directory()
     test_merge_filters_orphan_rows()
@@ -514,6 +681,8 @@ def run_test() -> None:
     test_merge_reads_mixed_layouts()
     test_merge_prefers_new_layout_over_legacy_duplicate()
     test_merge_splits_large_directions_into_multiple_parquet_files()
+    test_parallel_merge_processes_multiple_directions()
+    test_manifest_merge_uses_completion_trace()
     print("OK: merge handles legacy shards, worker-owned part files, orphan filtering, and split parquet output.")
 
 
