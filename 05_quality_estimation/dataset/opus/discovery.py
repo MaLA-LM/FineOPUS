@@ -7,7 +7,7 @@ from pathlib import Path
 
 from utils.logger import logger
 
-DEFAULT_OPUS_ROOT = "/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2"
+DEFAULT_OPUS_ROOT = "/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3"
 DEFAULT_SPLIT = "all"
 SPLIT_VALUES = (DEFAULT_SPLIT,)
 
