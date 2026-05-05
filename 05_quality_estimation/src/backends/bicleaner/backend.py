@@ -31,6 +31,12 @@ BICLEANER_MODEL_IDS = {
 }
 
 _DATASET_ISO_CACHE: dict[int, dict[str, str]] = {}
+_TSV_FIELD_TRANSLATION = str.maketrans({
+    "\t": " ",
+    "\r": " ",
+    "\n": " ",
+    "\x00": " ",
+})
 
 
 def _build_iso_lookup(dataset) -> dict[str, str]:
@@ -82,11 +88,22 @@ def select_model_id(
     return model_ids[model_key]
 
 
+def _tsv_field(value: object) -> str:
+    return str(value).translate(_TSV_FIELD_TRANSLATION)
+
+
 def write_tsv(examples: list[Example], path: Path) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.writer(handle, delimiter="\t", quoting=csv.QUOTE_MINIMAL)
+        writer = csv.writer(
+            handle,
+            delimiter="\t",
+            quoting=csv.QUOTE_MINIMAL,
+            doublequote=True,
+            escapechar="\\",
+            lineterminator="\n",
+        )
         for ex in examples:
-            writer.writerow([ex["src"], ex["tgt"]])
+            writer.writerow([_tsv_field(ex["src"]), _tsv_field(ex["tgt"])])
 
 
 def read_scores(path: Path) -> list[float]:

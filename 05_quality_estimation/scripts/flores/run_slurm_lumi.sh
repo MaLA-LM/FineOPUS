@@ -22,6 +22,8 @@ export HF_ASSETS_CACHE="$HF_HOME/assets"
 export HUGGINGFACE_HUB_CACHE="$HF_HUB_CACHE"
 export HUGGINGFACE_ASSETS_CACHE="$HF_ASSETS_CACHE"
 export TRANSFORMERS_CACHE="$HF_HUB_CACHE"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
 export TORCH_HOME="$SCRATCH_CACHE/.cache/torch"
 export TRITON_CACHE_DIR="$SCRATCH_CACHE/.cache/triton"
 export XDG_CACHE_HOME="$SCRATCH_CACHE/.cache"
@@ -532,7 +534,17 @@ elif [ "$BACKEND" = "llm" ]; then
 else
     # comet / metricx backends
     run_metric() {
-        singularity run "$SIF" bash -c "
+        singularity run \
+            --env "HF_HOME=${HF_HOME}" \
+            --env "HF_HUB_CACHE=${HF_HUB_CACHE}" \
+            --env "TRANSFORMERS_CACHE=${TRANSFORMERS_CACHE}" \
+            --env "HF_DATASETS_CACHE=${HF_DATASETS_CACHE}" \
+            --env "HF_ASSETS_CACHE=${HF_ASSETS_CACHE}" \
+            --env "HUGGINGFACE_HUB_CACHE=${HUGGINGFACE_HUB_CACHE}" \
+            --env "HUGGINGFACE_ASSETS_CACHE=${HUGGINGFACE_ASSETS_CACHE}" \
+            --env "HF_HUB_OFFLINE=1" \
+            --env "TRANSFORMERS_OFFLINE=1" \
+            "$SIF" bash -c "
             source ${VENV_PATH}/bin/activate
             python3 -m $MODULE \
                 ${COMMON_ARGS[*]} \

@@ -1,24 +1,26 @@
 #!/usr/bin/env bash
 #
 # Inner launcher for one OPUS queue worker. Expected to run under SLURM as
-# part of an array; reads MODEL / DB / OUTPUT_BASE / OPUS_ROOT / PLATFORM
+# part of an array; reads MODEL / MANIFEST_ROOT / BUILD_TAG / TRACE_ROOT / OUTPUT_BASE / OPUS_ROOT / PLATFORM
 # from the environment (exported by submit_array.sh).
 #
 #SBATCH --job-name=opus_worker
-#SBATCH --account=project_462001050
+#SBATCH --account=project_462001249
 #SBATCH --partition=small-g
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=7
 #SBATCH --gpus-per-node=1
 #SBATCH --mem=60G
-#SBATCH --output=/projappl/project_462001050/members/ibrahiam/05_quality_estimation/logs/%x-%A_%a.out
-#SBATCH --error=/projappl/project_462001050/members/ibrahiam/05_quality_estimation/logs/%x-%A_%a.err
+#SBATCH --output=/scratch/project_462001050/opus_qe/logs/%x-%A_%a.out
+#SBATCH --error=/scratch/project_462001050/opus_qe/logs/%x-%A_%a.err
 
 set -euo pipefail
 
 : "${MODEL:?MODEL is required}"
-: "${DB:?DB is required}"
+: "${MANIFEST_ROOT:?MANIFEST_ROOT is required}"
+: "${BUILD_TAG:?BUILD_TAG is required}"
+: "${TRACE_ROOT:?TRACE_ROOT is required}"
 : "${OUTPUT_BASE:?OUTPUT_BASE is required}"
 
 PLATFORM="$(printf '%s' "${PLATFORM:-lumi}" | tr '[:upper:]' '[:lower:]')"
@@ -35,6 +37,8 @@ export HF_DATASETS_CACHE="$HF_HOME/datasets"
 export HF_ASSETS_CACHE="$HF_HOME/assets"
 export HUGGINGFACE_HUB_CACHE="$HF_HUB_CACHE"
 export HUGGINGFACE_ASSETS_CACHE="$HF_ASSETS_CACHE"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
 export TORCH_HOME="$SCRATCH_CACHE/.cache/torch"
 export TRITON_CACHE_DIR="$SCRATCH_CACHE/.cache/triton"
 export XDG_CACHE_HOME="$SCRATCH_CACHE/.cache"
@@ -45,7 +49,7 @@ export MASTER_PORT=$(( 20000 + ((PORT_JOB_SEED + PORT_TASK_SEED) % 20000) ))
 
 WORKDIR="${WORKDIR:-/projappl/project_462001050/members/ibrahiam/05_quality_estimation}"
 VENV_BASE="${VENV_BASE:-/scratch/project_462001050/ibrahiam/envs}"
-DEFAULT_OPUS_ROOT="/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2"
+DEFAULT_OPUS_ROOT="/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3"
 OPUS_ROOT="${OPUS_ROOT:-$DEFAULT_OPUS_ROOT}"
 
 # FLORES-aligned runtime knobs.
@@ -72,7 +76,8 @@ cd "$WORKDIR"
 
 echo "=================================="
 echo "OPUS worker: model=$MODEL platform=$PLATFORM"
-echo "DB=$DB  OUTPUT_BASE=$OUTPUT_BASE  OPUS_ROOT=$OPUS_ROOT"
+echo "MANIFEST_ROOT=$MANIFEST_ROOT  BUILD_TAG=$BUILD_TAG  TRACE_ROOT=$TRACE_ROOT"
+echo "OUTPUT_BASE=$OUTPUT_BASE  OPUS_ROOT=$OPUS_ROOT"
 echo "Job ID: ${SLURM_JOB_ID:-N/A}  Array task: ${SLURM_ARRAY_TASK_ID:-N/A}"
 echo "Start time: $(date)"
 echo "Master Port: $MASTER_PORT"
@@ -236,7 +241,10 @@ else
 fi
 
 WORKER_ARGS=(
-    --db "$DB"
+    --mode manifest
+    --manifest-root "$MANIFEST_ROOT"
+    --build-tag "$BUILD_TAG"
+    --trace-root "$TRACE_ROOT"
     --model "$QUEUE_MODEL"
     --backend "$BACKEND"
     --output-base "$OUTPUT_BASE"
@@ -349,7 +357,16 @@ elif [ "$BACKEND" = "llm" ]; then
     set +x
 else
     set -x
-    singularity run "$SIF" bash -lc "
+    singularity run \
+        --env "HF_HOME=${HF_HOME}" \
+        --env "HF_HUB_CACHE=${HF_HUB_CACHE}" \
+        --env "HF_DATASETS_CACHE=${HF_DATASETS_CACHE}" \
+        --env "HF_ASSETS_CACHE=${HF_ASSETS_CACHE}" \
+        --env "HUGGINGFACE_HUB_CACHE=${HUGGINGFACE_HUB_CACHE}" \
+        --env "HUGGINGFACE_ASSETS_CACHE=${HUGGINGFACE_ASSETS_CACHE}" \
+        --env "HF_HUB_OFFLINE=1" \
+        --env "TRANSFORMERS_OFFLINE=1" \
+        "$SIF" bash -lc "
         source ${VENV_PATH}/bin/activate
         ${WORKER_CMD}
     "

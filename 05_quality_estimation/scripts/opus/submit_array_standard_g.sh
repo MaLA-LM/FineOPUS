@@ -6,9 +6,8 @@
 # for up to 200 nodes x 8 GCDs = 1600 GCDs in flight on standard-g.
 #
 # This is the high-throughput companion to scripts/opus/submit_array.sh
-# (which uses small-g with 1 GCD per array task). Both can run at once;
-# they share the same SQLite queue DB and SQLite + WAL handles the
-# concurrent claims atomically.
+# (which uses small-g with 1 GCD per array task). Work is pre-assigned
+# in a manifest; each node-level array task owns 8 stable worker slots.
 #
 # Throughput math:
 #   --array=0-99%100      => 100 nodes x 8 GCDs =  800 GCDs in flight
@@ -25,11 +24,13 @@ MODEL=""
 ARRAY_SPEC=""
 CONCURRENCY=""
 TIME_LIMIT="24:00:00"
-DB=""
+MANIFEST_ROOT=""
+BUILD_TAG=""
+TRACE_ROOT="/scratch/project_462001050/opus_qe/shard_trace"
 OUTPUT_BASE=""
 OPUS_ROOT=""
 PARTITION="standard-g"
-ACCOUNT="project_462001050"
+ACCOUNT="project_462001249"
 EXTRA_SBATCH=""
 PLATFORM="lumi"
 BATCH_SIZE="${BATCH_SIZE:-}"
@@ -60,10 +61,12 @@ Use scripts/opus/submit_array.sh instead for the per-GCD small-g pattern.
 Required:
   --model <key>          Model key (e.g. metricx24, qwen3-4b-instruct-2507).
   --array <a-b>          SLURM array spec (e.g. 0-99). Each index = 1 node.
-  --db <path>            Path to shared SQLite queue database.
+  --manifest-root <dir>  Root containing <build_tag>/manifest.jsonl.
+  --build-tag <tag>      Manifest build tag.
   --output-base <dir>    Shared-storage dir for shard JSONLs / part files.
 
 Optional:
+  --trace-root <dir>     Per-worker trace root (default: /scratch/project_462001050/opus_qe/shard_trace).
   --concurrency <int>    SLURM %N cap (joined to --array as a-b%N).
                          Standard-g caps at 200 running jobs.
   --time <HH:MM:SS>      Walltime per array task (default 24:00:00, max
@@ -92,6 +95,7 @@ Optional:
   --part-writer          Append multiple shards into worker-owned part files.
   --part-max-bytes <int> Rotate part files before the next shard would exceed this size.
   --part-max-shards <int>  Rotate part files after this many shards per part.
+  --db <path>            Deprecated; ignored by manifest workers.
   --extra <str>          Extra args appended verbatim to sbatch.
 EOF
 }
@@ -102,7 +106,10 @@ while [ $# -gt 0 ]; do
         --array)         ARRAY_SPEC="${2:-}"; shift 2 ;;
         --concurrency)   CONCURRENCY="${2:-}"; shift 2 ;;
         --time)          TIME_LIMIT="${2:-}"; shift 2 ;;
-        --db)            DB="${2:-}"; shift 2 ;;
+        --db)            echo "WARNING: --db is deprecated and ignored; use --manifest-root/--build-tag." >&2; shift 2 ;;
+        --manifest-root) MANIFEST_ROOT="${2:-}"; shift 2 ;;
+        --build-tag)     BUILD_TAG="${2:-}"; shift 2 ;;
+        --trace-root)    TRACE_ROOT="${2:-}"; shift 2 ;;
         --output-base)   OUTPUT_BASE="${2:-}"; shift 2 ;;
         --opus-root)     OPUS_ROOT="${2:-}"; shift 2 ;;
         --account)       ACCOUNT="${2:-}"; shift 2 ;;
@@ -131,8 +138,8 @@ while [ $# -gt 0 ]; do
     esac
 done
 
-if [ -z "$MODEL" ] || [ -z "$ARRAY_SPEC" ] || [ -z "$DB" ] || [ -z "$OUTPUT_BASE" ]; then
-    echo "ERROR: --model, --array, --db, and --output-base are required." >&2
+if [ -z "$MODEL" ] || [ -z "$ARRAY_SPEC" ] || [ -z "$MANIFEST_ROOT" ] || [ -z "$BUILD_TAG" ] || [ -z "$OUTPUT_BASE" ]; then
+    echo "ERROR: --model, --array, --manifest-root, --build-tag, and --output-base are required." >&2
     print_usage >&2
     exit 1
 fi
@@ -154,6 +161,7 @@ else
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 RUNNER="$SCRIPT_DIR/run_worker_standard_g.sh"
 TASK_SCRIPT="$SCRIPT_DIR/run_worker_standard_g_task.sh"
 
@@ -168,29 +176,17 @@ for path in "$RUNNER" "$TASK_SCRIPT"; do
     fi
 done
 
-if [ -f "$DB" ] && command -v sqlite3 >/dev/null 2>&1; then
-    SQL_MODEL="${MODEL//\'/\'\'}"
-    PENDING_COUNT="$(sqlite3 "$DB" "SELECT COUNT(*) FROM jobs WHERE model = '$SQL_MODEL' AND status = 'pending';" 2>/dev/null || true)"
-    TOTAL_COUNT="$(sqlite3 "$DB" "SELECT COUNT(*) FROM jobs WHERE model = '$SQL_MODEL';" 2>/dev/null || true)"
-    if [ -n "$TOTAL_COUNT" ] && [ "$TOTAL_COUNT" = "0" ]; then
-        PENDING_MODELS="$(sqlite3 "$DB" "SELECT model || ':' || COUNT(*) FROM jobs WHERE status = 'pending' GROUP BY model ORDER BY COUNT(*) DESC, model ASC LIMIT 10;" 2>/dev/null || true)"
-        if [ -n "$PENDING_MODELS" ]; then
-            PENDING_MODELS="$(printf '%s' "$PENDING_MODELS" | tr '\n' ',' | sed 's/,$//')"
-        else
-            PENDING_MODELS="<none>"
-        fi
-        echo "WARNING: no queue rows found for model='$MODEL' in $DB" >&2
-        echo "WARNING: pending models in DB: $PENDING_MODELS" >&2
-    elif [ -n "$PENDING_COUNT" ] && [ "$PENDING_COUNT" = "0" ]; then
-        echo "WARNING: model='$MODEL' exists in $DB but has no pending rows." >&2
-    fi
+MANIFEST_FILE="${MANIFEST_ROOT%/}/${BUILD_TAG}/manifest.jsonl"
+if [ ! -r "$MANIFEST_FILE" ]; then
+    echo "ERROR: manifest is not readable: $MANIFEST_FILE" >&2
+    exit 1
 fi
 
 SBATCH_ARGS=(
     --job-name="opus_g_${MODEL}"
     --array="$ARRAY_ARG"
     --time="$TIME_LIMIT"
-    --export=ALL,MODEL="$MODEL",DB="$DB",OUTPUT_BASE="$OUTPUT_BASE",OPUS_ROOT="$OPUS_ROOT",PLATFORM="$PLATFORM",BATCH_SIZE="$BATCH_SIZE",GPUS="$GPUS",PROMPT_MODE="$PROMPT_MODE",TEMPERATURE="$TEMPERATURE",MAX_TOKENS="$MAX_TOKENS",MAX_RETRIES="$MAX_RETRIES",VLLM_DTYPE="$VLLM_DTYPE",VLLM_GPU_UTIL="$VLLM_GPU_UTIL",MAX_NUM_BATCHED_TOKENS="$MAX_NUM_BATCHED_TOKENS",MAX_NUM_SEQS="$MAX_NUM_SEQS",MAX_MODEL_LEN="$MAX_MODEL_LEN",RESPONSE_FORMAT="$RESPONSE_FORMAT",STRUCTURED_OUTPUTS_BACKEND="$STRUCTURED_OUTPUTS_BACKEND",ENFORCE_EAGER="$ENFORCE_EAGER",PART_WRITER="$PART_WRITER",PART_MAX_BYTES="$PART_MAX_BYTES",PART_MAX_SHARDS="$PART_MAX_SHARDS",OPUS_STANDARD_G_SCRIPT_DIR="$SCRIPT_DIR"
+    --export=ALL,MODEL="$MODEL",MANIFEST_ROOT="$MANIFEST_ROOT",BUILD_TAG="$BUILD_TAG",TRACE_ROOT="$TRACE_ROOT",OUTPUT_BASE="$OUTPUT_BASE",OPUS_ROOT="$OPUS_ROOT",PLATFORM="$PLATFORM",BATCH_SIZE="$BATCH_SIZE",GPUS="$GPUS",PROMPT_MODE="$PROMPT_MODE",TEMPERATURE="$TEMPERATURE",MAX_TOKENS="$MAX_TOKENS",MAX_RETRIES="$MAX_RETRIES",VLLM_DTYPE="$VLLM_DTYPE",VLLM_GPU_UTIL="$VLLM_GPU_UTIL",MAX_NUM_BATCHED_TOKENS="$MAX_NUM_BATCHED_TOKENS",MAX_NUM_SEQS="$MAX_NUM_SEQS",MAX_MODEL_LEN="$MAX_MODEL_LEN",RESPONSE_FORMAT="$RESPONSE_FORMAT",STRUCTURED_OUTPUTS_BACKEND="$STRUCTURED_OUTPUTS_BACKEND",ENFORCE_EAGER="$ENFORCE_EAGER",PART_WRITER="$PART_WRITER",PART_MAX_BYTES="$PART_MAX_BYTES",PART_MAX_SHARDS="$PART_MAX_SHARDS",OPUS_STANDARD_G_SCRIPT_DIR="$SCRIPT_DIR"
 )
 
 if [ -n "$ACCOUNT" ]; then

@@ -20,7 +20,7 @@ from stand_alone_modules.lookup_table.opus_matcher import (
     build_opus_rows,
 )
 
-DEFAULT_OPUS_PATH = "/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2"
+DEFAULT_OPUS_PATH = "/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3"
 DEFAULT_TABLES_DIR = Path(__file__).resolve().parent / "tables"
 DEFAULT_OUTPUT = Path("data/lookups/lookup_OPUS.csv")
 

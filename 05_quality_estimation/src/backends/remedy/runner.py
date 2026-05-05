@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 
 from execution.flores_array.manifest import ManifestEntry
 from models.language_support import RemedyLanguages
+from utils.logger import logger
 from src.backends.remedy.backend import (
     read_calibration_scores,
     resolve_calibration_scores_path,
@@ -28,6 +29,17 @@ def score_entry(
     iteration: int = 0,
 ):
     examples = load_examples(entry, args, dataset)
+    if not examples:
+        logger.warning(
+            "ReMedy input is empty for %s-%s split=%s; skipping remedy-score.",
+            entry.src_lang,
+            entry.tgt_lang,
+            entry.split,
+        )
+        return build_scored_frames(
+            dataset, entry, spec.model_id, [], examples, language_support
+        )
+
     remedy_src_lang, remedy_tgt_lang = map_lang_codes_to_iso(
         entry.src_lang, entry.tgt_lang, language_support
     )

@@ -9,23 +9,25 @@
 # The two scripts coexist; this one is intended for high-throughput
 # backfill of large queues.
 #
-# Reads MODEL / DB / OUTPUT_BASE / OPUS_ROOT / runtime knobs from the
+# Reads MODEL / MANIFEST_ROOT / BUILD_TAG / TRACE_ROOT / OUTPUT_BASE / OPUS_ROOT / runtime knobs from the
 # environment (exported by submit_array_standard_g.sh).
 #
 #SBATCH --job-name=opus_worker_g
-#SBATCH --account=project_462001050
+#SBATCH --account=project_462001249
 #SBATCH --partition=standard-g
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=8
 #SBATCH --gpus-per-node=8
 #SBATCH --cpus-per-task=7
-#SBATCH --output=/projappl/project_462001050/members/ibrahiam/05_quality_estimation/logs/%x-%A_%a.out
-#SBATCH --error=/projappl/project_462001050/members/ibrahiam/05_quality_estimation/logs/%x-%A_%a.err
+#SBATCH --output=/scratch/project_462001050/opus_qe/logs/%x-%A_%a.out
+#SBATCH --error=/scratch/project_462001050/opus_qe/logs/%x-%A_%a.err
 
 set -euo pipefail
 
 : "${MODEL:?MODEL is required}"
-: "${DB:?DB is required}"
+: "${MANIFEST_ROOT:?MANIFEST_ROOT is required}"
+: "${BUILD_TAG:?BUILD_TAG is required}"
+: "${TRACE_ROOT:?TRACE_ROOT is required}"
 : "${OUTPUT_BASE:?OUTPUT_BASE is required}"
 
 PLATFORM="$(printf '%s' "${PLATFORM:-lumi}" | tr '[:upper:]' '[:lower:]')"
@@ -67,7 +69,7 @@ fi
 
 echo "=================================="
 echo "OPUS standard-g launcher: model=$MODEL"
-echo "DB=$DB"
+echo "MANIFEST_ROOT=$MANIFEST_ROOT  BUILD_TAG=$BUILD_TAG  TRACE_ROOT=$TRACE_ROOT"
 echo "OUTPUT_BASE=$OUTPUT_BASE"
 echo "Job ID: ${SLURM_JOB_ID:-N/A}  Array task: ${SLURM_ARRAY_TASK_ID:-N/A}"
 echo "Node: $(hostname)"
@@ -96,13 +98,10 @@ echo "=================================="
 # Ref: https://docs.lumi-supercomputer.eu/runjobs/scheduled-jobs/distribution-binding/
 # Ref: https://docs.lumi-supercomputer.eu/runjobs/scheduled-jobs/lumig-job/
 #
-# --kill-on-bad-exit=0 : one worker dying does NOT kill the other 7
-#                        (queue workers are independent; the reaper handles
-#                        re-queue of stale shards from killed workers).
-# --wait=0             : srun does not start a SIGKILL countdown when one
-#                        task exits early; siblings keep running until
-#                        either they exit cleanly (queue drained / walltime
-#                        budget) or the SLURM walltime kills the whole job.
+# --kill-on-bad-exit=1 : any shard failure stops the whole node-level job.
+#                        Manifest ownership is static, and resume is based
+#                        only on successful completion markers; unfinished
+#                        shards are retried on explicit resubmission.
 #
 # Current launch model:
 #   * the job reserves one full standard-g node with 8 GCDs
@@ -123,7 +122,7 @@ srun \
     --cpu-bind="$CPU_BIND" \
     --output="${STEP_LOG_DIR}/gcd-%t.out" \
     --error="${STEP_LOG_DIR}/gcd-%t.err" \
-    --kill-on-bad-exit=0 --wait=0 \
+    --kill-on-bad-exit=1 \
     bash "$TASK_SCRIPT"
 EXIT_CODE=$?
 set -e

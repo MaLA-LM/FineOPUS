@@ -4,7 +4,7 @@
 
 ```bash
 export LOOKUP=data/lookups/lookup_OPUS.csv
-export OPUS_ROOT=/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2
+export OPUS_ROOT=/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3
 export DB=/scratch/project_462001050/opus_qe/jobs.db
 export OUTPUT_BASE=/scratch/project_462001050/opus_qe/shards
 export MERGED_BASE=/scratch/project_462001050/opus_qe/merged
@@ -56,7 +56,7 @@ chmod +x envs/*.sh scripts/flores/*.sh scripts/opus/*.sh
 # but do not create or modify the SQLite DB.
 python -m execution.opus_queue.ops.build_queue \
   --lookup data/lookups/lookup_OPUS.csv \
-  --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 \
+  --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3 \
   --db /scratch/project_462001050/opus_qe/jobs.db \
   --dry-run
 
@@ -65,7 +65,7 @@ module purge
 module use /appl/local/laifs/modules  
 module load lumi-aif-singularity-bindings  
 export SIF=/appl/local/laifs/containers/lumi-multitorch-u24r64f21m43t29-20260124_092648/lumi-multitorch-full-u24r64f21m43t29-20260124_092648.sif
-srun --account=project_462001050 --partition=small --time=01:00:00 --cpus-per-task=16 singularity exec $SIF bash  -c 'source /scratch/project_462001050/ibrahiam/envs/metric_venv/bin/activate && python -u -m execution.opus_queue.ops.build_queue --lookup data/lookups/lookup_OPUS.csv --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2 --db /scratch/project_462001050/opus_qe/jobs.db'
+srun --account=project_462001050 --partition=small --time=01:00:00 --cpus-per-task=16 singularity exec $SIF bash  -c 'source /scratch/project_462001050/ibrahiam/envs/metric_venv/bin/activate && python -u -m execution.opus_queue.ops.build_queue --lookup data/lookups/lookup_OPUS.csv --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3 --db /scratch/project_462001050/opus_qe/jobs.db'
 
 # Rebuild one model after calibration.
 # Change --shard-size-override if shards are too short or too long.
@@ -97,7 +97,7 @@ bash scripts/opus/run_reaper.sh --db "$DB" --interval 300 --timeout-multiplier 2
 # If you see terminal failed shards caused by transient issues
 # (scheduler kill, filesystem glitch, model startup crash),
 # temporarily allow the reaper to move old failed rows back to pending.
-bash scripts/opus/run_reaper.sh --db "$DB" --interval 300 --timeout-multiplier 1 --reset-failed
+bash scripts/opus/run_reaper.sh --db "$DB" --interval 300 --timeout-multiplier 2 --reset-failed
 
 # Example check before using --reset-failed:
 sqlite3 "$DB" <<'EOF'
@@ -122,11 +122,11 @@ EOF
 
 # COMET family
 bash scripts/opus/submit_array.sh --model wmt22-cometkiwi-da --array 0-63 --concurrency 32 --time 24:00:00 --batch-size 8 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
-bash scripts/opus/submit_array.sh --model wmt23-cometkiwi-da-xl --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array.sh --model wmt23-cometkiwi-da-xl --array 0 --concurrency 1 --time 12:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model xcomet-xl --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # MetricX
-bash scripts/opus/submit_array.sh --model metricx24 --array 0-1 --concurrency 2 --time 01:00:00 --batch-size 64 --gpus 1 --db /scratch/project_462001050/opus_qe/jobs.db --output-base /scratch/project_462001050/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2
+bash scripts/opus/submit_array.sh --model metricx24 --array 0-1 --concurrency 2 --time 01:00:00 --batch-size 64 --gpus 1 --db /scratch/project_462001050/opus_qe/jobs.db --output-base /scratch/project_462001050/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3
 
 # MetricX with worker-owned part files enabled.
 bash scripts/opus/submit_array.sh --model metricx24 --array 0-31 --concurrency 16 --time 12:00:00 --batch-size 64 --gpus 1 --part-writer --part-max-bytes 536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
@@ -159,7 +159,7 @@ bash scripts/opus/submit_array.sh --model shaomutan_remedy-9b-22 --array 0-2 --c
 
 # Bicleaner selectors
 # If your DB stores auto, use auto. If it stores en-xx / es-xx / de-xx, submit that exact selector.
-bash scripts/opus/submit_array.sh --model bicleaner-ai --array 0 --concurrency 1 --time 01:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array.sh --model bicleaner-ai --array 0-3 --concurrency 4 --time 12:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model en-xx --array 0-31 --concurrency 16 --time 12:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model es-xx --array 0-31 --concurrency 16 --time 12:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 bash scripts/opus/submit_array.sh --model de-xx --array 0-31 --concurrency 16 --time 12:00:00 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
@@ -214,7 +214,7 @@ Caveats before launching:
 # with whole-node accounting).
 bash scripts/opus/submit_array_standard_g.sh --model wmt23-cometkiwi-da-xl --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
-bash scripts/opus/submit_array_standard_g.sh --model xcomet-xl --array 0 --concurrency 1 --time 01:00:00 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model xcomet-xl --array 0-9 --concurrency 10 --time 24:00:00 --part-writer --part-max-bytes 3536870912 --part-max-shards 50 --batch-size 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # MetricX on standard-g (smaller jobs are usually fine on small-g; only
 # scale up to standard-g if MetricX has a large pending backlog).
@@ -239,11 +239,11 @@ bash scripts/opus/submit_array_standard_g.sh --model qwen3-1.7b --array 0-99 --c
 bash scripts/opus/submit_array_standard_g.sh --model qwen3-0.6b --array 0-99 --concurrency 100 --time 24:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # Prometheus family (same FLORES-known-good LLM recipe).
-bash scripts/opus/submit_array_standard_g.sh --model m-prometheus-7b --array 0-1 --concurrency 2 --time 01:00:00 --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 8192 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model m-prometheus-7b --account project_462001249 --array 0-3 --concurrency 4 --time 40:00:00 --batch-size 32 --prompt-mode batch --max-tokens 256 --max-retries 5 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 17000 --response-format json_schema --enforce-eager --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # ReMedy on standard-g. Confirm /pfs/lustrep3/.../hf is pre-populated;
 # 8 workers booting on a cold cache at once will thrash the filesystem.
-bash scripts/opus/submit_array_standard_g.sh --model shaomutan_remedy-9b-22 --array 0 --concurrency 1 --time 01:00:00 --part-writer --part-max-bytes 1536870912 --part-max-shards 32 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
+bash scripts/opus/submit_array_standard_g.sh --model shaomutan_remedy-9b-22 --array 0-8 --concurrency 9 --time 12:00:00 --part-writer --part-max-bytes 3536870912 --part-max-shards 50 --db "$DB" --output-base "$OUTPUT_BASE" --opus-root "$OPUS_ROOT"
 
 # Combined throughput example: keep the existing small-g array (200 GCDs)
 # AND submit a standard-g array (800 GCDs) for the same model. They share
@@ -315,7 +315,15 @@ EOF
 
 ## 7. Merge completed shards
 
+Merged outputs are written under `<merged-base>/<model>/<direction_key>/`.
+The direction subfolder is also the marker used to skip already-merged
+directions on later runs.
+
 ```bash
+# Fix old flat merged outputs by grouping each direction into its own folder.
+python -m stand_alone_modules.group_merged --merged-base "$MERGED_BASE" --model metricx24
+
+
 # Merge one model.
 sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model metricx24
 
@@ -328,4 +336,61 @@ sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --mer
 # Merge a model after a part-writer run. Merge automatically reads both
 # part-*.jsonl and any leftover legacy shard_*.jsonl files in OUTPUT_BASE.
 sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model qwen3-4b-instruct-2507 --force
+
+# names: shaomutan_remedy-9b-22, xcomet-xl, wmt23-cometkiwi-da-xl, m-prometheus-7b, metricx24, bicleaner-ai, qwen3-4b-instruct-2507
+sbatch --cpus-per-task=8 ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model metricx24 --jobs 8
+
+
+## check
+
+module purge
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+
+export SIF=/appl/local/laifs/containers/lumi-multitorch-u24r64f21m43t29-20260124_092648/lumi-multitorch-full-u24r64f21m43t29-20260124_092648.sif
+
+singularity exec "$SIF" sqlite3 "$DB" "SELECT COUNT(*) 
+FROM directions d 
+WHERE NOT EXISTS (
+      SELECT 1
+      FROM jobs j 
+      WHERE j.direction_key = d.direction_key AND j.model = d.model AND j.status != 'done' ) ORDER BY d.direction_key;"
+
+
+```
+
+## 8. Summarize merged OPUS QE scores
+
+The stats command reads all `<merged-base>/<model>/<direction_key>/*.parquet`
+files with DuckDB SQL and writes pooled CSV tables plus a Markdown report.
+By default, outputs go to this repository's `data/stats/` directory.
+
+```bash
+srun --account=project_462001050 --partition=small --time=05:00:00 --cpus-per-task=64 --mem=256G singularity exec "$SIF" bash -lc 'source /scratch/project_462001050/ibrahiam/envs/analysis_venv/bin/activate && python -u -m stand_alone_modules.opus_stats --merged-base "$MERGED_BASE" --tmp-dir /scratch/project_462001050/opus_qe/duckdb_tmp --threads 64 --memory-limit 180GB --max-temp-size 500GiB'
+```
+
+---
+
+## 9. Migration
+```bash
+
+module purge  
+module use /appl/local/laifs/modules  
+module load lumi-aif-singularity-bindings  
+export SIF=/appl/local/laifs/containers/lumi-multitorch-u24r64f21m43t29-20260124_092648/lumi-multitorch-full-u24r64f21m43t29-20260124_092648.sif
+
+#migration tool, from DB to manifest file
+# names: shaomutan_remedy-9b-22, xcomet-xl, wmt23-cometkiwi-da-xl, m-prometheus-7b, metricx24, bicleaner-ai, qwen3-4b-instruct-2507
+srun --account=project_462001249 --partition=small --time=02:00:00 --cpus-per-task=16 singularity exec $SIF bash -c 'source /scratch/project_462001050/ibrahiam/envs/metric_venv/bin/activate && python -u -m execution.opus_queue.tools.migrate_to_manifest --db /scratch/project_462001050/opus_qe/jobs.db --manifest-root /scratch/project_462001050/opus_qe/manifests --build-tag opus-manifest-2026-05-05 --walltime-seconds 86400 --safety-factor 0.85 --include-status pending,failed --slots metricx24:800:8 --slots qwen3-4b-instruct-2507:800:8 --slots shaomutan_remedy-9b-22:400:8'
+
+# example run model command
+bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-instruct-2507 --array 0 --concurrency 1 --time 40:00:00 --manifest-root /scratch/project_462001050/opus_qe/manifests --build-tag opus-manifest-2026-05-05 --trace-root /scratch/project_462001050/opus_qe/shard_trace --output-base /scratch/project_462001050/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3 --account project_462001249 --partition standard-g --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 18000 --response-format json_schema --enforce-eager --part-writer --part-max-bytes 3536870912 --part-max-shards 50
+
+
+bash scripts/opus/submit_array_standard_g.sh --account project_462001249 --model metricx24 --array 0 --concurrency 1 --time 00:40:00 --batch-size 64 --part-writer --part-max-bytes 3536870912 --part-max-shards 50 --manifest-root /scratch/project_462001050/opus_qe/manifests --build-tag opus-manifest-2026-05-05 --trace-root /scratch/project_462001050/opus_qe/shard_trace --output-base /scratch/project_462001050/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3
+
+
+## check on done/summary
+python -m stand_alone_modules.opus_trace_summary --model metricx24 --trace-root /scratch/project_462001050/opus_qe/shard_trace --build-tag opus-manifest-2026-05-05 --manifest-root /scratch/project_462001050/opus_qe/manifests
+
 ```

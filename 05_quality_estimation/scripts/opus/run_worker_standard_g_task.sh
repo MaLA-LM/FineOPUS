@@ -4,9 +4,9 @@
 # (8 invocations per node, controlled by SLURM_LOCALID 0..7).
 #
 # Launched by run_worker_standard_g.sh via:
-#   srun --kill-on-bad-exit=0 --wait=0 ./run_worker_standard_g_task.sh
+#   srun --kill-on-bad-exit=1 ./run_worker_standard_g_task.sh
 #
-# Reads MODEL / DB / OUTPUT_BASE / OPUS_ROOT / runtime knobs from the
+# Reads MODEL / MANIFEST_ROOT / BUILD_TAG / TRACE_ROOT / OUTPUT_BASE / OPUS_ROOT / runtime knobs from the
 # environment (exported by submit_array_standard_g.sh and forwarded by
 # the outer launcher).
 #
@@ -17,7 +17,9 @@
 set -euo pipefail
 
 : "${MODEL:?MODEL is required}"
-: "${DB:?DB is required}"
+: "${MANIFEST_ROOT:?MANIFEST_ROOT is required}"
+: "${BUILD_TAG:?BUILD_TAG is required}"
+: "${TRACE_ROOT:?TRACE_ROOT is required}"
 : "${OUTPUT_BASE:?OUTPUT_BASE is required}"
 
 PLATFORM="$(printf '%s' "${PLATFORM:-lumi}" | tr '[:upper:]' '[:lower:]')"
@@ -56,6 +58,8 @@ export HF_DATASETS_CACHE="$HF_HOME/datasets"
 export HF_ASSETS_CACHE="$HF_HOME/assets"
 export HUGGINGFACE_HUB_CACHE="$HF_HUB_CACHE"
 export HUGGINGFACE_ASSETS_CACHE="$HF_ASSETS_CACHE"
+export HF_HUB_OFFLINE=1
+export TRANSFORMERS_OFFLINE=1
 export XDG_CACHE_HOME="$SCRATCH_CACHE/.cache"
 
 # ---- per-worker compile/cache dirs (write-heavy, MUST be unique) ---------
@@ -71,7 +75,7 @@ mkdir -p "$TORCH_HOME" "$TRITON_CACHE_DIR"
 # ---- workdir + venv defaults (mirror run_worker.sh) ----------------------
 WORKDIR="${WORKDIR:-/projappl/project_462001050/members/ibrahiam/05_quality_estimation}"
 VENV_BASE="${VENV_BASE:-/scratch/project_462001050/ibrahiam/envs}"
-DEFAULT_OPUS_ROOT="/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2"
+DEFAULT_OPUS_ROOT="/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3"
 OPUS_ROOT="${OPUS_ROOT:-$DEFAULT_OPUS_ROOT}"
 
 # FLORES-aligned runtime knobs (same defaults as run_worker.sh).
@@ -265,7 +269,10 @@ fi
 echo "GCD=${LOCAL_ID}: part_writer=${PART_WRITER:-0} part_max_bytes=${PART_MAX_BYTES:-<worker-default>} part_max_shards=${PART_MAX_SHARDS:-<worker-default>}"
 
 WORKER_ARGS=(
-    --db "$DB"
+    --mode manifest
+    --manifest-root "$MANIFEST_ROOT"
+    --build-tag "$BUILD_TAG"
+    --trace-root "$TRACE_ROOT"
     --model "$QUEUE_MODEL"
     --backend "$BACKEND"
     --output-base "$OUTPUT_BASE"
@@ -381,6 +388,14 @@ elif [ "$BACKEND" = "llm" ]; then
     EXIT_CODE=$?
 else
     singularity run \
+        --env "HF_HOME=${HF_HOME}" \
+        --env "HF_HUB_CACHE=${HF_HUB_CACHE}" \
+        --env "HF_DATASETS_CACHE=${HF_DATASETS_CACHE}" \
+        --env "HF_ASSETS_CACHE=${HF_ASSETS_CACHE}" \
+        --env "HUGGINGFACE_HUB_CACHE=${HUGGINGFACE_HUB_CACHE}" \
+        --env "HUGGINGFACE_ASSETS_CACHE=${HUGGINGFACE_ASSETS_CACHE}" \
+        --env "HF_HUB_OFFLINE=1" \
+        --env "TRANSFORMERS_OFFLINE=1" \
         "$SIF" bash -lc "
         if [ -f /opt/venv/bin/activate ]; then source /opt/venv/bin/activate; fi
         source ${VENV_PATH}/bin/activate
