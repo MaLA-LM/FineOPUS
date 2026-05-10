@@ -10,8 +10,8 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=32G
-#SBATCH --time=12:00:00
+#SBATCH --mem=128G
+#SBATCH --time=3-00:00:00
 #SBATCH --output=./slurm_logs/%x-%j.out
 #SBATCH --error=./slurm_logs/%x-%j.err
 
@@ -24,7 +24,8 @@ TRACE_ROOT="${TRACE_ROOT:-}"
 OUTPUT_BASE="${OUTPUT_BASE:-}"
 MERGED_BASE="${MERGED_BASE:-}"
 MODEL="${MODEL:-}"
-DELETE_SHARDS="${DELETE_SHARDS:-0}"
+DELETE_MERGED_DIRECTIONS="${DELETE_MERGED_DIRECTIONS:-0}"
+DRY_RUN="${DRY_RUN:-0}"
 FORCE="${FORCE:-0}"
 JOBS="${JOBS:-1}"
 WORKDIR="${WORKDIR:-/projappl/project_462001050/members/ibrahiam/05_quality_estimation}"
@@ -40,17 +41,23 @@ Required:
   --output-base <dir>  Base dir of worker JSONLs (<model>/<direction>/*.jsonl).
   --merged-base <dir>  Destination dir for merged parquet files.
 
-Coordination source (choose one):
+Completion sources (provide one or both):
   --db <path>              Legacy shared SQLite queue DB.
   --manifest-root <dir>    Manifest root containing <build_tag>/manifest.jsonl.
   --build-tag <tag>        Manifest build tag.
   --trace-root <dir>       Trace root containing completion state.jsonl files.
+                           If both DB and manifest args are provided, merge
+                           combines old DB completions with manifest trace
+                           completions before deciding a direction is complete.
 
 Optional:
   --model <key>        Restrict merge to a single model.
   --jobs <n>           Merge up to n directions in parallel.
-  --delete-shards      Delete source shard files after successful merge.
   --force              Re-merge directions whose parquet outputs already exist.
+  --delete-merged-directions
+                       Cleanup mode: delete source direction dirs already
+                       represented by merged parquet outputs, then exit.
+  --dry-run            With --delete-merged-directions, report deletions only.
   --workdir <dir>      cd into this dir before running.
   --venv-base <dir>    Base directory containing metric_venv.
   --metric-venv <dir>  Full path to the metric virtual environment.
@@ -90,7 +97,8 @@ while [ $# -gt 0 ]; do
         --merged-base)   MERGED_BASE="${2:-}"; shift 2 ;;
         --model)         MODEL="${2:-}"; shift 2 ;;
         --jobs)          JOBS="${2:-}"; shift 2 ;;
-        --delete-shards) DELETE_SHARDS=1; shift ;;
+        --delete-merged-directions|--cleanup-merged-inputs) DELETE_MERGED_DIRECTIONS=1; shift ;;
+        --dry-run)       DRY_RUN=1; shift ;;
         --force)         FORCE=1; shift ;;
         --workdir)       WORKDIR="${2:-}"; shift 2 ;;
         --venv-base)     VENV_BASE="${2:-}"; VENV_PATH="${2:-}/metric_venv"; shift 2 ;;
@@ -107,10 +115,28 @@ if [ -z "$OUTPUT_BASE" ] || [ -z "$MERGED_BASE" ]; then
     exit 1
 fi
 
-if [ -z "$DB" ] && { [ -z "$MANIFEST_ROOT" ] || [ -z "$BUILD_TAG" ] || [ -z "$TRACE_ROOT" ]; }; then
-    echo "ERROR: provide either --db or all of --manifest-root, --build-tag, and --trace-root." >&2
+if [ "$DRY_RUN" = "1" ] && [ "$DELETE_MERGED_DIRECTIONS" != "1" ]; then
+    echo "ERROR: --dry-run is only valid with --delete-merged-directions." >&2
     print_usage >&2
     exit 1
+fi
+
+HAS_MANIFEST_SOURCE=0
+if [ -n "$MANIFEST_ROOT" ] || [ -n "$BUILD_TAG" ] || [ -n "$TRACE_ROOT" ]; then
+    HAS_MANIFEST_SOURCE=1
+fi
+
+if [ "$DELETE_MERGED_DIRECTIONS" != "1" ]; then
+    if [ -z "$DB" ] && [ "$HAS_MANIFEST_SOURCE" != "1" ]; then
+        echo "ERROR: provide --db and/or all of --manifest-root, --build-tag, and --trace-root." >&2
+        print_usage >&2
+        exit 1
+    fi
+    if [ "$HAS_MANIFEST_SOURCE" = "1" ] && { [ -z "$MANIFEST_ROOT" ] || [ -z "$BUILD_TAG" ] || [ -z "$TRACE_ROOT" ]; }; then
+        echo "ERROR: --manifest-root, --build-tag, and --trace-root must be provided together." >&2
+        print_usage >&2
+        exit 1
+    fi
 fi
 
 setup_lumi_container
@@ -122,20 +148,25 @@ ARGS=(
     --merged-base "$MERGED_BASE"
     --jobs "$JOBS"
 )
-if [ -n "$DB" ]; then
-    ARGS+=(--db "$DB")
+if [ "$DELETE_MERGED_DIRECTIONS" = "1" ]; then
+    ARGS+=(--delete-merged-directions)
+    if [ "$DRY_RUN" = "1" ]; then
+        ARGS+=(--dry-run)
+    fi
 else
-    ARGS+=(
-        --manifest-root "$MANIFEST_ROOT"
-        --build-tag "$BUILD_TAG"
-        --trace-root "$TRACE_ROOT"
-    )
+    if [ -n "$DB" ]; then
+        ARGS+=(--db "$DB")
+    fi
+    if [ "$HAS_MANIFEST_SOURCE" = "1" ]; then
+        ARGS+=(
+            --manifest-root "$MANIFEST_ROOT"
+            --build-tag "$BUILD_TAG"
+            --trace-root "$TRACE_ROOT"
+        )
+    fi
 fi
 if [ -n "$MODEL" ]; then
     ARGS+=(--model "$MODEL")
-fi
-if [ "$DELETE_SHARDS" = "1" ]; then
-    ARGS+=(--delete-shards)
 fi
 if [ "$FORCE" = "1" ]; then
     ARGS+=(--force)

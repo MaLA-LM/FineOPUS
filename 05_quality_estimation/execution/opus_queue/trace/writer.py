@@ -21,8 +21,6 @@ class TraceWriter:
     ) -> None:
         self.trace_dir = Path(trace_root).expanduser() / build_tag / worker_slot_id
         self.completed_path = self.trace_dir / "state.jsonl"
-        self.events_path = self.completed_path
-        self.legacy_events_path = self.trace_dir / "events.jsonl"
         self.state_path = self.trace_dir / "state.json"
         self.trace_dir.mkdir(parents=True, exist_ok=True)
 

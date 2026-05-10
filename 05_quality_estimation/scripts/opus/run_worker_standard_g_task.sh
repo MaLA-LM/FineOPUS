@@ -6,7 +6,8 @@
 # Launched by run_worker_standard_g.sh via:
 #   srun --kill-on-bad-exit=1 ./run_worker_standard_g_task.sh
 #
-# Reads MODEL / MANIFEST_ROOT / BUILD_TAG / TRACE_ROOT / OUTPUT_BASE / OPUS_ROOT / runtime knobs from the
+# Reads MODEL / MANIFEST_ROOT / BUILD_TAG / TRACE_ROOT / OUTPUT_BASE / OPUS_ROOT /
+# LOG_ROOT / runtime knobs from the
 # environment (exported by submit_array_standard_g.sh and forwarded by
 # the outer launcher).
 #
@@ -74,6 +75,7 @@ mkdir -p "$TORCH_HOME" "$TRITON_CACHE_DIR"
 
 # ---- workdir + venv defaults (mirror run_worker.sh) ----------------------
 WORKDIR="${WORKDIR:-/projappl/project_462001050/members/ibrahiam/05_quality_estimation}"
+LOG_ROOT="${LOG_ROOT:-/scratch/project_462001050/opus_qe/logs}"
 VENV_BASE="${VENV_BASE:-/scratch/project_462001050/ibrahiam/envs}"
 DEFAULT_OPUS_ROOT="/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3"
 OPUS_ROOT="${OPUS_ROOT:-$DEFAULT_OPUS_ROOT}"
@@ -97,7 +99,7 @@ PART_WRITER="${PART_WRITER:-}"
 PART_MAX_BYTES="${PART_MAX_BYTES:-}"
 PART_MAX_SHARDS="${PART_MAX_SHARDS:-}"
 
-mkdir -p "${WORKDIR}/logs"
+mkdir -p "$LOG_ROOT"
 cd "$WORKDIR"
 
 echo "----- task GCD=${LOCAL_ID} pid=$$ host=$(hostname) port=${MASTER_PORT} -----"

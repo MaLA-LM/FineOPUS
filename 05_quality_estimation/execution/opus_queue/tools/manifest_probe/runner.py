@@ -78,7 +78,7 @@ def _done_keys(trace_root: Path, build_tag: str, model: str) -> set[tuple[str, s
     if not root.exists():
         return set()
     done: set[tuple[str, str, int]] = set()
-    trace_paths = list(root.glob("*/events.jsonl")) + list(root.glob("*/state.jsonl"))
+    trace_paths = sorted(root.glob("*/state.jsonl"))
     for trace_path in trace_paths:
         for event in read_events(trace_path):
             if event.get("event") != "done" or event.get("model") != model:

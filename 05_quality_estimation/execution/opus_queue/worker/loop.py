@@ -408,7 +408,7 @@ def _run_manifest_loop(args: argparse.Namespace) -> int:
         args.build_tag,
         worker_slot_id,
     )
-    state = replay_events([trace_writer.legacy_events_path, trace_writer.completed_path])
+    state = replay_events(trace_writer.completed_path)
     trace_writer.write_state(state.snapshot(assignments))
     if not assignments:
         logger.warning(

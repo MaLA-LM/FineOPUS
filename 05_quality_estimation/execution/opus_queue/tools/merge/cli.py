@@ -14,12 +14,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--db",
         default=None,
-        help="Legacy shared jobs SQLite file. Required unless manifest trace args are provided.",
+        help=(
+            "Legacy shared jobs SQLite file. If manifest trace args are also "
+            "provided, DB done rows and trace done rows are combined."
+        ),
     )
     parser.add_argument(
         "--manifest-root",
         default=None,
-        help="Manifest root containing <build_tag>/manifest.jsonl.",
+        help=(
+            "Manifest root containing <build_tag>/manifest.jsonl. Provide with "
+            "--build-tag and --trace-root; can be combined with --db."
+        ),
     )
     parser.add_argument(
         "--build-tag",
@@ -49,14 +55,25 @@ def parse_args() -> argparse.Namespace:
         "--model", default=None, help="Optional: restrict merge to a single model."
     )
     parser.add_argument(
-        "--delete-shards",
-        action="store_true",
-        help="Remove the source shard files after a successful merge.",
-    )
-    parser.add_argument(
         "--force",
         action="store_true",
         help="Re-merge directions even if merged parquet outputs already exist.",
+    )
+    parser.add_argument(
+        "--delete-merged-directions",
+        "--cleanup-merged-inputs",
+        dest="cleanup_merged_inputs",
+        action="store_true",
+        help=(
+            "Cleanup mode: delete source direction directories from output-base "
+            "when matching merged parquet outputs already exist, then exit. "
+            "This does not run merging."
+        ),
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --delete-merged-directions, report what would be deleted.",
     )
     parser.add_argument(
         "--jobs",

@@ -324,18 +324,23 @@ directions on later runs.
 python -m stand_alone_modules.group_merged --merged-base "$MERGED_BASE" --model metricx24
 
 
-# Merge one model.
+# Merge one model from the legacy DB only.
 sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model metricx24
 
-# Merge everything that is complete.
+# Merge everything that is complete in the legacy DB.
 sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE"
 
-# Add --delete-shards if you want to remove legacy shard files and new part files after a successful merge.
-sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model metricx24 --delete-shards
+# After verifying merged outputs, delete source JSONL direction folders that
+# already have merged parquet outputs. This is a separate cleanup run.
+sbatch ./scripts/opus/run_delete_merged_directions.sh --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model metricx24
 
 # Merge a model after a part-writer run. Merge automatically reads both
 # part-*.jsonl and any leftover legacy shard_*.jsonl files in OUTPUT_BASE.
 sbatch ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model qwen3-4b-instruct-2507 --force
+
+# Mixed DB-to-manifest migration merge. Use this when some shards were already
+# done in jobs.db before pending/failed shards moved into a manifest.
+sbatch --cpus-per-task=8 ./scripts/opus/run_merge.sh --db "$DB" --manifest-root /scratch/project_462001050/opus_qe/manifests --build-tag opus-manifest-2026-05-05 --trace-root /scratch/project_462001050/opus_qe/shard_trace --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model metricx24 --jobs 8
 
 # names: shaomutan_remedy-9b-22, xcomet-xl, wmt23-cometkiwi-da-xl, m-prometheus-7b, metricx24, bicleaner-ai, qwen3-4b-instruct-2507
 sbatch --cpus-per-task=8 ./scripts/opus/run_merge.sh --db "$DB" --output-base "$OUTPUT_BASE" --merged-base "$MERGED_BASE" --model metricx24 --jobs 8
@@ -366,7 +371,7 @@ files with DuckDB SQL and writes pooled CSV tables plus a Markdown report.
 By default, outputs go to this repository's `data/stats/` directory.
 
 ```bash
-srun --account=project_462001050 --partition=small --time=05:00:00 --cpus-per-task=64 --mem=256G singularity exec "$SIF" bash -lc 'source /scratch/project_462001050/ibrahiam/envs/analysis_venv/bin/activate && python -u -m stand_alone_modules.opus_stats --merged-base "$MERGED_BASE" --tmp-dir /scratch/project_462001050/opus_qe/duckdb_tmp --threads 64 --memory-limit 180GB --max-temp-size 500GiB'
+srun --account=project_462001249 --partition=small --time=10:00:00 --cpus-per-task=64 --mem=256G singularity exec "$SIF" bash -lc 'source /scratch/project_462001050/ibrahiam/envs/analysis_venv/bin/activate && python -u -m stand_alone_modules.opus_stats --merged-base /scratch/project_462001069/opus_qe/merged --tmp-dir /scratch/project_462001069/opus_qe/duckdb_tmp --threads 64 --memory-limit 180GB --max-temp-size 500GiB'
 ```
 
 ---
@@ -384,13 +389,43 @@ export SIF=/appl/local/laifs/containers/lumi-multitorch-u24r64f21m43t29-20260124
 srun --account=project_462001249 --partition=small --time=02:00:00 --cpus-per-task=16 singularity exec $SIF bash -c 'source /scratch/project_462001050/ibrahiam/envs/metric_venv/bin/activate && python -u -m execution.opus_queue.tools.migrate_to_manifest --db /scratch/project_462001050/opus_qe/jobs.db --manifest-root /scratch/project_462001050/opus_qe/manifests --build-tag opus-manifest-2026-05-05 --walltime-seconds 86400 --safety-factor 0.85 --include-status pending,failed --slots metricx24:800:8 --slots qwen3-4b-instruct-2507:800:8 --slots shaomutan_remedy-9b-22:400:8'
 
 # example run model command
-bash scripts/opus/submit_array_standard_g.sh --model qwen3-4b-instruct-2507 --array 0 --concurrency 1 --time 40:00:00 --manifest-root /scratch/project_462001050/opus_qe/manifests --build-tag opus-manifest-2026-05-05 --trace-root /scratch/project_462001050/opus_qe/shard_trace --output-base /scratch/project_462001050/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3 --account project_462001249 --partition standard-g --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 18000 --response-format json_schema --enforce-eager --part-writer --part-max-bytes 3536870912 --part-max-shards 50
+bash scripts/opus/submit_array_standard_g.sh --account <> --model qwen3-4b-instruct-2507 --array 0-99 --concurrency 100 --time 47:00:00 --manifest-root /scratch/project_462001069/opus_qe/manifests --build-tag opus-manifest-2026-05-05 --trace-root /scratch/project_462001069/opus_qe/shard_trace --output-base /scratch/project_462001069/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3  --batch-size 32 --prompt-mode batch --max-tokens 8192 --max-num-batched-tokens 8192 --max-num-seqs 32 --max-model-len 18000 --response-format json_schema --enforce-eager --part-writer --part-max-bytes 3536870912 --part-max-shards 50
 
 
-bash scripts/opus/submit_array_standard_g.sh --account project_462001249 --model metricx24 --array 0 --concurrency 1 --time 00:40:00 --batch-size 64 --part-writer --part-max-bytes 3536870912 --part-max-shards 50 --manifest-root /scratch/project_462001050/opus_qe/manifests --build-tag opus-manifest-2026-05-05 --trace-root /scratch/project_462001050/opus_qe/shard_trace --output-base /scratch/project_462001050/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3
+bash scripts/opus/submit_array_standard_g.sh --account <project> --model metricx24 --array 0-99 --concurrency 100 --time 47:00:00 --batch-size 64 --part-writer --part-max-bytes 5536870912 --part-max-shards 50 --manifest-root /scratch/project_462001069/opus_qe/manifests --build-tag opus-manifest-2026-05-05 --trace-root /scratch/project_462001069/opus_qe/shard_trace --output-base /scratch/project_462001069/opus_qe/shards --opus-root /scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3
 
 
 ## check on done/summary
-python -m stand_alone_modules.opus_trace_summary --model metricx24 --trace-root /scratch/project_462001050/opus_qe/shard_trace --build-tag opus-manifest-2026-05-05 --manifest-root /scratch/project_462001050/opus_qe/manifests
+python -m stand_alone_modules.opus_trace_summary --model metricx24 --trace-root /scratch/project_462001069/opus_qe/shard_trace --build-tag opus-manifest-2026-05-05 --manifest-root /scratch/project_462001069/opus_qe/manifests
+
+```
+
+## 10. Merging, new
+
+```bash
+# Combined DB + manifest migration merge. A direction is complete only when
+# DB done rows plus manifest trace done rows cover the full DB shard set.
+sbatch --cpus-per-task=8 scripts/opus/run_merge.sh --db /scratch/project_462001069/opus_qe/jobs.db --manifest-root /scratch/project_462001069/opus_qe/manifests --build-tag opus-manifest-2026-05-05 --trace-root /scratch/project_462001069/opus_qe/shard_trace --output-base /scratch/project_462001069/opus_qe/shards --merged-base /scratch/project_462001069/opus_qe/merged  --model metricx24 --jobs 8
+# names: shaomutan_remedy-9b-22, xcomet-xl, wmt23-cometkiwi-da-xl, m-prometheus-7b, metricx24, bicleaner-ai, qwen3-4b-instruct-2507
+
+# Manifest-only merge is only for manifests that represent the complete shard
+# inventory. For DB-to-manifest migrations, use the combined command above.
+sbatch ./scripts/opus/run_merge.sh \
+  --manifest-root /scratch/project_462001050/opus_qe/manifests \
+  --build-tag opus-manifest-2026-05-05 \
+  --trace-root /scratch/project_462001050/opus_qe/shard_trace \
+  --output-base /scratch/project_462001050/opus_qe/shards \
+  --merged-base /scratch/project_462001050/opus_qe/merged \
+  --model metricx24
+
+## cleanup
+
+sbatch scripts/opus/run_merge.sh --delete-merged-directions --output-base /scratch/project_462001069/opus_qe/shards --merged-base /scratch/project_462001069/opus_qe/merged --model shaomutan_remedy-9b-22
+
+sbatch scripts/opus/run_merge.sh --delete-merged-directions --output-base /scratch/project_462001069/opus_qe/shards --merged-base /scratch/project_462001069/opus_qe/merged --model m-prometheus-7b
+
+sbatch scripts/opus/run_merge.sh --delete-merged-directions --output-base /scratch/project_462001069/opus_qe/shards --merged-base /scratch/project_462001069/opus_qe/merged --model metricx24
+
+sbatch scripts/opus/run_merge.sh --delete-merged-directions --output-base /scratch/project_462001069/opus_qe/shards --merged-base /scratch/project_462001069/opus_qe/merged --model qwen3-4b-instruct-2507
 
 ```

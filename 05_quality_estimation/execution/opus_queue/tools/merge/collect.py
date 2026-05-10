@@ -17,6 +17,7 @@ __all__ = [
     "CompletedDirection",
     "CompletedShard",
     "PartFileInfo",
+    "collect_complete_combined_directions",
     "collect_complete_directions",
     "collect_complete_manifest_directions",
     "done_jobs_for_direction",
@@ -84,6 +85,46 @@ def done_jobs_for_direction(
     return winners
 
 
+def _db_shards_and_winners(
+    conn,
+    model_filter: str | None,
+) -> tuple[
+    dict[tuple[str, str], set[int]],
+    dict[tuple[str, str], dict[int, CompletedShard]],
+]:
+    rows = conn.execute(
+        """
+        SELECT d.direction_key,
+               d.model,
+               j.shard_id,
+               j.status,
+               j.worker_id
+          FROM directions d
+          JOIN jobs j
+            ON j.direction_key = d.direction_key
+           AND j.model = d.model
+         WHERE (? IS NULL OR d.model = ?)
+         ORDER BY d.model ASC, d.direction_key ASC, j.shard_id ASC
+        """,
+        (model_filter, model_filter),
+    ).fetchall()
+    assigned: dict[tuple[str, str], set[int]] = defaultdict(set)
+    winners: dict[tuple[str, str], dict[int, CompletedShard]] = defaultdict(dict)
+    for row in rows:
+        model = str(row["model"])
+        direction_key = str(row["direction_key"])
+        shard_id = int(row["shard_id"])
+        key = (model, direction_key)
+        assigned[key].add(shard_id)
+        if row["status"] != "done":
+            continue
+        worker_id = row["worker_id"]
+        if worker_id is None:
+            continue
+        winners[key][shard_id] = CompletedShard(worker_id=str(worker_id))
+    return dict(assigned), {key: dict(value) for key, value in winners.items()}
+
+
 def _load_manifest_rows(
     manifest_root: str | Path, build_tag: str, model_filter: str | None
 ) -> dict[tuple[str, str], set[int]]:
@@ -117,7 +158,7 @@ def _trace_winners(
     if not root.exists():
         return winners
 
-    trace_paths = list(root.glob("*/events.jsonl")) + list(root.glob("*/state.jsonl"))
+    trace_paths = sorted(root.glob("*/state.jsonl"))
     for trace_path in trace_paths:
         for event in read_events(trace_path):
             if event.get("event") != "done":
@@ -156,6 +197,81 @@ def collect_complete_manifest_directions(
                 direction_key=direction_key,
                 model=model,
                 winners={shard_id: winners[shard_id] for shard_id in sorted(assigned_shards)},
+            )
+        )
+    return complete
+
+
+def collect_complete_combined_directions(
+    conn,
+    model_filter: str | None,
+    *,
+    manifest_root: str | Path | None = None,
+    build_tag: str | None = None,
+    trace_root: str | Path | None = None,
+) -> list[CompletedDirection]:
+    """Collect mergeable directions from DB rows, manifest trace, or both.
+
+    When the DB is available, the DB job table is the full shard inventory for
+    each direction. Manifest trace completions can satisfy those DB rows, which
+    is the migration case where old completed shards remain in the DB while the
+    remaining shards complete through manifest workers. Manifest-only
+    directions are still supported when no DB rows exist for that direction.
+    """
+
+    db_assigned: dict[tuple[str, str], set[int]] = {}
+    db_winners: dict[tuple[str, str], dict[int, CompletedShard]] = {}
+    if conn is not None:
+        db_assigned, db_winners = _db_shards_and_winners(conn, model_filter)
+
+    manifest_assigned: dict[tuple[str, str], set[int]] = {}
+    trace_winners: dict[tuple[str, str], dict[int, CompletedShard]] = {}
+    has_manifest_source = bool(manifest_root or build_tag or trace_root)
+    if has_manifest_source:
+        if manifest_root is None or build_tag is None or trace_root is None:
+            raise ValueError(
+                "manifest_root, build_tag, and trace_root are required together"
+            )
+        manifest_assigned = _load_manifest_rows(
+            manifest_root,
+            build_tag,
+            model_filter,
+        )
+        raw_trace_winners = _trace_winners(trace_root, build_tag, model_filter)
+        for key, winners in raw_trace_winners.items():
+            assigned_shards = manifest_assigned.get(key)
+            if not assigned_shards:
+                continue
+            trace_winners[key] = {
+                shard_id: winner
+                for shard_id, winner in winners.items()
+                if shard_id in assigned_shards
+            }
+
+    complete: list[CompletedDirection] = []
+    for model, direction_key in sorted(set(db_assigned) | set(manifest_assigned)):
+        key = (model, direction_key)
+        expected_shards = db_assigned.get(key) or manifest_assigned.get(key) or set()
+        if not expected_shards:
+            continue
+
+        winners: dict[int, CompletedShard] = {}
+        winners.update(db_winners.get(key, {}))
+        # Trace completions are newer than DB rows during migration, so prefer
+        # them if a shard appears in both sources.
+        winners.update(trace_winners.get(key, {}))
+
+        if not expected_shards.issubset(winners):
+            continue
+
+        complete.append(
+            CompletedDirection(
+                direction_key=direction_key,
+                model=model,
+                winners={
+                    shard_id: winners[shard_id]
+                    for shard_id in sorted(expected_shards)
+                },
             )
         )
     return complete

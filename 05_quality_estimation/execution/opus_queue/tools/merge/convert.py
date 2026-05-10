@@ -25,7 +25,7 @@ _MERGE_BATCH_ROWS = 20_000
 # Split merged outputs once the current parquet part reaches roughly 5 GB.
 # Rotation is checked after each written batch, so a single file can exceed the
 # cap by up to one merge batch.
-_MAX_PARQUET_FILE_BYTES = 5_000_000_000
+_MAX_PARQUET_FILE_BYTES = 10_000_000_000
 _DROP_OUTPUT_COLUMNS = ("shard_id", "worker_id", "worker_run_id", "direction_key")
 
 
@@ -298,7 +298,6 @@ def merge_direction(
     model: str,
     *,
     force: bool,
-    delete_shards: bool,
     winners: dict[int, CompletedShard] | None = None,
 ) -> tuple[bool, int, int]:
     import pyarrow as pa
@@ -311,7 +310,9 @@ def merge_direction(
 
     if winners is None:
         if conn is None:
-            raise ValueError("merge_direction requires conn when winners are not provided")
+            raise ValueError(
+                "merge_direction requires conn when winners are not provided"
+            )
         winners = done_jobs_for_direction(conn, direction_key, model)
     if not winners:
         logger.warning(
@@ -437,13 +438,6 @@ def merge_direction(
         shutil.rmtree(tmp_direction_dir, ignore_errors=True)
         raise
     _remove_flat_outputs(merged_model_dir, direction_key)
-
-    if delete_shards:
-        for item in part_files:
-            try:
-                item.path.unlink()
-            except OSError:
-                logger.warning("Failed to delete shard file: %s", item.path)
 
     logger.info(
         (

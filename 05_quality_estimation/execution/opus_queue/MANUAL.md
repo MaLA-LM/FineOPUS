@@ -174,8 +174,23 @@ shards they no longer own.
 
 ## 5. Completion
 
-For manifest mode, run merge against the static manifest and completion
-trace:
+For DB-to-manifest migration runs, pass both the legacy DB and the manifest
+trace. The merge treats the DB as the full shard inventory, then combines old
+DB `done` rows with new manifest `state.jsonl` completions:
+
+```bash
+sbatch ./scripts/opus/run_merge.sh \
+    --db /scratch/.../opus_qe/jobs.db \
+    --manifest-root /scratch/.../opus_qe/manifests \
+    --build-tag <build_tag> \
+    --trace-root /scratch/.../opus_qe/shard_trace \
+    --output-base /scratch/.../opus_qe/shards \
+    --merged-base /scratch/.../opus_qe/merged \
+    --model metricx24
+```
+
+For manifest-only runs where the manifest is the complete shard inventory, run
+merge against the static manifest and completion trace:
 
 ```bash
 sbatch ./scripts/opus/run_merge.sh \
@@ -205,9 +220,18 @@ Each direction gets:
 <merged-base>/<model>/<direction_key>/<direction_key>.meta.json
 ```
 
-The merge metadata records the source DB path and the shard count used to
+The merge metadata records the source path and the shard count used to
 produce the merged parquet files. The direction subdirectory is the merge
 completion marker used to skip already-merged directions on later runs.
+
+Source JSONL cleanup is a separate run after merge verification:
+
+```bash
+sbatch ./scripts/opus/run_delete_merged_directions.sh \
+    --output-base /scratch/.../opus_qe/shards \
+    --merged-base /scratch/.../opus_qe/merged \
+    --model metricx24
+```
 
 ## Output layout summary
 

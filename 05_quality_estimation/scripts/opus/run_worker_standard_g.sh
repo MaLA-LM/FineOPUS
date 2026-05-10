@@ -9,7 +9,8 @@
 # The two scripts coexist; this one is intended for high-throughput
 # backfill of large queues.
 #
-# Reads MODEL / MANIFEST_ROOT / BUILD_TAG / TRACE_ROOT / OUTPUT_BASE / OPUS_ROOT / runtime knobs from the
+# Reads MODEL / MANIFEST_ROOT / BUILD_TAG / TRACE_ROOT / OUTPUT_BASE / OPUS_ROOT /
+# LOG_ROOT / runtime knobs from the
 # environment (exported by submit_array_standard_g.sh).
 #
 #SBATCH --job-name=opus_worker_g
@@ -37,7 +38,8 @@ if [ "$PLATFORM" != "lumi" ]; then
 fi
 
 WORKDIR="${WORKDIR:-/projappl/project_462001050/members/ibrahiam/05_quality_estimation}"
-mkdir -p "${WORKDIR}/logs"
+LOG_ROOT="${LOG_ROOT:-/scratch/project_462001050/opus_qe/logs}"
+mkdir -p "$LOG_ROOT"
 cd "$WORKDIR"
 
 resolve_task_script() {
@@ -71,6 +73,7 @@ echo "=================================="
 echo "OPUS standard-g launcher: model=$MODEL"
 echo "MANIFEST_ROOT=$MANIFEST_ROOT  BUILD_TAG=$BUILD_TAG  TRACE_ROOT=$TRACE_ROOT"
 echo "OUTPUT_BASE=$OUTPUT_BASE"
+echo "LOG_ROOT=$LOG_ROOT"
 echo "Job ID: ${SLURM_JOB_ID:-N/A}  Array task: ${SLURM_ARRAY_TASK_ID:-N/A}"
 echo "Node: $(hostname)"
 echo "ntasks-per-node=${SLURM_NTASKS_PER_NODE:-?} cpus-per-task=${SLURM_CPUS_PER_TASK:-?} gpus-per-node=${SLURM_GPUS_PER_NODE:-?}"
@@ -106,22 +109,21 @@ echo "=================================="
 # Current launch model:
 #   * the job reserves one full standard-g node with 8 GCDs
 #   * the srun step launches 8 tasks with NUMA-aware CPU binding
-#   * each task writes its own stdout/stderr file under a per-array-task log dir
+#   * each task writes its own stdout/stderr file under LOG_ROOT
 #   * each task selects its physical GCD via ROCR_VISIBLE_DEVICES=$SLURM_LOCALID
 CPU_BIND="mask_cpu:0xfe000000000000,0xfe00000000000000"
 CPU_BIND="${CPU_BIND},0xfe0000,0xfe000000"
 CPU_BIND="${CPU_BIND},0xfe,0xfe00"
 CPU_BIND="${CPU_BIND},0xfe00000000,0xfe0000000000"
 
-STEP_LOG_DIR="${WORKDIR}/logs/${SLURM_JOB_NAME:-opus_worker_g}-${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-local}}_${SLURM_ARRAY_TASK_ID:-0}"
-mkdir -p "$STEP_LOG_DIR"
-echo "Task logs: ${STEP_LOG_DIR}"
+STEP_LOG_PREFIX="${LOG_ROOT}/${SLURM_JOB_NAME:-opus_worker_g}-${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-local}}_${SLURM_ARRAY_TASK_ID:-0}-gcd-%t"
+echo "Task logs: ${STEP_LOG_PREFIX}.{out,err}"
 
 set +e
 srun \
     --cpu-bind="$CPU_BIND" \
-    --output="${STEP_LOG_DIR}/gcd-%t.out" \
-    --error="${STEP_LOG_DIR}/gcd-%t.err" \
+    --output="${STEP_LOG_PREFIX}.out" \
+    --error="${STEP_LOG_PREFIX}.err" \
     --kill-on-bad-exit=1 \
     bash "$TASK_SCRIPT"
 EXIT_CODE=$?
