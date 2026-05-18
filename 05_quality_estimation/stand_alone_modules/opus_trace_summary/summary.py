@@ -105,12 +105,14 @@ def build_summary(
         worker_stats["workers"],
         key=lambda row: (-row["remaining_shards"], row["worker_slot_id"]),
     )
+    unfinished_workers = [row for row in workers if row["remaining_shards"]]
 
     return {
         "totals": totals,
         "manifest": manifest_info,
         "manifest_summary": summary_info,
         "workers": workers,
+        "unfinished_workers": unfinished_workers,
         "directions": directions,
         "trace_files": worker_infos,
         "warnings": [],
@@ -184,11 +186,19 @@ def _direction_stats(assignments, completed_keys):
 def _worker_stats(assignments, completed, completed_keys, worker_infos):
     worker_to_assigned = defaultdict(set)
     worker_to_done = defaultdict(set)
+    worker_to_slot = {}
     trace_workers = set(info["worker_slot_id"] for info in worker_infos)
 
     for key, meta in assignments.items():
         worker = meta.get("worker_slot_id") or UNKNOWN_WORKER
         worker_to_assigned[worker].add(key)
+        worker_to_slot.setdefault(
+            worker,
+            {
+                "array_task_id": meta.get("array_task_id"),
+                "local_id": meta.get("local_id"),
+            },
+        )
 
     for key, done in completed.items():
         worker = done.get("worker_slot_id")
@@ -202,7 +212,13 @@ def _worker_stats(assignments, completed, completed_keys, worker_infos):
     workers_with_remaining = 0
     all_workers = set(worker_to_assigned) | set(worker_to_done) | trace_workers
     for worker in sorted(all_workers):
-        row = _worker_row(worker, worker_to_assigned, completed_keys, trace_workers)
+        row = _worker_row(
+            worker,
+            worker_to_assigned,
+            completed_keys,
+            trace_workers,
+            worker_to_slot,
+        )
         if row["done_shards"]:
             workers_with_done += 1
         if row["assigned_shards"] and not row["remaining_shards"]:
@@ -220,10 +236,17 @@ def _worker_stats(assignments, completed, completed_keys, worker_infos):
     }
 
 
-def _worker_row(worker, worker_to_assigned, completed_keys, trace_workers):
+def _worker_row(
+    worker,
+    worker_to_assigned,
+    completed_keys,
+    trace_workers,
+    worker_to_slot,
+):
     assigned = worker_to_assigned.get(worker, set())
     done = assigned & completed_keys
     remaining = assigned - completed_keys
+    slot = worker_to_slot.get(worker, {})
     assigned_dirs = defaultdict(set)
     for key in assigned:
         assigned_dirs[key[1]].add(key)
@@ -233,6 +256,8 @@ def _worker_row(worker, worker_to_assigned, completed_keys, trace_workers):
             done_dirs += 1
     return {
         "worker_slot_id": worker,
+        "array_task_id": slot.get("array_task_id"),
+        "local_id": slot.get("local_id"),
         "trace_present": worker in trace_workers,
         "assigned_shards": len(assigned),
         "done_shards": len(done),

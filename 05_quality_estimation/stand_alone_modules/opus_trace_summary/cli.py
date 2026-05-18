@@ -63,8 +63,11 @@ def parse_args(argv=None):
     parser.add_argument(
         "--workers-limit",
         type=int,
-        default=20,
-        help="Number of worker rows to print in human output. Use 0 to hide.",
+        default=-1,
+        help=(
+            "Number of unfinished worker rows to print in human output. "
+            "Default -1 prints all unfinished workers. Use 0 to hide."
+        ),
     )
     parser.add_argument(
         "--directions-limit",

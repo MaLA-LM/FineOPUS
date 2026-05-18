@@ -85,14 +85,33 @@ def _print_directions_section(totals):
 def _print_worker_rows(result, workers_limit):
     if not workers_limit:
         return
+    unfinished = result.get("unfinished_workers")
+    if unfinished is None:
+        unfinished = [row for row in result["workers"] if row["remaining_shards"]]
+    if workers_limit > 0:
+        rows = unfinished[:workers_limit]
+    else:
+        rows = unfinished
     print("")
-    print("workers with most remaining shards")
-    print("  worker_slot_id assigned done remaining dirs done_dirs trace")
-    for row in result["workers"][:workers_limit]:
+    if workers_limit > 0 and len(unfinished) > workers_limit:
         print(
-            "  {worker_slot_id} {assigned_shards} {done_shards} "
+            "unfinished workers (top %d of %d by remaining shards)"
+            % (workers_limit, len(unfinished))
+        )
+    else:
+        print("unfinished workers")
+    if not rows:
+        print("  none")
+        return
+    print("  worker_slot_id array local assigned done remaining dirs done_dirs trace")
+    for row in rows:
+        print(
+            "  {worker_slot_id} {array_task_id} {local_id} "
+            "{assigned_shards} {done_shards} "
             "{remaining_shards} {directions} {done_directions} {trace_present}".format(
                 worker_slot_id=row["worker_slot_id"],
+                array_task_id=_format_optional(row.get("array_task_id")),
+                local_id=_format_optional(row.get("local_id")),
                 assigned_shards=row["assigned_shards"],
                 done_shards=row["done_shards"],
                 remaining_shards=row["remaining_shards"],
@@ -133,3 +152,7 @@ def _print_warnings(result):
 
 def _format_bool(value):
     return "yes" if value else "no"
+
+
+def _format_optional(value):
+    return "-" if value is None else str(value)

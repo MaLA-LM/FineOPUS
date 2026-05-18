@@ -347,7 +347,7 @@ if [ "$BACKEND" = "bicleaner" ]; then
 elif [ "$BACKEND" = "remedy" ]; then
     export PYTHONNOUSERSITE=1
     module --force purge
-    REPO="/scratch/project_462001050/$USER/envs/Remedy"
+    REPO="/scratch/project_462001050/ibrahiam/envs/Remedy"
     unset PYTHONPATH
     export PYTHONPATH="$REPO"
     export TRANSFORMERS_OFFLINE=1

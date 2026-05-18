@@ -72,8 +72,17 @@ def _resolve_master_port(env: dict[str, str], iteration: int) -> int:
             env.get("SLURM_ARRAY_JOB_ID") or env.get("SLURM_JOB_ID"),
             default=0,
         )
-        seed_task = _parse_int(env.get("SLURM_ARRAY_TASK_ID"), default=0)
-        master_port = PORT_RANGE_START + ((seed_job + seed_task) % PORT_RANGE_SIZE)
+        seed_task = _parse_int(
+            env.get("OPUS_ARRAY_TASK_ID") or env.get("SLURM_ARRAY_TASK_ID"),
+            default=0,
+        )
+        seed_local = _parse_int(
+            env.get("OPUS_LOCAL_ID") or env.get("SLURM_LOCALID"),
+            default=0,
+        )
+        master_port = PORT_RANGE_START + (
+            (seed_job + seed_task + seed_local * 101) % PORT_RANGE_SIZE
+        )
 
     slot = (master_port - PORT_RANGE_START + max(iteration, 0)) % PORT_RANGE_SIZE
     return PORT_RANGE_START + slot

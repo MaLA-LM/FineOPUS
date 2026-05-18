@@ -38,26 +38,30 @@ def _make_worker_id() -> str:
     return f"{job}.{task}.{host}.{pid}"
 
 
-def _slurm_int(name: str, default: int = 0) -> int:
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
+def _env_int(*names: str, default: int = 0) -> int:
+    for name in names:
+        raw = os.environ.get(name)
+        if raw is None or raw == "":
+            continue
+        try:
+            return int(raw)
+        except ValueError:
+            continue
+    return default
 
 
 def _make_worker_slot_id(model: str) -> str:
-    array_task_id = _slurm_int("SLURM_ARRAY_TASK_ID", 0)
-    local_id = _slurm_int("SLURM_LOCALID", 0)
+    array_task_id = _env_int("OPUS_ARRAY_TASK_ID", "SLURM_ARRAY_TASK_ID", default=0)
+    local_id = _env_int("OPUS_LOCAL_ID", "SLURM_LOCALID", default=0)
     return f"{model}-a{array_task_id:05d}-l{local_id}"
 
 
 def _make_worker_run_id() -> str:
     job = os.environ.get("SLURM_JOB_ID", "local")
-    array_task_id = os.environ.get("SLURM_ARRAY_TASK_ID", "0")
-    local_id = os.environ.get("SLURM_LOCALID", "0")
+    array_task_id = str(
+        _env_int("OPUS_ARRAY_TASK_ID", "SLURM_ARRAY_TASK_ID", default=0)
+    )
+    local_id = str(_env_int("OPUS_LOCAL_ID", "SLURM_LOCALID", default=0))
     host = socket.gethostname()
     pid = os.getpid()
     return f"{job}.{array_task_id}.{local_id}.{host}.{pid}"
@@ -94,7 +98,9 @@ def _format_failure_detail(
     return f"{summary}\n{shard_context}\ntraceback:\n{tb.rstrip()}"
 
 
-def _score_shard(run_entry, context, entry, start_idx, end_idx, direction_key, shard_id):
+def _score_shard(
+    run_entry, context, entry, start_idx, end_idx, direction_key, shard_id
+):
     context.bounds.start = start_idx
     context.bounds.end = end_idx
     context.bounds.active = True
@@ -184,7 +190,8 @@ def _run_db_loop(args: argparse.Namespace) -> int:
             if time_left < 1.5 * exp_seconds:
                 logger.info(
                     "Walltime budget low (%.0fs left < 1.5 * %ds); exiting cleanly.",
-                    time_left, exp_seconds,
+                    time_left,
+                    exp_seconds,
                 )
                 queue_db.log_event(conn, worker_id, "exit", detail="walltime_budget")
                 break
@@ -205,7 +212,8 @@ def _run_db_loop(args: argparse.Namespace) -> int:
                 backoff = random.uniform(*_CLAIM_FAILURE_BACKOFF_S)
                 logger.warning(
                     "claim_next failed (db lock?): %s; sleeping %.1fs and retrying.",
-                    _summarize_exception(exc), backoff,
+                    _summarize_exception(exc),
+                    backoff,
                 )
                 time.sleep(backoff)
                 continue
@@ -218,19 +226,20 @@ def _run_db_loop(args: argparse.Namespace) -> int:
                         counts,
                     )
                 else:
-                    pending_models = conn.execute(
-                        """
+                    pending_models = conn.execute("""
                         SELECT model, COUNT(*) AS n
                           FROM jobs
                          WHERE status = 'pending'
                          GROUP BY model
                          ORDER BY n DESC, model ASC
                          LIMIT 10
-                        """
-                    ).fetchall()
-                    pending_summary = ", ".join(
-                        f"{row['model']}:{row['n']}" for row in pending_models
-                    ) or "<none>"
+                        """).fetchall()
+                    pending_summary = (
+                        ", ".join(
+                            f"{row['model']}:{row['n']}" for row in pending_models
+                        )
+                        or "<none>"
+                    )
                     logger.warning(
                         "Queue drained for model=%s because the DB has no rows for that exact model key. Pending models: %s",
                         queue_model,
@@ -248,7 +257,11 @@ def _run_db_loop(args: argparse.Namespace) -> int:
             attempt = int(job["attempts"])
             logger.info(
                 "Claimed shard dir=%s shard=%d range=[%d,%d) attempt=%d",
-                direction_key, shard_id, start_idx, end_idx, attempt,
+                direction_key,
+                shard_id,
+                start_idx,
+                end_idx,
+                attempt,
             )
             queue_db.log_event(
                 conn,
@@ -268,7 +281,13 @@ def _run_db_loop(args: argparse.Namespace) -> int:
                     split=dataset.split_values[0],
                 )
                 frame, elapsed = _score_shard(
-                    run_entry, context, entry, start_idx, end_idx, direction_key, shard_id
+                    run_entry,
+                    context,
+                    entry,
+                    start_idx,
+                    end_idx,
+                    direction_key,
+                    shard_id,
                 )
                 frame["worker_id"] = worker_id
                 out_path = None
@@ -308,18 +327,27 @@ def _run_db_loop(args: argparse.Namespace) -> int:
                 error_summary = _summarize_exception(exc)
                 logger.error(
                     "Shard failed dir=%s shard=%d:\n%s",
-                    direction_key, shard_id, error_detail,
+                    direction_key,
+                    shard_id,
+                    error_detail,
                 )
                 try:
                     finalize_result = queue_db.mark_failed(
-                        conn, direction_key, queue_model, shard_id,
-                        worker_id, error_detail, args.max_attempts,
+                        conn,
+                        direction_key,
+                        queue_model,
+                        shard_id,
+                        worker_id,
+                        error_detail,
+                        args.max_attempts,
                     )
                 except sqlite3.OperationalError as finalize_exc:
                     logger.error(
                         "mark_failed could not commit (db lock?) dir=%s shard=%d: %s; "
                         "row left 'running' — stale-row reset will requeue it.",
-                        direction_key, shard_id, _summarize_exception(finalize_exc),
+                        direction_key,
+                        shard_id,
+                        _summarize_exception(finalize_exc),
                     )
                     queue_db.log_event(
                         conn,
@@ -328,9 +356,7 @@ def _run_db_loop(args: argparse.Namespace) -> int:
                         direction_key=direction_key,
                         model=queue_model,
                         shard_id=shard_id,
-                        detail=(
-                            f"mark_failed db_lock; original_error={error_summary}"
-                        ),
+                        detail=(f"mark_failed db_lock; original_error={error_summary}"),
                     )
                 else:
                     queue_db.log_event(
@@ -346,7 +372,10 @@ def _run_db_loop(args: argparse.Namespace) -> int:
                 context.bounds.clear()
     finally:
         queue_db.log_event(
-            conn, worker_id, "exit", detail=f"completed={completed_shards} failed={failed_shards}"
+            conn,
+            worker_id,
+            "exit",
+            detail=f"completed={completed_shards} failed={failed_shards}",
         )
         if writer is not None:
             writer.close_all()
@@ -354,7 +383,9 @@ def _run_db_loop(args: argparse.Namespace) -> int:
 
     logger.info(
         "Worker finished: id=%s completed=%d failed=%d",
-        worker_id, completed_shards, failed_shards,
+        worker_id,
+        completed_shards,
+        failed_shards,
     )
     return 0 if failed_shards == 0 else 1
 

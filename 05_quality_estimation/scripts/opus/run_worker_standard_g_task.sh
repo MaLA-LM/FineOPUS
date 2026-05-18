@@ -40,6 +40,13 @@ fi
 # Ref: https://docs.lumi-supercomputer.eu/runjobs/scheduled-jobs/distribution-binding/
 # Ref: https://rocm.docs.amd.com/en/docs-7.2.1/reference/env-variables.html
 LOCAL_ID="${SLURM_LOCALID:-0}"
+ARRAY_TASK_ID="${SLURM_ARRAY_TASK_ID:-${OPUS_ARRAY_TASK_ID:-0}}"
+
+# The standard-g launcher is the source of truth for node-local identity.
+# submit_array_standard_g.sh uses --export=ALL, so stale OPUS_* values from
+# the submit shell must not override the srun-provided local rank.
+export OPUS_ARRAY_TASK_ID="$ARRAY_TASK_ID"
+export OPUS_LOCAL_ID="$LOCAL_ID"
 
 # Master port: the existing run_worker.sh formula collides for the 8
 # workers on a single node (same JOB_ID + same TASK_ID). Adding
@@ -47,9 +54,16 @@ LOCAL_ID="${SLURM_LOCALID:-0}"
 # port in the 20000-39999 range with negligible collision probability
 # across array tasks.
 PORT_JOB_SEED="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}"
-PORT_TASK_SEED="${SLURM_ARRAY_TASK_ID:-0}"
+PORT_TASK_SEED="$ARRAY_TASK_ID"
 export MASTER_ADDR=127.0.0.1
 export MASTER_PORT=$(( 20000 + ((PORT_JOB_SEED + PORT_TASK_SEED + LOCAL_ID * 101) % 20000) ))
+
+DISTRIBUTED_ENVS=(
+    --env "MASTER_ADDR=${MASTER_ADDR}"
+    --env "MASTER_PORT=${MASTER_PORT}"
+    --env "OPUS_ARRAY_TASK_ID=${OPUS_ARRAY_TASK_ID}"
+    --env "OPUS_LOCAL_ID=${OPUS_LOCAL_ID}"
+)
 
 # ---- shared scratch caches (HF model files: read-only, safe to share) ----
 SCRATCH_CACHE="${SCRATCH_CACHE:-/scratch/project_462001050/ibrahiam}"
@@ -189,7 +203,7 @@ if [ "$BACKEND" = "bicleaner" ]; then
 elif [ "$BACKEND" = "remedy" ]; then
     export PYTHONNOUSERSITE=1
     module --force purge
-    REPO="/scratch/project_462001050/$USER/envs/Remedy"
+    REPO="/scratch/project_462001050/ibrahiam/envs/Remedy"
     unset PYTHONPATH
     export PYTHONPATH="$REPO"
     export TRANSFORMERS_OFFLINE=1
@@ -343,10 +357,14 @@ if [ "$BACKEND" = "bicleaner" ]; then
 elif [ "$BACKEND" = "remedy" ]; then
     # Keep the standard-g host-side ROCR_VISIBLE_DEVICES wrapper, but make
     # the ReMedy container invocation itself match the known-good small-g
-    # launcher as closely as possible. The small-g branch does not add extra
-    # device binds or override ROCR/MASTER/TORCH cache envs here.
+    # launcher as closely as possible. The only intentional additions are the
+    # computed rendezvous port and OPUS worker identity.
     singularity exec --rocm -B /scratch -B /pfs -B /projappl "$SIF" env \
         PYTHONPATH="$PYTHONPATH" \
+        MASTER_ADDR="$MASTER_ADDR" \
+        MASTER_PORT="$MASTER_PORT" \
+        OPUS_ARRAY_TASK_ID="$OPUS_ARRAY_TASK_ID" \
+        OPUS_LOCAL_ID="$OPUS_LOCAL_ID" \
         HF_HOME="$HF_HOME" \
         HF_HUB_CACHE="$HF_HUB_CACHE" \
         HF_DATASETS_CACHE="$HF_DATASETS_CACHE" \
@@ -368,6 +386,7 @@ elif [ "$BACKEND" = "llm" ]; then
     # task still starts from the host-side ROCR wrapper, then switches to the
     # HIP/CUDA visibility vars that vLLM + Ray expect inside the container.
     singularity run \
+        "${DISTRIBUTED_ENVS[@]}" \
         --env "TORCH_HOME=${TORCH_HOME}" \
         --env "TRITON_CACHE_DIR=${TRITON_CACHE_DIR}" \
         --env "XDG_CACHE_HOME=${XDG_CACHE_HOME}" \
@@ -390,6 +409,7 @@ elif [ "$BACKEND" = "llm" ]; then
     EXIT_CODE=$?
 else
     singularity run \
+        "${DISTRIBUTED_ENVS[@]}" \
         --env "HF_HOME=${HF_HOME}" \
         --env "HF_HUB_CACHE=${HF_HUB_CACHE}" \
         --env "HF_DATASETS_CACHE=${HF_DATASETS_CACHE}" \
