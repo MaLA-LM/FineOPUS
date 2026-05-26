@@ -28,9 +28,9 @@ MAX_ROWS=10000000
 BATCH_SIZE=500000
 COMPRESSION=zstd
 SCORED_DIR="/scratch/project_462001069/opus_qe/merged"
-THRESHOLDS_CSV="../thresholds/stats/v1/thresholds_v2.csv"
-OUT_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage4-V2"
-STATS_OUTPUT="./stats/filter_stats_v2.csv"
+THRESHOLDS_CSV="../thresholds/stats/v1/thresholds_v1.csv"
+OUT_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage4-V1"
+STATS_OUTPUT="./stats/filter_stats_v1.csv"
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
@@ -78,7 +78,7 @@ CMD="sbatch \
     --ntasks-per-node=1 \
     --cpus-per-task=4 \
     --mem=64G \
-    --time=0-01:00:00 \
+    --time=0-04:00:00 \
     --account=project_462000964 \
     --export=ALL,N_TASKS=${N_TASKS},MAX_ROWS=${MAX_ROWS},BATCH_SIZE=${BATCH_SIZE},COMPRESSION=${COMPRESSION},SCORED_DIR=${SCORED_DIR},THRESHOLDS_CSV=${THRESHOLDS_CSV},OUT_DIR=${OUT_DIR},STATS_OUTPUT=${STATS_OUTPUT} \
     ./apply_thresholds.sh"
