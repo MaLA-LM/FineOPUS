@@ -1,12 +1,12 @@
 #!/bin/bash
 
 #SBATCH --job-name=cnt_tok
-#SBATCH --account=project_462000787
+#SBATCH --account=project_462001050
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=16G
+#SBATCH --mem=128G
 #SBATCH --time=3:00:00
 #SBATCH --output=slurmlog/cnt_tok_%A_%a.out.log  # Changed to %A_%a for unique array logs
 #SBATCH --error=slurmlog/cnt_tok_%A_%a.err.log     # Changed to %A_%a for unique array logs
@@ -38,9 +38,13 @@ echo "--------------------------------------------------------"
 # 5. Run your command
 module use /appl/local/csc/modulefiles/
 module load pytorch
+# for latest DeepSeek
+source /scratch/project_462001050/ibrahiam/envs/transformers-latest/bin/activate
+
+export HF_TOKEN
 
 srun python count_token.py --data_dir "$DATA_DIR" \
-    --lang_pair $(basename "$MY_FOLDER") \
+    --lang_pair "$(basename "$MY_FOLDER")" \
     --output_file "$OUTPUT_FILE"
 
 echo "$MY_FOLDER" >> ${COMPLETE_LIST}

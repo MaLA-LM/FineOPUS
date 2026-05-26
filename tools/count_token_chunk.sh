@@ -1,75 +1,87 @@
 #!/bin/bash
 set -e # Exit immediately if a command fails
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Optional: Clean up old logs
-rm -f slurmlog/cnt_tok*.log 
+mkdir -p "$SCRIPT_DIR/slurmlog"
+rm -f "$SCRIPT_DIR"/slurmlog/cnt_tok*.log
 
 # --- Configuration ---
-DATA_DIR="/scratch/project_462000941/FineOPUS/fineopus-original"
-OUTPUT_FILE="/scratch/project_462000941/members/shaoxion/FineOPUS/statistics/token_counts/fineopus_original.csv"
-TASK_LIST_FILE="tmp/incomplete_folders_fineopus_original.txt"
+DATA_DIR="/scratch/project_462001069/opus_qe/merged"
+OUTPUT_FILE="/scratch/project_462001050/FineOPUS/statistics/mala-opus-dedup-2410.csv"
 
-# Define how many folders each array job should process
-CHUNK_SIZE=1500
+# Define how many folders each array job should process.
+CHUNK_SIZE=200
+
+# Tune this if tokenizer memory or throughput needs adjustment.
+TOKENIZER_BATCH_SIZE=1024
 # ---------------------
 
-# 1. Find all possible folders from DATA_DIR
+TASK_ROOT_DIR="${TASK_ROOT_DIR:-$(dirname "$OUTPUT_FILE")/token_count_tasks}"
+RUN_ID="$(date +%Y%m%d_%H%M%S)"
+RUN_TASK_DIR="$TASK_ROOT_DIR/run_$RUN_ID"
+WORKER_TASK_DIR="$RUN_TASK_DIR/worker_lists"
+WORKER_OUTPUT_DIR="$RUN_TASK_DIR/worker_outputs"
+TASK_LIST_FILE="$RUN_TASK_DIR/incomplete_folders_opus_2410.txt"
+ALL_FOLDERS_FILE="$RUN_TASK_DIR/all_folders.txt"
+
+mkdir -p "$WORKER_TASK_DIR" "$WORKER_OUTPUT_DIR"
+
+# 1. Find all possible folders from DATA_DIR.
 echo "Finding all folders in $DATA_DIR..."
+find "$DATA_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort > "$ALL_FOLDERS_FILE"
 
-# -printf "%f\n" tells find to print only the file's name (without leading directories)
-find "$DATA_DIR" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" | sort > all_folders.tmp
+NUM_ALL_FOLDERS=$(wc -l < "$ALL_FOLDERS_FILE")
 
-NUM_ALL_FOLDERS=$(wc -l < all_folders.tmp)
-
-
-# 2 & 3. Find processed folders and filter to get incomplete list
+# 2 & 3. Find processed folders and filter to get incomplete list.
 echo "Determining incomplete folders..."
-
-# Clear/create the incomplete list file to ensure we start fresh
-> "$TASK_LIST_FILE" 
+> "$TASK_LIST_FILE"
 
 if [ ! -f "$OUTPUT_FILE" ]; then
-    # Case A: If no output file exists, everything is incomplete
     echo "No existing output file found. All folders are incomplete."
-    cp all_folders.tmp "$TASK_LIST_FILE"
+    cp "$ALL_FOLDERS_FILE" "$TASK_LIST_FILE"
 else
-    # Case B: Exclude folders found in OUTPUT_FILE
-    # We use awk to read the CSV first (NR==FNR), recording the 1st column (path) as completed.
-    # Then we read all_folders.tmp, printing only lines NOT in the completed array.
-    
+    # The output CSV's first column is lang_pair. Language-pair names do not
+    # contain commas, so this simple CSV read is enough here.
     awk -F, '
         NR==FNR {
-            # Mark the folder path (1st column) as completed
-            completed[$1] = 1
+            value = $1
+            gsub(/\r/, "", value)
+            gsub(/^"|"$/, "", value)
+            if (value != "" && value != "lang_pair") {
+                completed[value] = 1
+            }
             next
         }
-        {
-            # Check the lines from all_folders.tmp
-            if (!($0 in completed)) {
-                print $0
-            }
+        !($0 in completed) {
+            print $0
         }
-    ' "$OUTPUT_FILE" all_folders.tmp > "$TASK_LIST_FILE"
+    ' "$OUTPUT_FILE" "$ALL_FOLDERS_FILE" > "$TASK_LIST_FILE"
 fi
 
-rm all_folders.tmp # Clean up temporary file
-
-# 4. Count and submit
+# 4. Count, split, and submit.
 NUM_INCOMPLETE=$(wc -l < "$TASK_LIST_FILE")
 
 if [ "$NUM_INCOMPLETE" -eq 0 ]; then
-    echo "✅ All folders are already processed. Nothing to submit."
-    rm "$TASK_LIST_FILE" # Optional: remove empty task file
+    echo "All folders are already processed. Nothing to submit."
 else
-    # Calculate array size using ceiling division
     NUM_JOBS=$(( (NUM_INCOMPLETE + CHUNK_SIZE - 1) / CHUNK_SIZE ))
 
     echo "Total folders found: $NUM_ALL_FOLDERS"
-    echo "Incomplted folders: $NUM_INCOMPLETE"
-    echo "Submitting $NUM_JOBS array jobs (processing $CHUNK_SIZE folders each)..."
-    
-    # Removed undefined 'COMPLETE_LIST' variable from exports
+    echo "Incomplete folders: $NUM_INCOMPLETE"
+    echo "Creating $NUM_JOBS worker task files in $WORKER_TASK_DIR"
+
+    for TASK_ID in $(seq 1 "$NUM_JOBS"); do
+        START_LINE=$(( (TASK_ID - 1) * CHUNK_SIZE + 1 ))
+        END_LINE=$(( TASK_ID * CHUNK_SIZE ))
+        sed -n "${START_LINE},${END_LINE}p" "$TASK_LIST_FILE" > "$WORKER_TASK_DIR/worker_${TASK_ID}.txt"
+    done
+
+    echo "Submitting $NUM_JOBS array jobs (processing up to $CHUNK_SIZE folders each)..."
+
+    cd "$SCRIPT_DIR"
     sbatch --array=1-$NUM_JOBS \
-           --export=ALL,DATA_DIR="$DATA_DIR",TASK_LIST_FILE="$TASK_LIST_FILE",OUTPUT_FILE="$OUTPUT_FILE",CHUNK_SIZE="$CHUNK_SIZE" \
+           --export=ALL,DATA_DIR="$DATA_DIR",TASK_LIST_FILE="$TASK_LIST_FILE",OUTPUT_FILE="$OUTPUT_FILE",CHUNK_SIZE="$CHUNK_SIZE",TOKENIZER_BATCH_SIZE="$TOKENIZER_BATCH_SIZE",WORKER_TASK_DIR="$WORKER_TASK_DIR",WORKER_OUTPUT_DIR="$WORKER_OUTPUT_DIR",SCRIPT_DIR="$SCRIPT_DIR" \
            count_token_chunk.slurm
 fi
