@@ -223,5 +223,9 @@ cython_debug/
 /04_parallelism_check/filter/stats*
 /05_quality_estimation/thresholds/stats/data_score_stats.*.csv
 /05_quality_estimation/filter/stats*
+/05_quality_estimation/thresholds/stats/v1
+/05_quality_estimation/thresholds/stats/v2
+/05_quality_estimation/thresholds/stats/v3
+/05_quality_estimation/thresholds/stats/v4
 /*/*/hostfiles/*
 models/*

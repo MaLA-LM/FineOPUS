@@ -18,15 +18,17 @@ Threshold formula (per language pair):
   T_raw     = data_{--data_quantile}                # default: p10
   T_clipped = clip(T_raw, --t_floor, --t_cap)       # default: [0.30, 0.95]
 
-  # Last-line-of-defense caps (the tightest one wins).
+  # Upper-side caps (the tightest one wins).
   T_sanity  = data_{--data_sanity_quantile}         # default: p50
-                                                    # (never filter > 50%)
+                                                    # (cap: keep >= 50%)
   if --min_keep_fraction > 0:
       T_keep = data_quantile(1 - min_keep_fraction)
   else:
       T_keep = +inf
 
-  T = min(T_clipped, T_sanity, T_keep)
+  # `t_floor` is a HARD floor: applied after all caps, so a pair with a
+  # degenerate distribution (e.g. data_p50 == 0) can't end up with T = 0.
+  T = clip(min(T_clipped, T_sanity, T_keep), --t_floor, --t_cap)
 
 Outputs:
   - thresholds.csv : per-pair final threshold + the intermediate components
@@ -191,7 +193,12 @@ def derive_threshold(
     else:
         T_keep_cap = float("inf")
 
+    # `t_floor` is a HARD lower bound, applied after all caps. This means a
+    # pair with a degenerate score distribution (e.g. data_p50 == 0) can't
+    # silently fall through to T = 0; it gets pulled back up to t_floor and
+    # the resulting low kept_fraction signals that the pair is unreliable.
     T = float(min(T_clipped, data_sanity_cap, T_keep_cap))
+    T = float(min(max(T, t_floor), eff_cap))
 
     return {
         "T_raw": float(T_raw),
