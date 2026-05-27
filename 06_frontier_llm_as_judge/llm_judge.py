@@ -1,0 +1,700 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+LLM-as-a-judge scorer for parallel-corpus parquet shards.
+
+Reads every `{dataset_dir}/{src}-{tgt}/*.parquet`, batches rows of
+(source_text, target_text), asks an Azure-hosted LLM (DeepSeek-V4-Flash by
+default) for reference-free MT quality scores, parses the JSON response, and
+writes new parquet shards with an extra `llm_judge_score` column
+(`overall_0to100` normalized to a 0.0-1.0 float) and, optionally, the seven
+per-dimension 0-10 integer scores.
+
+Rate limiting respects both a tokens-per-minute and a requests-per-minute
+budget via an asyncio token bucket. Designed to be run as a single process
+per chunk (e.g. one SLURM array task per chunk).
+
+Example (single machine):
+    python llm_judge.py \\
+        --dataset_dir /scratch/.../FineOPUS-Filtered-Stage3 \\
+        --out_dir     /scratch/.../FineOPUS-Filtered-Stage3-LLMScored \\
+        --batch_size 10 --concurrency 32
+
+Example (SLURM array, one task per chunk):
+    python llm_judge.py ... --n_chunks $SLURM_ARRAY_TASK_COUNT \\
+                            --chunk_id $SLURM_ARRAY_TASK_ID
+"""
+
+import argparse
+import asyncio
+import csv
+import json
+import logging
+import os
+import random
+import re
+import sys
+import time
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+from dotenv import load_dotenv
+from openai import AsyncOpenAI
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)],
+)
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Constants / output schema
+# ---------------------------------------------------------------------------
+
+DIM_KEYS = [
+    "accuracy_completeness",
+    "terminology_consistency",
+    "fluency_coherence",
+    "style_tone_audience",
+    "locale_formatting",
+    "technical_integrity",
+    "cultural_appropriateness",
+]
+
+SCORE_COL = "llm_judge_score"
+DIM_COL_PREFIX = "llm_judge_"
+
+STATS_COLUMNS = [
+    "lang_pair", "source_lang", "target_lang",
+    "n_shards_in", "n_shards_out",
+    "rows_total", "rows_scored", "rows_failed",
+    "mean_score", "elapsed_sec",
+]
+
+
+# ---------------------------------------------------------------------------
+# Rate limiter (TPM + RPM, sliding 60s window)
+# ---------------------------------------------------------------------------
+
+class TpmRpmLimiter:
+    """Sliding-window token + request bucket.
+
+    Callers `await acquire(est_tokens)` before sending a request, and
+    `add_actual(extra_tokens)` after the response with the delta between the
+    actual token count and the estimate (positive or negative)."""
+
+    def __init__(self, tpm: int, rpm: int):
+        self.tpm = tpm
+        self.rpm = rpm
+        # Each entry is (timestamp, tokens). Requests track timestamp only.
+        self._tokens: List[Tuple[float, int]] = []
+        self._reqs: List[float] = []
+        self._lock = asyncio.Lock()
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - 60.0
+        # Drop entries older than 60s.
+        i = 0
+        while i < len(self._tokens) and self._tokens[i][0] < cutoff:
+            i += 1
+        if i:
+            self._tokens = self._tokens[i:]
+        j = 0
+        while j < len(self._reqs) and self._reqs[j] < cutoff:
+            j += 1
+        if j:
+            self._reqs = self._reqs[j:]
+
+    async def acquire(self, est_tokens: int) -> None:
+        while True:
+            async with self._lock:
+                now = time.monotonic()
+                self._prune(now)
+                cur_tokens = sum(n for _, n in self._tokens)
+                cur_reqs = len(self._reqs)
+                if cur_tokens + est_tokens <= self.tpm and cur_reqs < self.rpm:
+                    self._tokens.append((now, est_tokens))
+                    self._reqs.append(now)
+                    return
+                # Compute the soonest moment some window slot frees up.
+                wait = 0.25
+                if cur_reqs >= self.rpm and self._reqs:
+                    wait = max(wait, 60.0 - (now - self._reqs[0]) + 0.05)
+                if cur_tokens + est_tokens > self.tpm and self._tokens:
+                    wait = max(wait, 60.0 - (now - self._tokens[0][0]) + 0.05)
+                wait = min(wait, 10.0)
+            await asyncio.sleep(wait)
+
+    async def add_actual(self, extra_tokens: int) -> None:
+        """After we know the true token usage, add a correction so the
+        bucket reflects reality. `extra_tokens` can be negative."""
+        if extra_tokens == 0:
+            return
+        async with self._lock:
+            self._tokens.append((time.monotonic(), int(extra_tokens)))
+
+
+# ---------------------------------------------------------------------------
+# Prompt construction & response parsing
+# ---------------------------------------------------------------------------
+
+PROMPT_TEMPLATE = """You are a professional translation quality evaluator.
+
+Below are {batch_size} source/translation segment pairs to evaluate.
+
+Source language: {source_lang}
+Target language: {target_lang}
+
+{items_block}
+
+Task: Reference-free MT quality scoring for EVERY item above.
+
+Score each dimension as an integer 0..10 (higher = better), then overall 0..100.
+
+Dimensions:
+1) accuracy_completeness (meaning preserved, no additions/omissions)
+2) terminology_consistency
+3) fluency_coherence
+4) style_tone_audience
+5) locale_formatting (numbers, punctuation, dates, tags if any)
+6) technical_integrity (entities/units/code/markup preserved)
+7) cultural_appropriateness
+
+Output ONLY valid JSON with exactly this shape (no extra keys, no text outside JSON, all values integers):
+
+{{
+  "results": [
+    {{
+      "id": <int>,
+      "dims_0to10": {{
+        "accuracy_completeness": 0-10,
+        "terminology_consistency": 0-10,
+        "fluency_coherence": 0-10,
+        "style_tone_audience": 0-10,
+        "locale_formatting": 0-10,
+        "technical_integrity": 0-10,
+        "cultural_appropriateness": 0-10
+      }},
+      "overall_0to100": 0-100
+    }}
+  ]
+}}
+
+Return exactly {batch_size} items in "results", one per input segment, ordered by id."""
+
+
+def _truncate(text: str, max_chars: int) -> str:
+    if text is None:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 1] + "\u2026"
+
+
+def build_prompt(
+    pairs: List[Tuple[str, str]],
+    source_lang: str,
+    target_lang: str,
+    max_chars_per_field: int,
+) -> str:
+    blocks = []
+    for i, (src, tgt) in enumerate(pairs):
+        src_t = _truncate(src, max_chars_per_field).replace("\n", " ")
+        tgt_t = _truncate(tgt, max_chars_per_field).replace("\n", " ")
+        blocks.append(f"[{i}] SRC: {src_t}\n[{i}] TGT: {tgt_t}")
+    items_block = "\n\n".join(blocks)
+    return PROMPT_TEMPLATE.format(
+        batch_size=len(pairs),
+        source_lang=source_lang,
+        target_lang=target_lang,
+        items_block=items_block,
+    )
+
+
+_JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def parse_response(
+    content: str, expected_n: int
+) -> Tuple[List[Optional[float]], List[Optional[Dict[str, int]]]]:
+    """Parse the JSON response. Returns (overalls, dim_dicts) lists of length
+    expected_n, with None entries where parsing failed for that id."""
+    if content is None:
+        raise ValueError("empty response content")
+    # Strip code fences if any.
+    text = content.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+    # Find the outermost JSON object.
+    try:
+        data = json.loads(text)
+    except Exception:
+        m = _JSON_OBJ_RE.search(text)
+        if not m:
+            raise ValueError(f"no JSON object in response: {text[:200]!r}")
+        data = json.loads(m.group(0))
+    results = data.get("results")
+    if not isinstance(results, list):
+        raise ValueError("response missing 'results' list")
+
+    by_id: Dict[int, dict] = {}
+    for r in results:
+        if not isinstance(r, dict):
+            continue
+        try:
+            rid = int(r.get("id"))
+        except (TypeError, ValueError):
+            continue
+        by_id[rid] = r
+
+    overalls: List[Optional[float]] = [None] * expected_n
+    dim_dicts: List[Optional[Dict[str, int]]] = [None] * expected_n
+    for i in range(expected_n):
+        r = by_id.get(i)
+        if r is None:
+            continue
+        v = r.get("overall_0to100")
+        if isinstance(v, (int, float)):
+            # Normalize the model's 0..100 score to 0..1 and clip just in case.
+            overalls[i] = max(0.0, min(1.0, float(v) / 100.0))
+        dims = r.get("dims_0to10")
+        if isinstance(dims, dict):
+            parsed_dims: Dict[str, int] = {}
+            for k in DIM_KEYS:
+                vv = dims.get(k)
+                if isinstance(vv, (int, float)):
+                    parsed_dims[k] = int(vv)
+            if parsed_dims:
+                dim_dicts[i] = parsed_dims
+    return overalls, dim_dicts
+
+
+# ---------------------------------------------------------------------------
+# Token estimation
+# ---------------------------------------------------------------------------
+
+def estimate_input_tokens(text: str) -> int:
+    # Conservative: ~3 chars per token for mixed-script text.
+    return max(1, len(text) // 3)
+
+
+def estimate_output_tokens(batch_size: int) -> int:
+    # Each result is ~80 tokens of JSON (id + 7 dim ints + overall).
+    return 60 + 80 * batch_size
+
+
+# ---------------------------------------------------------------------------
+# Per-batch scorer
+# ---------------------------------------------------------------------------
+
+class ScoringClient:
+    def __init__(
+        self,
+        client: AsyncOpenAI,
+        deployment: str,
+        limiter: TpmRpmLimiter,
+        sem: asyncio.Semaphore,
+        max_retries: int,
+        request_timeout: float,
+        max_chars_per_field: int,
+        max_completion_tokens: int,
+    ):
+        self.client = client
+        self.deployment = deployment
+        self.limiter = limiter
+        self.sem = sem
+        self.max_retries = max_retries
+        self.request_timeout = request_timeout
+        self.max_chars_per_field = max_chars_per_field
+        self.max_completion_tokens = max_completion_tokens
+
+    async def score_batch(
+        self,
+        pairs: List[Tuple[str, str]],
+        source_lang: str,
+        target_lang: str,
+    ) -> Tuple[List[Optional[float]], List[Optional[Dict[str, int]]]]:
+        prompt = build_prompt(pairs, source_lang, target_lang, self.max_chars_per_field)
+        out_tokens = estimate_output_tokens(len(pairs))
+        est_tokens = estimate_input_tokens(prompt) + out_tokens
+
+        last_err: Optional[Exception] = None
+        async with self.sem:
+            for attempt in range(self.max_retries):
+                await self.limiter.acquire(est_tokens)
+                try:
+                    resp = await self.client.chat.completions.create(
+                        model=self.deployment,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.0,
+                        max_tokens=self.max_completion_tokens,
+                        timeout=self.request_timeout,
+                    )
+                    content = resp.choices[0].message.content
+                    # Reconcile token usage with the limiter.
+                    try:
+                        usage = resp.usage
+                        if usage is not None:
+                            actual = (usage.prompt_tokens or 0) + (usage.completion_tokens or 0)
+                            await self.limiter.add_actual(actual - est_tokens)
+                    except Exception:
+                        pass
+                    return parse_response(content, len(pairs))
+                except Exception as e:
+                    last_err = e
+                    msg = str(e)
+                    # Exponential backoff with jitter; longer for 429.
+                    base = 5.0 if "429" in msg or "rate" in msg.lower() else 2.0
+                    wait = min(60.0, base * (2 ** attempt)) + random.uniform(0, 0.5)
+                    logger.warning(
+                        f"  batch error (attempt {attempt + 1}/{self.max_retries}): "
+                        f"{type(e).__name__}: {msg[:160]} -- retry in {wait:.1f}s"
+                    )
+                    await asyncio.sleep(wait)
+        logger.error(f"  batch failed after {self.max_retries} retries: {last_err}")
+        return [None] * len(pairs), [None] * len(pairs)
+
+
+# ---------------------------------------------------------------------------
+# Per-shard worker
+# ---------------------------------------------------------------------------
+
+async def score_shard(
+    in_path: Path,
+    out_path: Path,
+    src_lang: str,
+    tgt_lang: str,
+    scorer: ScoringClient,
+    batch_size: int,
+    keep_dims: bool,
+    compression: str,
+    max_rows: Optional[int] = None,
+) -> Tuple[int, int, float]:
+    """Score one parquet shard end-to-end. Returns (n_rows, n_failed, mean_score).
+
+    If `max_rows` is set, only the first `max_rows` rows of the shard are
+    read, scored, and written (used by the --max_rows_per_pair test option)."""
+    table = pq.read_table(in_path)
+    if max_rows is not None and table.num_rows > max_rows:
+        table = table.slice(0, max_rows)
+    n = table.num_rows
+    if n == 0:
+        pq.write_table(table, out_path, compression=compression)
+        return 0, 0, float("nan")
+
+    if "source_text" not in table.column_names or "target_text" not in table.column_names:
+        raise ValueError(
+            f"{in_path.name}: expected 'source_text' and 'target_text' columns, "
+            f"got {table.column_names}"
+        )
+
+    sources = table["source_text"].to_pylist()
+    targets = table["target_text"].to_pylist()
+
+    overalls: List[Optional[float]] = [None] * n
+    dims_list: List[Optional[Dict[str, int]]] = [None] * n
+
+    async def run_one(start: int, end: int):
+        idxs = list(range(start, end))
+        pairs = [(sources[i] or "", targets[i] or "") for i in idxs]
+        ov, dm = await scorer.score_batch(pairs, src_lang, tgt_lang)
+        for k, i in enumerate(idxs):
+            overalls[i] = ov[k]
+            dims_list[i] = dm[k]
+
+    tasks = [
+        run_one(start, min(start + batch_size, n))
+        for start in range(0, n, batch_size)
+    ]
+    await asyncio.gather(*tasks)
+
+    score_arr = pa.array(overalls, type=pa.float64())
+    new_table = table.append_column(SCORE_COL, score_arr)
+    if keep_dims:
+        for k in DIM_KEYS:
+            col = [d.get(k) if isinstance(d, dict) else None for d in dims_list]
+            new_table = new_table.append_column(
+                DIM_COL_PREFIX + k, pa.array(col, type=pa.int32())
+            )
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    pq.write_table(new_table, out_path, compression=compression)
+
+    n_failed = sum(1 for v in overalls if v is None)
+    valid = [v for v in overalls if v is not None]
+    mean_score = (sum(valid) / len(valid)) if valid else float("nan")
+    return n, n_failed, mean_score
+
+
+# ---------------------------------------------------------------------------
+# Lang-pair enumeration
+# ---------------------------------------------------------------------------
+
+def enumerate_pairs(dataset_dir: Path, include_same_lang: bool) -> List[Tuple[str, str]]:
+    if not dataset_dir.exists():
+        raise FileNotFoundError(f"dataset_dir does not exist: {dataset_dir}")
+    pairs: List[Tuple[str, str]] = []
+    for child in sorted(dataset_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        name = child.name
+        if "-" not in name:
+            continue
+        src, tgt = name.split("-", 1)
+        if not include_same_lang and src == tgt:
+            continue
+        if not any(child.glob("*.parquet")):
+            continue
+        pairs.append((src, tgt))
+    return pairs
+
+
+def list_shards(pair_dir: Path) -> List[Path]:
+    return sorted(p for p in pair_dir.glob("*.parquet") if p.is_file())
+
+
+# ---------------------------------------------------------------------------
+# Stats CSV I/O
+# ---------------------------------------------------------------------------
+
+def read_existing_pairs(stats_csv: Path) -> set:
+    if not stats_csv.exists():
+        return set()
+    try:
+        with open(stats_csv, newline="") as fp:
+            return {row["lang_pair"] for row in csv.DictReader(fp)}
+    except Exception:
+        return set()
+
+
+def append_stats_row(stats_csv: Path, row: dict) -> None:
+    stats_csv.parent.mkdir(parents=True, exist_ok=True)
+    file_exists = stats_csv.exists()
+    with open(stats_csv, "a", newline="") as fp:
+        w = csv.DictWriter(fp, fieldnames=STATS_COLUMNS)
+        if not file_exists:
+            w.writeheader()
+        w.writerow({k: row.get(k, "") for k in STATS_COLUMNS})
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+async def amain(args: argparse.Namespace) -> None:
+    load_dotenv(dotenv_path=args.env_file)
+
+    api_key = os.environ.get("AZURE_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError(
+            f"AZURE_API_KEY not found in environment or {args.env_file}"
+        )
+
+    # The new Azure /openai/v1/ endpoint accepts both Bearer and api-key
+    # headers; we send api-key explicitly to be safe.
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url=args.endpoint.rstrip("/") + "/",
+        default_headers={"api-key": api_key},
+    )
+
+    limiter = TpmRpmLimiter(tpm=args.tpm_limit, rpm=args.rpm_limit)
+    sem = asyncio.Semaphore(args.concurrency)
+    scorer = ScoringClient(
+        client=client,
+        deployment=args.deployment,
+        limiter=limiter,
+        sem=sem,
+        max_retries=args.max_retries,
+        request_timeout=args.request_timeout,
+        max_chars_per_field=args.max_chars_per_field,
+        max_completion_tokens=args.max_completion_tokens,
+    )
+
+    dataset_dir = Path(args.dataset_dir)
+    out_root = Path(args.out_dir)
+    stats_output = Path(args.stats_output)
+    if args.n_chunks > 1:
+        stats_output = stats_output.with_suffix(f".chunk{args.chunk_id:04d}.csv")
+
+    out_root.mkdir(parents=True, exist_ok=True)
+
+    pairs = enumerate_pairs(dataset_dir, args.include_same_lang)
+    assigned = [p for i, p in enumerate(pairs) if i % args.n_chunks == args.chunk_id]
+
+    logger.info("=" * 72)
+    logger.info(f"dataset_dir       : {dataset_dir}")
+    logger.info(f"out_dir           : {out_root}")
+    logger.info(f"endpoint          : {args.endpoint}")
+    logger.info(f"deployment        : {args.deployment}")
+    logger.info(f"batch_size        : {args.batch_size}")
+    logger.info(f"concurrency       : {args.concurrency}")
+    logger.info(f"tpm_limit         : {args.tpm_limit:,}")
+    logger.info(f"rpm_limit         : {args.rpm_limit:,}")
+    logger.info(f"chunk_id          : {args.chunk_id} / {args.n_chunks}")
+    logger.info(f"keep_dims         : {args.keep_dims}")
+    logger.info(f"skip_existing     : {args.skip_existing}")
+    logger.info(f"max_rows          : {args.max_rows or 'all'}")
+    logger.info(f"total pairs       : {len(pairs):,}")
+    logger.info(f"assigned pairs    : {len(assigned):,}")
+    logger.info(f"stats_output      : {stats_output}")
+    logger.info("=" * 72)
+
+    done_in_stats = read_existing_pairs(stats_output) if args.skip_existing else set()
+
+    # Global row budget (across all pairs in this task). 0/None disables it.
+    rows_budget: Optional[int] = (
+        args.max_rows if args.max_rows and args.max_rows > 0 else None
+    )
+
+    for i, (src, tgt) in enumerate(assigned, 1):
+        if rows_budget is not None and rows_budget <= 0:
+            logger.info(f"Reached --max_rows budget; stopping after {i - 1} pair(s).")
+            break
+        lang_pair = f"{src}-{tgt}"
+        in_dir = dataset_dir / lang_pair
+        out_dir = out_root / lang_pair
+
+        if args.skip_existing and (
+            lang_pair in done_in_stats or (out_dir / "_DONE").exists()
+        ):
+            logger.info(f"[{i}/{len(assigned)}] {lang_pair}: already done, skip.")
+            continue
+
+        shards = list_shards(in_dir)
+        if not shards:
+            logger.warning(f"[{i}/{len(assigned)}] {lang_pair}: no parquet shards, skip.")
+            continue
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(
+            f"[{i}/{len(assigned)}] {lang_pair}: {len(shards)} shard(s) to score"
+        )
+        t0 = time.monotonic()
+        rows_total = 0
+        rows_failed = 0
+        score_sum = 0.0
+        score_n = 0
+        n_shards_out = 0
+
+        try:
+            for shard in shards:
+                if rows_budget is not None and rows_budget <= 0:
+                    logger.info("  reached --max_rows budget, stopping.")
+                    break
+                out_path = out_dir / shard.name
+                if args.skip_existing and out_path.exists():
+                    logger.info(f"  {shard.name}: output exists, skip shard.")
+                    n_shards_out += 1
+                    continue
+                tt0 = time.monotonic()
+                n_rows, n_fail, mean = await score_shard(
+                    in_path=shard,
+                    out_path=out_path,
+                    src_lang=src,
+                    tgt_lang=tgt,
+                    scorer=scorer,
+                    batch_size=args.batch_size,
+                    keep_dims=args.keep_dims,
+                    compression=args.compression,
+                    max_rows=rows_budget,
+                )
+                if rows_budget is not None:
+                    rows_budget -= n_rows
+                rows_total += n_rows
+                rows_failed += n_fail
+                if n_rows > n_fail:
+                    score_sum += mean * (n_rows - n_fail)
+                    score_n += n_rows - n_fail
+                n_shards_out += 1
+                logger.info(
+                    f"  {shard.name}: rows={n_rows:,} failed={n_fail:,} "
+                    f"mean={mean:.2f} ({time.monotonic() - tt0:.1f}s)"
+                )
+        except Exception as e:
+            logger.error(f"  {lang_pair}: aborted: {type(e).__name__}: {e}", exc_info=True)
+            continue
+
+        elapsed = time.monotonic() - t0
+        rows_scored = rows_total - rows_failed
+        mean_score = (score_sum / score_n) if score_n else float("nan")
+
+        (out_dir / "_DONE").write_text(
+            f"rows_total={rows_total}\nrows_failed={rows_failed}\n"
+            f"mean_score={mean_score}\nelapsed_sec={elapsed:.1f}\n"
+        )
+        append_stats_row(stats_output, {
+            "lang_pair": lang_pair,
+            "source_lang": src,
+            "target_lang": tgt,
+            "n_shards_in": len(shards),
+            "n_shards_out": n_shards_out,
+            "rows_total": rows_total,
+            "rows_scored": rows_scored,
+            "rows_failed": rows_failed,
+            "mean_score": f"{mean_score:.4f}",
+            "elapsed_sec": f"{elapsed:.1f}",
+        })
+        logger.info(
+            f"  {lang_pair}: total={rows_total:,} scored={rows_scored:,} "
+            f"failed={rows_failed:,} mean={mean_score:.2f} ({elapsed:.1f}s)"
+        )
+
+    await client.close()
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--dataset_dir", required=True,
+                   help="Root parquet directory (one subdir per '{src}-{tgt}').")
+    p.add_argument("--out_dir", required=True,
+                   help="Output root; mirrors the input layout, with one extra column.")
+    p.add_argument("--stats_output",
+                   default=str(Path(__file__).resolve().parent / "stats/llm_judge_stats.csv"),
+                   help="Per-pair stats CSV (one row per processed lang pair).")
+    p.add_argument("--env_file",
+                   default=str(Path(__file__).resolve().parent / ".env"),
+                   help="dotenv file containing AZURE_API_KEY=...")
+    p.add_argument("--endpoint",
+                   default="https://fineopus-step6.services.ai.azure.com/openai/v1/")
+    p.add_argument("--deployment", default="DeepSeek-V4-Flash")
+
+    p.add_argument("--batch_size", type=int, default=10,
+                   help="Segment pairs sent per API call.")
+    p.add_argument("--concurrency", type=int, default=32,
+                   help="Maximum in-flight requests.")
+    p.add_argument("--tpm_limit", type=int, default=900_000,
+                   help="Tokens-per-minute budget (default leaves 10%% headroom under 1M).")
+    p.add_argument("--rpm_limit", type=int, default=900,
+                   help="Requests-per-minute budget (default leaves 10%% headroom under 1K).")
+    p.add_argument("--max_chars_per_field", type=int, default=2000,
+                   help="Truncate each source/target text to this many characters.")
+    p.add_argument("--max_completion_tokens", type=int, default=2048)
+    p.add_argument("--request_timeout", type=float, default=120.0)
+    p.add_argument("--max_retries", type=int, default=5)
+
+    p.add_argument("--keep_dims", action="store_true",
+                   help="Also write the seven per-dimension 0-10 scores as extra columns.")
+    p.add_argument("--compression", default="zstd")
+    p.add_argument("--include_same_lang", action="store_true")
+    p.add_argument("--skip_existing", action="store_true",
+                   help="Skip pairs with a _DONE sentinel or already recorded in stats.")
+
+    p.add_argument("--chunk_id", type=int, default=0)
+    p.add_argument("--n_chunks", type=int, default=1)
+
+    p.add_argument("--max_rows", type=int, default=0,
+                   help="Test mode: if >0, score at most this many rows TOTAL across all "
+                        "language pairs (this task). Output parquet is truncated to the "
+                        "rows actually scored. 0 = no limit.")
+
+    args = p.parse_args()
+    asyncio.run(amain(args))
+
+
+if __name__ == "__main__":
+    main()

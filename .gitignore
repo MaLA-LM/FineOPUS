@@ -227,5 +227,6 @@ cython_debug/
 /05_quality_estimation/thresholds/stats/v2
 /05_quality_estimation/thresholds/stats/v3
 /05_quality_estimation/thresholds/stats/v4
+/06_frontier_llm_as_judge/.env
 /*/*/hostfiles/*
 models/*
