@@ -28,9 +28,9 @@ MAX_ROWS=10000000
 BATCH_SIZE=500000
 COMPRESSION=zstd
 SCORED_DIR="/scratch/project_462001069/opus_qe/merged"
-THRESHOLDS_CSV="../thresholds/stats/v1/thresholds_v1.csv"
-OUT_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage4-V1"
-STATS_OUTPUT="./stats/filter_stats_v1.csv"
+THRESHOLDS_CSV="../thresholds/stats/thresholds.csv"
+OUT_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage4"
+STATS_OUTPUT="./stats/filter_stats.csv"
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
