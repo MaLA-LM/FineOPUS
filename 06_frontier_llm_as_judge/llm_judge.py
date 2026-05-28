@@ -50,6 +50,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Silence noisy third-party loggers:
+#   - httpx prints every successful POST at INFO level
+#   - openai's own httpcore/openai loggers can also be chatty
+#   - numexpr prints three "detected N virtual cores" lines on first import
+for _noisy in ("httpx", "httpcore", "openai", "numexpr", "numexpr.utils"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+# Cap numexpr early in case any imported lib still pulls it in.
+os.environ.setdefault("NUMEXPR_MAX_THREADS", "16")
+
 # ---------------------------------------------------------------------------
 # Constants / output schema
 # ---------------------------------------------------------------------------
@@ -274,7 +283,7 @@ def parse_response(
 
 
 # ---------------------------------------------------------------------------
-# Token estimation
+# Token estimation + self-calibration
 # ---------------------------------------------------------------------------
 
 def estimate_input_tokens(text: str) -> int:
@@ -285,6 +294,55 @@ def estimate_input_tokens(text: str) -> int:
 def estimate_output_tokens(batch_size: int) -> int:
     # Each result is ~80 tokens of JSON (id + 7 dim ints + overall).
     return 60 + 80 * batch_size
+
+
+class TokenCalibration:
+    """Learns a multiplicative correction factor that maps our cheap
+    pre-request estimate to the real `usage.total_tokens` returned by the
+    API. Until we have a few samples it returns 1.0 (i.e. trust the raw
+    estimate)."""
+
+    def __init__(self, min_samples: int = 5, log_every: int = 50):
+        self._lock = asyncio.Lock()
+        self._actual_sum = 0.0
+        self._est_sum = 0.0
+        self._samples = 0
+        self._min_samples = min_samples
+        self._log_every = log_every
+        # Running totals for visibility / final summary.
+        self.prompt_total = 0
+        self.completion_total = 0
+
+    async def update(
+        self, actual_total: int, prompt_tokens: int, completion_tokens: int, est_raw: int
+    ) -> Optional[str]:
+        """Record one (actual, estimate) pair. Returns a summary string to
+        log when we just crossed a `log_every` boundary, else None."""
+        async with self._lock:
+            self._actual_sum += float(actual_total)
+            self._est_sum += max(1.0, float(est_raw))
+            self._samples += 1
+            self.prompt_total += int(prompt_tokens or 0)
+            self.completion_total += int(completion_tokens or 0)
+            if self._log_every and self._samples % self._log_every == 0:
+                return self._summary_locked()
+        return None
+
+    def _summary_locked(self) -> str:
+        factor = self.factor()
+        return (
+            f"token calibration: samples={self._samples} factor={factor:.3f} "
+            f"(actual {int(self._actual_sum):,} / est {int(self._est_sum):,})  "
+            f"prompt={self.prompt_total:,} completion={self.completion_total:,}"
+        )
+
+    def factor(self) -> float:
+        if self._samples < self._min_samples or self._est_sum <= 0:
+            return 1.0
+        return self._actual_sum / self._est_sum
+
+    def summary(self) -> str:
+        return self._summary_locked() if self._samples else "token calibration: no samples"
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +356,7 @@ class ScoringClient:
         deployment: str,
         limiter: TpmRpmLimiter,
         sem: asyncio.Semaphore,
+        calibration: "TokenCalibration",
         max_retries: int,
         request_timeout: float,
         max_chars_per_field: int,
@@ -307,6 +366,7 @@ class ScoringClient:
         self.deployment = deployment
         self.limiter = limiter
         self.sem = sem
+        self.calibration = calibration
         self.max_retries = max_retries
         self.request_timeout = request_timeout
         self.max_chars_per_field = max_chars_per_field
@@ -319,8 +379,10 @@ class ScoringClient:
         target_lang: str,
     ) -> Tuple[List[Optional[float]], List[Optional[Dict[str, int]]]]:
         prompt = build_prompt(pairs, source_lang, target_lang, self.max_chars_per_field)
-        out_tokens = estimate_output_tokens(len(pairs))
-        est_tokens = estimate_input_tokens(prompt) + out_tokens
+        raw_est = estimate_input_tokens(prompt) + estimate_output_tokens(len(pairs))
+        # Calibrated estimate used both for the limiter reservation and for
+        # the post-call delta correction.
+        est_tokens = max(1, int(raw_est * self.calibration.factor()))
 
         last_err: Optional[Exception] = None
         async with self.sem:
@@ -335,12 +397,20 @@ class ScoringClient:
                         timeout=self.request_timeout,
                     )
                     content = resp.choices[0].message.content
-                    # Reconcile token usage with the limiter.
+                    # Reconcile the limiter and feed the calibrator with the
+                    # *actual* token counts returned by the API.
                     try:
                         usage = resp.usage
                         if usage is not None:
-                            actual = (usage.prompt_tokens or 0) + (usage.completion_tokens or 0)
+                            prompt_t = int(usage.prompt_tokens or 0)
+                            compl_t = int(usage.completion_tokens or 0)
+                            actual = int(usage.total_tokens or (prompt_t + compl_t))
                             await self.limiter.add_actual(actual - est_tokens)
+                            msg = await self.calibration.update(
+                                actual, prompt_t, compl_t, raw_est
+                            )
+                            if msg:
+                                logger.info(msg)
                     except Exception:
                         pass
                     return parse_response(content, len(pairs))
@@ -373,11 +443,14 @@ async def score_shard(
     keep_dims: bool,
     compression: str,
     max_rows: Optional[int] = None,
+    progress_prefix: str = "",
+    progress_every_rows: int = 500,
+    progress_every_sec: float = 15.0,
 ) -> Tuple[int, int, float]:
     """Score one parquet shard end-to-end. Returns (n_rows, n_failed, mean_score).
 
     If `max_rows` is set, only the first `max_rows` rows of the shard are
-    read, scored, and written (used by the --max_rows_per_pair test option)."""
+    read, scored, and written (used by the --max_rows option)."""
     table = pq.read_table(in_path)
     if max_rows is not None and table.num_rows > max_rows:
         table = table.slice(0, max_rows)
@@ -398,6 +471,37 @@ async def score_shard(
     overalls: List[Optional[float]] = [None] * n
     dims_list: List[Optional[Dict[str, int]]] = [None] * n
 
+    # Shared progress counters between concurrent batches.
+    progress = {
+        "rows_done": 0,
+        "rows_failed": 0,
+        "next_row_log": progress_every_rows,
+        "next_time_log": time.monotonic() + progress_every_sec,
+        "t0": time.monotonic(),
+    }
+
+    def _maybe_log_progress(force: bool = False) -> None:
+        now = time.monotonic()
+        rows_done = progress["rows_done"]
+        if (
+            force
+            or rows_done >= progress["next_row_log"]
+            or now >= progress["next_time_log"]
+        ):
+            elapsed = max(0.001, now - progress["t0"])
+            rate = rows_done / elapsed
+            eta = (n - rows_done) / rate if rate > 0 else float("inf")
+            pct = 100.0 * rows_done / n if n else 100.0
+            logger.info(
+                f"{progress_prefix}  progress: {rows_done:,}/{n:,} "
+                f"({pct:5.1f}%) failed={progress['rows_failed']:,} "
+                f"{rate:.1f} rows/s ETA={eta:5.0f}s"
+            )
+            # Schedule the next thresholds (step past the count we just logged).
+            while progress["next_row_log"] <= rows_done:
+                progress["next_row_log"] += progress_every_rows
+            progress["next_time_log"] = now + progress_every_sec
+
     async def run_one(start: int, end: int):
         idxs = list(range(start, end))
         pairs = [(sources[i] or "", targets[i] or "") for i in idxs]
@@ -405,12 +509,17 @@ async def score_shard(
         for k, i in enumerate(idxs):
             overalls[i] = ov[k]
             dims_list[i] = dm[k]
+        # Update shared progress (single-threaded event loop, no lock needed).
+        progress["rows_done"] += len(idxs)
+        progress["rows_failed"] += sum(1 for v in ov if v is None)
+        _maybe_log_progress()
 
     tasks = [
         run_one(start, min(start + batch_size, n))
         for start in range(0, n, batch_size)
     ]
     await asyncio.gather(*tasks)
+    _maybe_log_progress(force=True)
 
     score_arr = pa.array(overalls, type=pa.float64())
     new_table = table.append_column(SCORE_COL, score_arr)
@@ -504,11 +613,16 @@ async def amain(args: argparse.Namespace) -> None:
 
     limiter = TpmRpmLimiter(tpm=args.tpm_limit, rpm=args.rpm_limit)
     sem = asyncio.Semaphore(args.concurrency)
+    calibration = TokenCalibration(
+        min_samples=args.calibration_warmup,
+        log_every=args.calibration_log_every,
+    )
     scorer = ScoringClient(
         client=client,
         deployment=args.deployment,
         limiter=limiter,
         sem=sem,
+        calibration=calibration,
         max_retries=args.max_retries,
         request_timeout=args.request_timeout,
         max_chars_per_field=args.max_chars_per_field,
@@ -582,16 +696,20 @@ async def amain(args: argparse.Namespace) -> None:
         n_shards_out = 0
 
         try:
-            for shard in shards:
+            for j, shard in enumerate(shards, 1):
                 if rows_budget is not None and rows_budget <= 0:
                     logger.info("  reached --max_rows budget, stopping.")
                     break
                 out_path = out_dir / shard.name
                 if args.skip_existing and out_path.exists():
-                    logger.info(f"  {shard.name}: output exists, skip shard.")
+                    logger.info(f"  [{j}/{len(shards)}] {shard.name}: output exists, skip shard.")
                     n_shards_out += 1
                     continue
                 tt0 = time.monotonic()
+                shard_prefix = (
+                    f"[{i}/{len(assigned)}] {lang_pair} [{j}/{len(shards)}] {shard.name}"
+                )
+                logger.info(f"{shard_prefix}: scoring...")
                 n_rows, n_fail, mean = await score_shard(
                     in_path=shard,
                     out_path=out_path,
@@ -602,6 +720,9 @@ async def amain(args: argparse.Namespace) -> None:
                     keep_dims=args.keep_dims,
                     compression=args.compression,
                     max_rows=rows_budget,
+                    progress_prefix=shard_prefix,
+                    progress_every_rows=args.progress_every_rows,
+                    progress_every_sec=args.progress_every_sec,
                 )
                 if rows_budget is not None:
                     rows_budget -= n_rows
@@ -612,7 +733,7 @@ async def amain(args: argparse.Namespace) -> None:
                     score_n += n_rows - n_fail
                 n_shards_out += 1
                 logger.info(
-                    f"  {shard.name}: rows={n_rows:,} failed={n_fail:,} "
+                    f"{shard_prefix}: done rows={n_rows:,} failed={n_fail:,} "
                     f"mean={mean:.2f} ({time.monotonic() - tt0:.1f}s)"
                 )
         except Exception as e:
@@ -644,6 +765,7 @@ async def amain(args: argparse.Namespace) -> None:
             f"failed={rows_failed:,} mean={mean_score:.2f} ({elapsed:.1f}s)"
         )
 
+    logger.info(calibration.summary())
     await client.close()
 
 
@@ -691,6 +813,18 @@ def main() -> None:
                    help="Test mode: if >0, score at most this many rows TOTAL across all "
                         "language pairs (this task). Output parquet is truncated to the "
                         "rows actually scored. 0 = no limit.")
+
+    p.add_argument("--calibration_warmup", type=int, default=5,
+                   help="Number of API responses to observe before the token-cost "
+                        "self-calibration kicks in. During warm-up we trust the raw estimate.")
+    p.add_argument("--calibration_log_every", type=int, default=50,
+                   help="Log a token-calibration summary every N successful requests "
+                        "(0 disables the periodic log; a final summary is always printed).")
+
+    p.add_argument("--progress_every_rows", type=int, default=5000,
+                   help="Within a shard, print a progress line every N scored rows.")
+    p.add_argument("--progress_every_sec", type=float, default=15.0,
+                   help="Within a shard, also print a progress line at least every N seconds.")
 
     args = p.parse_args()
     asyncio.run(amain(args))

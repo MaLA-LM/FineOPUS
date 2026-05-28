@@ -27,8 +27,8 @@
 set -euo pipefail
 
 N_TASKS=4
-DATASET_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage3"
-OUT_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage3-LLMScored"
+DATASET_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage4"
+OUT_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage4-LLMScored"
 STATS_OUTPUT="./stats/llm_judge_stats.csv"
 BATCH_SIZE=10
 CONCURRENCY=32
@@ -66,7 +66,7 @@ RPM_LIMIT=$(( RPM_TOTAL / N_TASKS ))
 [[ $TPM_LIMIT -lt 1 ]] && TPM_LIMIT=1
 [[ $RPM_LIMIT -lt 1 ]] && RPM_LIMIT=1
 
-LOG_DIR="../../logs/llm_judge"
+LOG_DIR="../logs/fineopus-llm-judge"
 mkdir -p "$LOG_DIR" "./stats"
 mkdir -p "$OUT_DIR"
 
