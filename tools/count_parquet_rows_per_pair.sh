@@ -2,11 +2,11 @@
 #SBATCH --job-name=fineopus-count-parquet-rows-per-pair
 #SBATCH --output=../logs/fineopus-count-parquet-rows-per-pair/%x_%j.out
 #SBATCH --error=../logs/fineopus-count-parquet-rows-per-pair/%x_%j.err
-#SBATCH --partition=small
+#SBATCH --partition=debug
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
-#SBATCH --time=0-02:00:00
+#SBATCH --time=0-00:30:00
 #SBATCH --mem=32G
 #SBATCH --account=project_462000964
 
@@ -16,11 +16,11 @@ echo "Job started at: $(date)"
 module purge
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.5
-source ../.venv/bin/activate
+source ../torch25_env/bin/activate
 
 
 ROOT_DIR=""
-OUTPUT_FILE=""
+OUTPUT_FILE="./xxx.xlsx"
 
 WORKERS=${SLURM_CPUS_PER_TASK:-$(nproc)}
 

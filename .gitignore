@@ -204,6 +204,7 @@ cython_debug/
 # Misc
 /logs/*
 *.jsonl
+/tools/parquet_rows_per_pair_stats
 /01_language_reID/fineopus-original-filelists/*
 /01_language_reID/filelists/*
 /01_language_reID/stats/*
