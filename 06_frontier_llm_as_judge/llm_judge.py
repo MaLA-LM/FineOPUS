@@ -315,6 +315,17 @@ class TokenCalibration:
 # Per-batch scorer
 # ---------------------------------------------------------------------------
 
+def _is_content_filter(err: Exception) -> bool:
+    """True if the error is a deterministic Azure content-filter / Responsible
+    AI block (HTTP 400). These never succeed on retry with the same input."""
+    s = str(err).lower()
+    return (
+        "content_filter" in s
+        or "responsibleai" in s
+        or "content management policy" in s
+    )
+
+
 class ScoringClient:
     def __init__(
         self,
@@ -338,61 +349,94 @@ class ScoringClient:
         self.max_chars_per_field = max_chars_per_field
         self.max_completion_tokens = max_completion_tokens
 
+    async def _attempt(
+        self,
+        pairs: List[Tuple[str, str]],
+        source_lang: str,
+        target_lang: str,
+    ) -> List[Optional[float]]:
+        """One API call + parse for a list of pairs. Reserves the token bucket,
+        reconciles it with the real usage, and feeds the calibrator. Raises on
+        any API error (caller decides whether to retry)."""
+        prompt = build_prompt(pairs, source_lang, target_lang, self.max_chars_per_field)
+        raw_est = estimate_input_tokens(prompt) + estimate_output_tokens(len(pairs))
+        est_tokens = max(1, int(raw_est * self.calibration.factor()))
+
+        await self.limiter.acquire(est_tokens)
+        resp = await self.client.chat.completions.create(
+            model=self.deployment,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=self.max_completion_tokens,
+            timeout=self.request_timeout,
+        )
+        content = resp.choices[0].message.content
+        # Reconcile the limiter and feed the calibrator with the *actual* token
+        # counts returned by the API.
+        try:
+            usage = resp.usage
+            if usage is not None:
+                prompt_t = int(usage.prompt_tokens or 0)
+                compl_t = int(usage.completion_tokens or 0)
+                actual = int(usage.total_tokens or (prompt_t + compl_t))
+                await self.limiter.add_actual(actual - est_tokens)
+                msg = await self.calibration.update(actual, prompt_t, compl_t, raw_est)
+                if msg:
+                    logger.info(msg)
+        except Exception:
+            pass
+        return parse_response(content, len(pairs))
+
+    async def _score_with_retry(
+        self,
+        pairs: List[Tuple[str, str]],
+        source_lang: str,
+        target_lang: str,
+    ) -> List[Optional[float]]:
+        """Retry transient errors with backoff. A content-filter block is
+        deterministic, so we do NOT retry it: instead, if the batch has more
+        than one row, we re-score each row individually so a single offending
+        segment doesn't sink the whole batch. A blocked single row fails."""
+        last_err: Optional[Exception] = None
+        for attempt in range(self.max_retries):
+            try:
+                return await self._attempt(pairs, source_lang, target_lang)
+            except Exception as e:
+                last_err = e
+                if _is_content_filter(e):
+                    if len(pairs) > 1:
+                        logger.warning(
+                            f"  content filter blocked a batch of {len(pairs)}; "
+                            f"re-scoring rows individually"
+                        )
+                        results: List[Optional[float]] = []
+                        for p in pairs:
+                            results.extend(
+                                await self._score_with_retry([p], source_lang, target_lang)
+                            )
+                        return results
+                    logger.warning("  content filter blocked single row; marking as failed")
+                    return [None]
+                msg = str(e)
+                # Exponential backoff with jitter; longer for 429.
+                base = 5.0 if "429" in msg or "rate" in msg.lower() else 2.0
+                wait = min(60.0, base * (2 ** attempt)) + random.uniform(0, 0.5)
+                logger.warning(
+                    f"  batch error (attempt {attempt + 1}/{self.max_retries}): "
+                    f"{type(e).__name__}: {msg[:160]} -- retry in {wait:.1f}s"
+                )
+                await asyncio.sleep(wait)
+        logger.error(f"  batch failed after {self.max_retries} retries: {last_err}")
+        return [None] * len(pairs)
+
     async def score_batch(
         self,
         pairs: List[Tuple[str, str]],
         source_lang: str,
         target_lang: str,
     ) -> List[Optional[float]]:
-        prompt = build_prompt(pairs, source_lang, target_lang, self.max_chars_per_field)
-        raw_est = estimate_input_tokens(prompt) + estimate_output_tokens(len(pairs))
-        # Calibrated estimate used both for the limiter reservation and for
-        # the post-call delta correction.
-        est_tokens = max(1, int(raw_est * self.calibration.factor()))
-
-        last_err: Optional[Exception] = None
         async with self.sem:
-            for attempt in range(self.max_retries):
-                await self.limiter.acquire(est_tokens)
-                try:
-                    resp = await self.client.chat.completions.create(
-                        model=self.deployment,
-                        messages=[{"role": "user", "content": prompt}],
-                        temperature=0.0,
-                        max_tokens=self.max_completion_tokens,
-                        timeout=self.request_timeout,
-                    )
-                    content = resp.choices[0].message.content
-                    # Reconcile the limiter and feed the calibrator with the
-                    # *actual* token counts returned by the API.
-                    try:
-                        usage = resp.usage
-                        if usage is not None:
-                            prompt_t = int(usage.prompt_tokens or 0)
-                            compl_t = int(usage.completion_tokens or 0)
-                            actual = int(usage.total_tokens or (prompt_t + compl_t))
-                            await self.limiter.add_actual(actual - est_tokens)
-                            msg = await self.calibration.update(
-                                actual, prompt_t, compl_t, raw_est
-                            )
-                            if msg:
-                                logger.info(msg)
-                    except Exception:
-                        pass
-                    return parse_response(content, len(pairs))
-                except Exception as e:
-                    last_err = e
-                    msg = str(e)
-                    # Exponential backoff with jitter; longer for 429.
-                    base = 5.0 if "429" in msg or "rate" in msg.lower() else 2.0
-                    wait = min(60.0, base * (2 ** attempt)) + random.uniform(0, 0.5)
-                    logger.warning(
-                        f"  batch error (attempt {attempt + 1}/{self.max_retries}): "
-                        f"{type(e).__name__}: {msg[:160]} -- retry in {wait:.1f}s"
-                    )
-                    await asyncio.sleep(wait)
-        logger.error(f"  batch failed after {self.max_retries} retries: {last_err}")
-        return [None] * len(pairs)
+            return await self._score_with_retry(pairs, source_lang, target_lang)
 
 
 # ---------------------------------------------------------------------------

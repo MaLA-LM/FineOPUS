@@ -99,6 +99,11 @@ Each request scores `batch_size` segments at once. The prompt:
 If a batch fails after `--max_retries` attempts, the corresponding rows get
 `null` for `llm_judge_score` and the shard continues.
 
+Content-filter blocks (Azure "Responsible AI", HTTP 400 with
+`finish_reason=content_filter`) are deterministic, so they are **not** retried.
+Instead, when a multi-row batch is blocked, each row is re-scored individually
+so only the truly offending segment(s) fail and the rest still get a score.
+
 ## Files
 
 * `llm_judge.py` — main async scorer
