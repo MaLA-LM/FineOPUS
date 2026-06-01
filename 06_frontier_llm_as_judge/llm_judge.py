@@ -7,8 +7,7 @@ Reads every `{dataset_dir}/{src}-{tgt}/*.parquet`, batches rows of
 (source_text, target_text), asks an Azure-hosted LLM (DeepSeek-V4-Flash by
 default) for reference-free MT quality scores, parses the JSON response, and
 writes new parquet shards with an extra `llm_judge_score` column
-(`overall_0to100` normalized to a 0.0-1.0 float) and, optionally, the seven
-per-dimension 0-10 integer scores.
+(`overall_0to100` normalized to a 0.0-1.0 float).
 
 Rate limiting respects both a tokens-per-minute and a requests-per-minute
 budget via an asyncio token bucket. Designed to be run as a single process
@@ -63,18 +62,7 @@ os.environ.setdefault("NUMEXPR_MAX_THREADS", "16")
 # Constants / output schema
 # ---------------------------------------------------------------------------
 
-DIM_KEYS = [
-    "accuracy_completeness",
-    "terminology_consistency",
-    "fluency_coherence",
-    "style_tone_audience",
-    "locale_formatting",
-    "technical_integrity",
-    "cultural_appropriateness",
-]
-
 SCORE_COL = "llm_judge_score"
-DIM_COL_PREFIX = "llm_judge_"
 
 STATS_COLUMNS = [
     "lang_pair", "source_lang", "target_lang",
@@ -161,16 +149,15 @@ Target language: {target_lang}
 
 Task: Reference-free MT quality scoring for EVERY item above.
 
-Score each dimension as an integer 0..10 (higher = better), then overall 0..100.
-
-Dimensions:
-1) accuracy_completeness (meaning preserved, no additions/omissions)
-2) terminology_consistency
-3) fluency_coherence
-4) style_tone_audience
-5) locale_formatting (numbers, punctuation, dates, tags if any)
-6) technical_integrity (entities/units/code/markup preserved)
-7) cultural_appropriateness
+Give each item a single overall quality score as an integer 0..100 (higher = better).
+When deciding the score, consider all of these aspects together:
+- accuracy & completeness (meaning preserved, no additions/omissions)
+- terminology consistency
+- fluency & coherence
+- style, tone & audience fit
+- locale formatting (numbers, punctuation, dates, tags if any)
+- technical integrity (entities/units/code/markup preserved)
+- cultural appropriateness
 
 Output ONLY valid JSON with exactly this shape (no extra keys, no text outside JSON, all values integers):
 
@@ -178,15 +165,6 @@ Output ONLY valid JSON with exactly this shape (no extra keys, no text outside J
   "results": [
     {{
       "id": <int>,
-      "dims_0to10": {{
-        "accuracy_completeness": 0-10,
-        "terminology_consistency": 0-10,
-        "fluency_coherence": 0-10,
-        "style_tone_audience": 0-10,
-        "locale_formatting": 0-10,
-        "technical_integrity": 0-10,
-        "cultural_appropriateness": 0-10
-      }},
       "overall_0to100": 0-100
     }}
   ]
@@ -226,10 +204,8 @@ def build_prompt(
 _JSON_OBJ_RE = re.compile(r"\{.*\}", re.DOTALL)
 
 
-def parse_response(
-    content: str, expected_n: int
-) -> Tuple[List[Optional[float]], List[Optional[Dict[str, int]]]]:
-    """Parse the JSON response. Returns (overalls, dim_dicts) lists of length
+def parse_response(content: str, expected_n: int) -> List[Optional[float]]:
+    """Parse the JSON response. Returns an `overalls` list of length
     expected_n, with None entries where parsing failed for that id."""
     if content is None:
         raise ValueError("empty response content")
@@ -261,7 +237,6 @@ def parse_response(
         by_id[rid] = r
 
     overalls: List[Optional[float]] = [None] * expected_n
-    dim_dicts: List[Optional[Dict[str, int]]] = [None] * expected_n
     for i in range(expected_n):
         r = by_id.get(i)
         if r is None:
@@ -270,16 +245,7 @@ def parse_response(
         if isinstance(v, (int, float)):
             # Normalize the model's 0..100 score to 0..1 and clip just in case.
             overalls[i] = max(0.0, min(1.0, float(v) / 100.0))
-        dims = r.get("dims_0to10")
-        if isinstance(dims, dict):
-            parsed_dims: Dict[str, int] = {}
-            for k in DIM_KEYS:
-                vv = dims.get(k)
-                if isinstance(vv, (int, float)):
-                    parsed_dims[k] = int(vv)
-            if parsed_dims:
-                dim_dicts[i] = parsed_dims
-    return overalls, dim_dicts
+    return overalls
 
 
 # ---------------------------------------------------------------------------
@@ -292,8 +258,8 @@ def estimate_input_tokens(text: str) -> int:
 
 
 def estimate_output_tokens(batch_size: int) -> int:
-    # Each result is ~80 tokens of JSON (id + 7 dim ints + overall).
-    return 60 + 80 * batch_size
+    # Each result is ~20 tokens of JSON (id + overall).
+    return 60 + 20 * batch_size
 
 
 class TokenCalibration:
@@ -377,7 +343,7 @@ class ScoringClient:
         pairs: List[Tuple[str, str]],
         source_lang: str,
         target_lang: str,
-    ) -> Tuple[List[Optional[float]], List[Optional[Dict[str, int]]]]:
+    ) -> List[Optional[float]]:
         prompt = build_prompt(pairs, source_lang, target_lang, self.max_chars_per_field)
         raw_est = estimate_input_tokens(prompt) + estimate_output_tokens(len(pairs))
         # Calibrated estimate used both for the limiter reservation and for
@@ -426,7 +392,7 @@ class ScoringClient:
                     )
                     await asyncio.sleep(wait)
         logger.error(f"  batch failed after {self.max_retries} retries: {last_err}")
-        return [None] * len(pairs), [None] * len(pairs)
+        return [None] * len(pairs)
 
 
 # ---------------------------------------------------------------------------
@@ -440,7 +406,6 @@ async def score_shard(
     tgt_lang: str,
     scorer: ScoringClient,
     batch_size: int,
-    keep_dims: bool,
     compression: str,
     max_rows: Optional[int] = None,
     progress_prefix: str = "",
@@ -469,7 +434,6 @@ async def score_shard(
     targets = table["target_text"].to_pylist()
 
     overalls: List[Optional[float]] = [None] * n
-    dims_list: List[Optional[Dict[str, int]]] = [None] * n
 
     # Shared progress counters between concurrent batches.
     progress = {
@@ -505,10 +469,9 @@ async def score_shard(
     async def run_one(start: int, end: int):
         idxs = list(range(start, end))
         pairs = [(sources[i] or "", targets[i] or "") for i in idxs]
-        ov, dm = await scorer.score_batch(pairs, src_lang, tgt_lang)
+        ov = await scorer.score_batch(pairs, src_lang, tgt_lang)
         for k, i in enumerate(idxs):
             overalls[i] = ov[k]
-            dims_list[i] = dm[k]
         # Update shared progress (single-threaded event loop, no lock needed).
         progress["rows_done"] += len(idxs)
         progress["rows_failed"] += sum(1 for v in ov if v is None)
@@ -523,12 +486,6 @@ async def score_shard(
 
     score_arr = pa.array(overalls, type=pa.float64())
     new_table = table.append_column(SCORE_COL, score_arr)
-    if keep_dims:
-        for k in DIM_KEYS:
-            col = [d.get(k) if isinstance(d, dict) else None for d in dims_list]
-            new_table = new_table.append_column(
-                DIM_COL_PREFIX + k, pa.array(col, type=pa.int32())
-            )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     pq.write_table(new_table, out_path, compression=compression)
@@ -564,6 +521,57 @@ def enumerate_pairs(dataset_dir: Path, include_same_lang: bool) -> List[Tuple[st
 
 def list_shards(pair_dir: Path) -> List[Path]:
     return sorted(p for p in pair_dir.glob("*.parquet") if p.is_file())
+
+
+# ---------------------------------------------------------------------------
+# Resource-class filtering (via the precomputed pair->combo JSON)
+# ---------------------------------------------------------------------------
+
+def parse_class_combos(spec: str) -> set:
+    """Parse a comma-separated list of directional combos like
+    "0-0,0-1,5-5" into a set of "{src_class}-{tgt_class}" strings."""
+    combos = set()
+    for tok in spec.split(","):
+        tok = tok.strip()
+        if tok:
+            combos.add(tok)
+    return combos
+
+
+def pairs_from_combos_json(
+    json_path: Path,
+    combos: set,
+    dataset_dir: Path,
+    include_same_lang: bool,
+) -> Tuple[List[Tuple[str, str]], List[str], int]:
+    """Read the precomputed `{ "src_class-tgt_class": ["src-tgt", ...] }` JSON
+    and return the (src, tgt) pairs belonging to the requested `combos`.
+
+    Returns (pairs, missing_combos, skipped) where `missing_combos` lists
+    requested combo keys absent from the JSON and `skipped` counts listed pairs
+    whose directory is missing or has no parquet shards on disk."""
+    with open(json_path) as fp:
+        data = json.load(fp)
+
+    missing_combos = sorted(c for c in combos if c not in data)
+    names: List[str] = []
+    for c in combos:
+        names.extend(data.get(c, []))
+
+    pairs: List[Tuple[str, str]] = []
+    skipped = 0
+    for name in sorted(set(names)):
+        if "-" not in name:
+            continue
+        src, tgt = name.split("-", 1)
+        if not include_same_lang and src == tgt:
+            continue
+        d = dataset_dir / name
+        if not d.is_dir() or not any(d.glob("*.parquet")):
+            skipped += 1
+            continue
+        pairs.append((src, tgt))
+    return pairs, missing_combos, skipped
 
 
 # ---------------------------------------------------------------------------
@@ -637,7 +645,19 @@ async def amain(args: argparse.Namespace) -> None:
 
     out_root.mkdir(parents=True, exist_ok=True)
 
-    pairs = enumerate_pairs(dataset_dir, args.include_same_lang)
+    # Resource-class filtering: when --class_combos is given we read the exact
+    # pair list straight from the precomputed pair->combo JSON (no full-dataset
+    # enumeration). Otherwise we enumerate every pair on disk.
+    combos = parse_class_combos(args.class_combos) if args.class_combos else set()
+    missing_combos: List[str] = []
+    n_skipped_missing = 0
+    if combos:
+        pairs, missing_combos, n_skipped_missing = pairs_from_combos_json(
+            Path(args.pair_combos_json), combos, dataset_dir, args.include_same_lang
+        )
+    else:
+        pairs = enumerate_pairs(dataset_dir, args.include_same_lang)
+
     assigned = [p for i, p in enumerate(pairs) if i % args.n_chunks == args.chunk_id]
 
     logger.info("=" * 72)
@@ -650,10 +670,20 @@ async def amain(args: argparse.Namespace) -> None:
     logger.info(f"tpm_limit         : {args.tpm_limit:,}")
     logger.info(f"rpm_limit         : {args.rpm_limit:,}")
     logger.info(f"chunk_id          : {args.chunk_id} / {args.n_chunks}")
-    logger.info(f"keep_dims         : {args.keep_dims}")
     logger.info(f"skip_existing     : {args.skip_existing}")
     logger.info(f"max_rows          : {args.max_rows or 'all'}")
-    logger.info(f"total pairs       : {len(pairs):,}")
+    if combos:
+        logger.info(f"pair_combos_json  : {args.pair_combos_json}")
+        logger.info(f"class_combos      : {','.join(sorted(combos))}")
+        logger.info(
+            f"total pairs       : {len(pairs):,} (from combos JSON; "
+            f"{n_skipped_missing:,} listed but missing on disk)"
+        )
+        if missing_combos:
+            logger.warning(f"combos not in JSON: {','.join(missing_combos)}")
+    else:
+        logger.info(f"class_combos      : (none; all pairs)")
+        logger.info(f"total pairs       : {len(pairs):,}")
     logger.info(f"assigned pairs    : {len(assigned):,}")
     logger.info(f"stats_output      : {stats_output}")
     logger.info("=" * 72)
@@ -717,7 +747,6 @@ async def amain(args: argparse.Namespace) -> None:
                     tgt_lang=tgt,
                     scorer=scorer,
                     batch_size=args.batch_size,
-                    keep_dims=args.keep_dims,
                     compression=args.compression,
                     max_rows=rows_budget,
                     progress_prefix=shard_prefix,
@@ -799,12 +828,19 @@ def main() -> None:
     p.add_argument("--request_timeout", type=float, default=120.0)
     p.add_argument("--max_retries", type=int, default=5)
 
-    p.add_argument("--keep_dims", action="store_true",
-                   help="Also write the seven per-dimension 0-10 scores as extra columns.")
     p.add_argument("--compression", default="zstd")
     p.add_argument("--include_same_lang", action="store_true")
     p.add_argument("--skip_existing", action="store_true",
                    help="Skip pairs with a _DONE sentinel or already recorded in stats.")
+
+    p.add_argument("--pair_combos_json",
+                   default=str(Path(__file__).resolve().parent / "fineopus_pair_class_combinations.json"),
+                   help="Precomputed JSON mapping 'src_class-tgt_class' -> ['src-tgt', ...], "
+                        "used by --class_combos to select exactly which pairs to score.")
+    p.add_argument("--class_combos", default="",
+                   help="Comma-separated directional resource-class combos to score, "
+                        "e.g. '0-0,0-1,5-5' (src_class-tgt_class). Empty = all pairs. "
+                        "The pair list is read directly from --pair_combos_json.")
 
     p.add_argument("--chunk_id", type=int, default=0)
     p.add_argument("--n_chunks", type=int, default=1)

@@ -12,8 +12,9 @@
 #   RPM_LIMIT            requests-per-minute budget (split across tasks)
 #   DEPLOYMENT           Azure deployment name
 #   ENDPOINT             Azure base URL ending in /openai/v1/
-#   KEEP_DIMS            "1" to also save per-dimension columns
 #   MAX_ROWS             test mode: cap total scored rows per task (0 = no cap)
+#   CLASS_COMBOS         optional resource-class combos to score (e.g. "0-0,0-1")
+#   PAIR_COMBOS_JSON     optional path to the precomputed pair->combo JSON
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -29,15 +30,19 @@ echo "TPM limit       : ${TPM_LIMIT}"
 echo "RPM limit       : ${RPM_LIMIT}"
 echo "Deployment      : ${DEPLOYMENT}"
 echo "Endpoint        : ${ENDPOINT}"
-echo "Keep dims       : ${KEEP_DIMS:-0}"
 echo "Max rows / task : ${MAX_ROWS:-0}"
+echo "Class combos    : ${CLASS_COMBOS:-<all>}"
+echo "Pair combos json: ${PAIR_COMBOS_JSON:-<default>}"
 
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.5
 
 EXTRA_ARGS=()
-if [[ "${KEEP_DIMS:-0}" == "1" ]]; then
-    EXTRA_ARGS+=(--keep_dims)
+if [[ -n "${CLASS_COMBOS:-}" ]]; then
+    EXTRA_ARGS+=(--class_combos "${CLASS_COMBOS}")
+fi
+if [[ -n "${PAIR_COMBOS_JSON:-}" ]]; then
+    EXTRA_ARGS+=(--pair_combos_json "${PAIR_COMBOS_JSON}")
 fi
 
 python3 ./llm_judge.py \

@@ -27,16 +27,6 @@ one column:
   score divided by 100 (and clipped). `null` if the LLM call (or JSON
   parsing) failed for that row after retries.
 
-If `--keep_dims` is passed, seven extra `int32` columns are added:
-
-* `llm_judge_accuracy_completeness`
-* `llm_judge_terminology_consistency`
-* `llm_judge_fluency_coherence`
-* `llm_judge_style_tone_audience`
-* `llm_judge_locale_formatting`
-* `llm_judge_technical_integrity`
-* `llm_judge_cultural_appropriateness`
-
 A `_DONE` sentinel is written into each per-pair output directory, and a
 per-task stats CSV records `rows_total / rows_scored / rows_failed /
 mean_score / elapsed_sec` for every processed language pair.
@@ -86,7 +76,7 @@ Logs land in `../../logs/llm_judge/`.
 
 A sliding-60s token bucket tracks both tokens (prompt + completion) and
 request counts. Token counts are first added by an estimate
-(`len(prompt)/3 + 60 + 80 * batch_size`); after each response we reconcile
+(`len(prompt)/3 + 60 + 20 * batch_size`); after each response we reconcile
 the bucket with the real `usage.prompt_tokens + usage.completion_tokens`
 value reported by the server.
 
@@ -101,7 +91,8 @@ Each request scores `batch_size` segments at once. The prompt:
 
 * States source/target language (passes through the FLORES-200 codes from
   the directory name, e.g. `abk_Cyrl`, `eng_Latn`).
-* Asks for seven 0–10 dimension scores plus an `overall_0to100`.
+* Asks for a single `overall_0to100` score per segment, while listing the
+  quality aspects the model should weigh together.
 * Demands a strict JSON shape; we strip code fences and tolerate stray
   prose before/after the JSON object.
 

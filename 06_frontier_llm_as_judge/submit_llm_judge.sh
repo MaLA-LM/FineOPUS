@@ -20,14 +20,17 @@
 #   --rpm-total N          Global requests-per-minute budget (default: 900)
 #   --deployment NAME      Azure deployment / model (default: DeepSeek-V4-Flash)
 #   --endpoint URL         Azure base URL (default: fineopus-step6 v1 endpoint)
-#   --keep-dims            Also write the 7 per-dimension columns
 #   --max-rows N           Test mode: cap total scored rows PER TASK (0 = no cap)
+#   --class-combos LIST    Only score these directional resource-class combos,
+#                          e.g. "0-0,0-1,5-5" (src_class-tgt_class). Empty = all.
+#   --pair-combos FILE     Precomputed pair->combo JSON
+#                          (default: fineopus_pair_class_combinations.json)
 #   --dry-run              Print the sbatch command without submitting
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
 N_TASKS=4
-DATASET_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage4"
+DATASET_DIR="/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage4"
 OUT_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage4-LLMScored"
 STATS_OUTPUT="./stats/llm_judge_stats.csv"
 BATCH_SIZE=10
@@ -36,8 +39,9 @@ TPM_TOTAL=900000
 RPM_TOTAL=900
 DEPLOYMENT="DeepSeek-V4-Flash"
 ENDPOINT="https://fineopus-step6.services.ai.azure.com/openai/v1/"
-KEEP_DIMS=0
 MAX_ROWS=0
+CLASS_COMBOS=""
+PAIR_COMBOS_JSON="./fineopus_pair_class_combinations.json"
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
@@ -52,8 +56,9 @@ while [[ $# -gt 0 ]]; do
         --rpm-total)     RPM_TOTAL="$2"; shift 2 ;;
         --deployment)    DEPLOYMENT="$2"; shift 2 ;;
         --endpoint)      ENDPOINT="$2"; shift 2 ;;
-        --keep-dims)     KEEP_DIMS=1; shift ;;
         --max-rows)      MAX_ROWS="$2"; shift 2 ;;
+        --class-combos)  CLASS_COMBOS="$2"; shift 2 ;;
+        --pair-combos)   PAIR_COMBOS_JSON="$2"; shift 2 ;;
         --dry-run)       DRY_RUN=1; shift ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
@@ -83,8 +88,9 @@ echo "  TPM (total/task): $TPM_TOTAL / $TPM_LIMIT"
 echo "  RPM (total/task): $RPM_TOTAL / $RPM_LIMIT"
 echo "  Deployment      : $DEPLOYMENT"
 echo "  Endpoint        : $ENDPOINT"
-echo "  Keep dims       : $KEEP_DIMS"
 echo "  Max rows / task : $MAX_ROWS"
+echo "  Class combos    : ${CLASS_COMBOS:-<all>}"
+echo "  Pair combos json: $PAIR_COMBOS_JSON"
 echo "  Log dir         : $LOG_DIR"
 echo "============================================================"
 
@@ -100,9 +106,9 @@ CMD="sbatch \
     --ntasks-per-node=1 \
     --cpus-per-task=4 \
     --mem=32G \
-    --time=1-00:00:00 \
-    --account=project_462001249 \
-    --export=ALL,N_TASKS=${N_TASKS},DATASET_DIR=${DATASET_DIR},OUT_DIR=${OUT_DIR},STATS_OUTPUT=${STATS_OUTPUT},BATCH_SIZE=${BATCH_SIZE},CONCURRENCY=${CONCURRENCY},TPM_LIMIT=${TPM_LIMIT},RPM_LIMIT=${RPM_LIMIT},DEPLOYMENT=${DEPLOYMENT},ENDPOINT=${ENDPOINT},KEEP_DIMS=${KEEP_DIMS},MAX_ROWS=${MAX_ROWS} \
+    --time=3-00:00:00 \
+    --account=project_462001087 \
+    --export=ALL,N_TASKS=${N_TASKS},DATASET_DIR=${DATASET_DIR},OUT_DIR=${OUT_DIR},STATS_OUTPUT=${STATS_OUTPUT},BATCH_SIZE=${BATCH_SIZE},CONCURRENCY=${CONCURRENCY},TPM_LIMIT=${TPM_LIMIT},RPM_LIMIT=${RPM_LIMIT},DEPLOYMENT=${DEPLOYMENT},ENDPOINT=${ENDPOINT},MAX_ROWS=${MAX_ROWS},CLASS_COMBOS=${CLASS_COMBOS},PAIR_COMBOS_JSON=${PAIR_COMBOS_JSON} \
     ./run_llm_judge.sh"
 
 if [[ $DRY_RUN -eq 1 ]]; then
