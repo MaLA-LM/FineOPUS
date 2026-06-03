@@ -15,6 +15,7 @@
 #   MAX_ROWS             test mode: cap total scored rows per task (0 = no cap)
 #   CLASS_COMBOS         optional resource-class combos to score (e.g. "0-0,0-1")
 #   PAIR_COMBOS_JSON     optional path to the precomputed pair->combo JSON
+#   API_KEY_ENV          env var name for the API key (default: AZURE_API_KEY)
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -33,6 +34,7 @@ echo "Endpoint        : ${ENDPOINT}"
 echo "Max rows / task : ${MAX_ROWS:-0}"
 echo "Class combos    : ${CLASS_COMBOS:-<all>}"
 echo "Pair combos json: ${PAIR_COMBOS_JSON:-<default>}"
+echo "API key env     : ${API_KEY_ENV:-AZURE_API_KEY}"
 
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.5
@@ -58,6 +60,7 @@ python3 ./llm_judge.py \
     --n_chunks      "$N_TASKS" \
     --chunk_id      "$SLURM_ARRAY_TASK_ID" \
     --max_rows      "${MAX_ROWS:-0}" \
+    --api_key_env   "${API_KEY_ENV:-AZURE_API_KEY}" \
     --skip_existing \
     "${EXTRA_ARGS[@]}"
 

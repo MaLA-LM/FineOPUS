@@ -649,10 +649,10 @@ def append_stats_row(stats_csv: Path, row: dict) -> None:
 async def amain(args: argparse.Namespace) -> None:
     load_dotenv(dotenv_path=args.env_file)
 
-    api_key = os.environ.get("AZURE_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY")
+    api_key = os.environ.get(args.api_key_env)
     if not api_key:
         raise RuntimeError(
-            f"AZURE_API_KEY not found in environment or {args.env_file}"
+            f"{args.api_key_env} not found in environment or {args.env_file}"
         )
 
     # The new Azure /openai/v1/ endpoint accepts both Bearer and api-key
@@ -853,7 +853,9 @@ def main() -> None:
                    help="Per-pair stats CSV (one row per processed lang pair).")
     p.add_argument("--env_file",
                    default=str(Path(__file__).resolve().parent / ".env"),
-                   help="dotenv file containing AZURE_API_KEY=...")
+                   help="dotenv file containing the API key variable.")
+    p.add_argument("--api_key_env", default="AZURE_API_KEY",
+                   help="Environment variable name for the Azure API key.")
     p.add_argument("--endpoint",
                    default="https://fineopus-step6.services.ai.azure.com/openai/v1/")
     p.add_argument("--deployment", default="DeepSeek-V4-Flash")
