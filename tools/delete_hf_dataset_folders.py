@@ -27,10 +27,30 @@ def has_zyyy(pair: str) -> bool:
     return "Zyyy" in pair
 
 
+def lang_code(part: str) -> str:
+    """Language code from a side like 'eng_Latn' or 'xxx_Arab'."""
+    return part.split("_", 1)[0]
+
+
+def has_xxx(pair: str) -> bool:
+    """True if either side uses the placeholder language code 'xxx'."""
+    parts = pair.split("-")
+    if len(parts) != 2:
+        return False
+    return lang_code(parts[0]) == "xxx" or lang_code(parts[1]) == "xxx"
+
+
+def should_delete(pair: str) -> bool:
+    """True if this language-pair folder should be removed."""
+    if "-" not in pair:
+        return False
+    return is_same_lang(pair) or has_zyyy(pair) or has_xxx(pair)
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Delete top-level language-pair folders from a HF dataset repo "
-        "where src==tgt (same full code) or the script is Zyyy."
+        "where src==tgt (same full code), the script is Zyyy, or the language is xxx."
     )
     ap.add_argument("--repo_id", required=True, help="Target HF dataset repo, e.g. 'MaLA-LM/FineOPUS-Deduplicated'")
     ap.add_argument("--revision", default="main", help="Target branch (default: main)")
@@ -55,13 +75,15 @@ def main():
     logging.info(f"Found {len(top_level)} top-level entries in repo.")
 
     # Decide which folders to delete.
-    to_delete = sorted(
-        d for d in top_level if "-" in d and (is_same_lang(d) or has_zyyy(d))
-    )
+    to_delete = sorted(d for d in top_level if should_delete(d))
     n_same = sum(1 for d in to_delete if is_same_lang(d))
-    n_zyyy = sum(1 for d in to_delete if has_zyyy(d) and not is_same_lang(d))
+    n_zyyy = sum(1 for d in to_delete if has_zyyy(d))
+    n_xxx = sum(1 for d in to_delete if has_xxx(d))
 
-    logging.info(f"{len(to_delete)} folders matched (same-code={n_same}, zyyy={n_zyyy}).")
+    logging.info(
+        f"{len(to_delete)} folders matched "
+        f"(same-code={n_same}, zyyy={n_zyyy}, xxx={n_xxx}; counts may overlap)."
+    )
 
     if args.dry_run:
         for d in to_delete[:60]:
@@ -87,7 +109,7 @@ def main():
                 repo_id=args.repo_id,
                 repo_type="dataset",
                 operations=batch,
-                commit_message=f"Delete same-language and Zyyy-script folders {i+1}/{total_batches}",
+                commit_message=f"Delete same-language, Zyyy-script, and xxx language folders {i+1}/{total_batches}",
                 revision=args.revision,
             )
             logging.info(f"[OK] Batch {i+1}/{total_batches} deleted successfully.")

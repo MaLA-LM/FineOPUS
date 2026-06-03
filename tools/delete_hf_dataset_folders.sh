@@ -19,14 +19,14 @@ module load pytorch/2.7
 
 export HF_XET_HIGH_PERFORMANCE=1
 
-# Target dataset repos to clean up.
+# Target dataset repos to clean up (removes same-lang, Zyyy-script, and xxx language folders).
 REPO_IDS=(
     "MaLA-LM/FineOPUS-ReLID"
-    # "MaLA-LM/FineOPUS-Deduplicated"
-    # "MaLA-LM/FineOPUS-Filtered-Stage1"
-    # "MaLA-LM/FineOPUS-Filtered-Stage2"
-    # "MaLA-LM/FineOPUS-Filtered-Stage3"
-    # "MaLA-LM/FineOPUS-Filtered-Stage4"
+    "MaLA-LM/FineOPUS-Deduplicated"
+    "MaLA-LM/FineOPUS-Filtered-Stage1"
+    "MaLA-LM/FineOPUS-Filtered-Stage2"
+    "MaLA-LM/FineOPUS-Filtered-Stage3"
+    "MaLA-LM/FineOPUS-Filtered-Stage4"
 )
 
 REVISION="main"
