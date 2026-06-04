@@ -231,5 +231,6 @@ cython_debug/
 /05_quality_estimation/thresholds/stats/v5
 /06_frontier_llm_as_judge/.env
 /06_frontier_llm_as_judge/stats
+/06_frontier_llm_as_judge/azure_api_key_registry.sh
 /*/*/hostfiles/*
 models/*

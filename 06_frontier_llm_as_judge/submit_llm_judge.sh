@@ -18,8 +18,10 @@
 #   --concurrency N        Max in-flight requests per task (default: 32)
 #   --tpm-total N          Global tokens-per-minute budget (default: 900000)
 #   --rpm-total N          Global requests-per-minute budget (default: 900)
-#   --deployment NAME      Azure deployment / model (default: DeepSeek-V4-Flash)
-#   --endpoint URL         Azure base URL (default: fineopus-step6 v1 endpoint)
+#   --deployment NAME      Azure deployment (overrides registry for API_KEY_ENV)
+#   --endpoint URL         Azure base URL (overrides registry for API_KEY_ENV)
+#                          If omitted, ENDPOINT/DEPLOYMENT are taken from
+#                          azure_api_key_registry.sh for --api-key-env.
 #   --max-rows N           Test mode: cap total scored rows PER TASK (0 = no cap)
 #   --class-combos LIST    Only score these directional resource-class combos,
 #                          e.g. "0-0,0-1,5-5" (src_class-tgt_class). Empty = all.
@@ -38,12 +40,14 @@ BATCH_SIZE=10
 CONCURRENCY=32
 TPM_TOTAL=900000
 RPM_TOTAL=900
-DEPLOYMENT="DeepSeek-V4-Flash"
-ENDPOINT="https://fineopus-step6.services.ai.azure.com/openai/v1/"
+DEPLOYMENT=""
+ENDPOINT=""
 MAX_ROWS=0
 CLASS_COMBOS=""
 PAIR_COMBOS_JSON="./fineopus_pair_class_combinations.json"
-API_KEY_ENV="AZURE_API_KEY_0"
+API_KEY_ENV="AZURE_API_KEY_1"
+ENDPOINT_EXPLICIT=0
+DEPLOYMENT_EXPLICIT=0
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
@@ -56,8 +60,8 @@ while [[ $# -gt 0 ]]; do
         --concurrency)   CONCURRENCY="$2"; shift 2 ;;
         --tpm-total)     TPM_TOTAL="$2"; shift 2 ;;
         --rpm-total)     RPM_TOTAL="$2"; shift 2 ;;
-        --deployment)    DEPLOYMENT="$2"; shift 2 ;;
-        --endpoint)      ENDPOINT="$2"; shift 2 ;;
+        --deployment)    DEPLOYMENT="$2"; DEPLOYMENT_EXPLICIT=1; shift 2 ;;
+        --endpoint)      ENDPOINT="$2"; ENDPOINT_EXPLICIT=1; shift 2 ;;
         --max-rows)      MAX_ROWS="$2"; shift 2 ;;
         --class-combos)  CLASS_COMBOS="$2"; shift 2 ;;
         --pair-combos)   PAIR_COMBOS_JSON="$2"; shift 2 ;;
@@ -66,6 +70,30 @@ while [[ $# -gt 0 ]]; do
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=azure_api_key_registry.sh
+source "${SCRIPT_DIR}/azure_api_key_registry.sh"
+
+if resolve_azure_from_api_key_env "$API_KEY_ENV"; then
+    if [[ $ENDPOINT_EXPLICIT -eq 0 ]]; then
+        ENDPOINT="$RESOLVED_ENDPOINT"
+    fi
+    if [[ $DEPLOYMENT_EXPLICIT -eq 0 ]]; then
+        DEPLOYMENT="$RESOLVED_DEPLOYMENT"
+    fi
+else
+    if [[ $ENDPOINT_EXPLICIT -eq 0 || $DEPLOYMENT_EXPLICIT -eq 0 ]]; then
+        echo "ERROR: Unknown --api-key-env '${API_KEY_ENV}' and missing --endpoint/--deployment." >&2
+        echo "       Known keys: AZURE_API_KEY, AZURE_API_KEY_1 .. AZURE_API_KEY_21" >&2
+        exit 1
+    fi
+fi
+
+if [[ -z "$ENDPOINT" || -z "$DEPLOYMENT" ]]; then
+    echo "ERROR: ENDPOINT and DEPLOYMENT must be set (via registry or --endpoint/--deployment)." >&2
+    exit 1
+fi
 
 # Split global budgets evenly across array tasks. Use integer division and
 # guarantee at least 1.
@@ -101,7 +129,7 @@ echo "============================================================"
 last_idx=$((N_TASKS - 1))
 
 CMD="sbatch \
-    --job-name=llm_judge \
+    --job-name=llm_judge_${CLASS_COMBOS}_${API_KEY_ENV} \
     --output=$LOG_DIR/%x_%A_%a.out \
     --error=$LOG_DIR/%x_%A_%a.err \
     --partition=small \

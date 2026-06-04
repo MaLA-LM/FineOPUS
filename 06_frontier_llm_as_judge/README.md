@@ -33,13 +33,20 @@ mean_score / elapsed_sec` for every processed language pair.
 
 ## Credentials
 
-`AZURE_API_KEY` must live in `.env` next to `llm_judge.py`:
+API keys live in `.env` next to `llm_judge.py` as `AZURE_API_KEY_1` …
+`AZURE_API_KEY_21` (plus optional legacy `AZURE_API_KEY`). The script also
+accepts `AZURE_OPENAI_API_KEY`.
 
-```
-AZURE_API_KEY=<your-azure-key>
+`submit_llm_judge.sh` maps each `--api-key-env` name to the correct Azure
+endpoint and deployment via `azure_api_key_registry.sh`, so you usually only
+pass the key env var:
+
+```bash
+bash submit_llm_judge.sh --api-key-env AZURE_API_KEY_5 --tasks 4 --dry-run
 ```
 
-The script also accepts `AZURE_OPENAI_API_KEY`.
+Override endpoint or deployment explicitly with `--endpoint` / `--deployment`
+when needed.
 
 ## Quick start (single machine)
 
