@@ -10,7 +10,7 @@
 #   bash submit_llm_judge.sh [options]
 #
 # Options:
-#   --tasks N              Number of array tasks (default: 4)
+#   --tasks N              Number of array tasks (default: 1)
 #   --dataset-dir DIR      Source parquet root (one subdir per src-tgt)
 #   --out-dir DIR          Scored output root
 #   --stats-output FILE    Per-task stats CSV path
@@ -30,7 +30,7 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-N_TASKS=4
+N_TASKS=1
 DATASET_DIR="/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage4"
 OUT_DIR="/scratch/project_462001069/FineOPUS/FineOPUS-Filtered-Stage4-LLMScored"
 STATS_OUTPUT="./stats/llm_judge_stats.csv"
