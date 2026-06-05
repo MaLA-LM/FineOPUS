@@ -205,6 +205,7 @@ cython_debug/
 /logs/*
 *.jsonl
 /tools/parquet_rows_per_pair_stats
+/tools/token_stats/*
 /01_language_reID/fineopus-original-filelists/*
 /01_language_reID/filelists/*
 /01_language_reID/stats/*
