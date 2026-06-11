@@ -10,7 +10,9 @@ writes new parquet shards with an extra `llm_judge_score` column
 (`overall_0to100` normalized to a 0.0-1.0 float).
 
 Rate limiting respects both a tokens-per-minute and a requests-per-minute
-budget via an asyncio token bucket. Designed to be run as a single process
+budget via an asyncio token bucket. Large parquet shards are checkpointed every
+1,000,000 scored rows (configurable); completed parts are merged at the end and
+reused on resume after an interrupt. Designed to be run as a single process
 per chunk (e.g. one SLURM array task per chunk).
 
 Example (single machine):
@@ -440,8 +442,119 @@ class ScoringClient:
 
 
 # ---------------------------------------------------------------------------
-# Per-shard worker
+# Per-shard worker (with checkpointing for large parquets)
 # ---------------------------------------------------------------------------
+
+def _checkpoint_parts_dir(out_path: Path) -> Path:
+    return out_path.parent / f".{out_path.stem}.parts"
+
+
+def _checkpoint_part_path(out_path: Path, part_idx: int) -> Path:
+    return _checkpoint_parts_dir(out_path) / f"{out_path.stem}.part.{part_idx:05d}.parquet"
+
+
+def merge_checkpoint_parts(
+    part_paths: List[Path],
+    out_path: Path,
+    compression: str,
+) -> None:
+    """Concatenate checkpoint part files into the final output parquet."""
+    if not part_paths:
+        raise ValueError("merge_checkpoint_parts: no part files given")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    writer: Optional[pq.ParquetWriter] = None
+    try:
+        for part in part_paths:
+            pf = pq.ParquetFile(part)
+            for batch in pf.iter_batches():
+                tbl = pa.Table.from_batches([batch])
+                if writer is None:
+                    writer = pq.ParquetWriter(out_path, tbl.schema, compression=compression)
+                writer.write_table(tbl)
+    finally:
+        if writer is not None:
+            writer.close()
+
+
+def _stats_from_overalls(overalls: List[Optional[float]]) -> Tuple[int, float]:
+    n_failed = sum(1 for v in overalls if v is None)
+    valid = [v for v in overalls if v is not None]
+    mean_score = (sum(valid) / len(valid)) if valid else float("nan")
+    return n_failed, mean_score
+
+
+async def _score_table_slice(
+    segment_table: pa.Table,
+    src_lang: str,
+    tgt_lang: str,
+    scorer: ScoringClient,
+    batch_size: int,
+    progress_prefix: str = "",
+    progress_every_rows: int = 500,
+    progress_every_sec: float = 15.0,
+    global_row_offset: int = 0,
+    global_n_rows: Optional[int] = None,
+) -> Tuple[List[Optional[float]], int]:
+    """Score rows in `segment_table`. Returns (overalls, n_failed)."""
+    n = segment_table.num_rows
+    if n == 0:
+        return [], 0
+
+    sources = segment_table["source_text"].to_pylist()
+    targets = segment_table["target_text"].to_pylist()
+    overalls: List[Optional[float]] = [None] * n
+
+    total = global_n_rows if global_n_rows is not None else n
+    progress = {
+        "rows_done": 0,
+        "rows_failed": 0,
+        "next_row_log": progress_every_rows,
+        "next_time_log": time.monotonic() + progress_every_sec,
+        "t0": time.monotonic(),
+    }
+
+    def _maybe_log_progress(force: bool = False) -> None:
+        now = time.monotonic()
+        rows_done = progress["rows_done"]
+        global_done = global_row_offset + rows_done
+        if (
+            force
+            or rows_done >= progress["next_row_log"]
+            or now >= progress["next_time_log"]
+        ):
+            elapsed = max(0.001, now - progress["t0"])
+            rate = rows_done / elapsed
+            eta = (n - rows_done) / rate if rate > 0 else float("inf")
+            pct = 100.0 * global_done / total if total else 100.0
+            logger.info(
+                f"{progress_prefix}  progress: {global_done:,}/{total:,} "
+                f"({pct:5.1f}%) failed={progress['rows_failed']:,} "
+                f"{rate:.1f} rows/s ETA={eta:5.0f}s"
+            )
+            while progress["next_row_log"] <= rows_done:
+                progress["next_row_log"] += progress_every_rows
+            progress["next_time_log"] = now + progress_every_sec
+
+    async def run_one(start: int, end: int):
+        idxs = list(range(start, end))
+        pairs = [(sources[i] or "", targets[i] or "") for i in idxs]
+        ov = await scorer.score_batch(pairs, src_lang, tgt_lang)
+        for k, i in enumerate(idxs):
+            overalls[i] = ov[k]
+        progress["rows_done"] += len(idxs)
+        progress["rows_failed"] += sum(1 for v in ov if v is None)
+        _maybe_log_progress()
+
+    tasks = [
+        run_one(start, min(start + batch_size, n))
+        for start in range(0, n, batch_size)
+    ]
+    await asyncio.gather(*tasks)
+    _maybe_log_progress(force=True)
+
+    n_failed, _ = _stats_from_overalls(overalls)
+    return overalls, n_failed
+
 
 async def score_shard(
     in_path: Path,
@@ -455,16 +568,24 @@ async def score_shard(
     progress_prefix: str = "",
     progress_every_rows: int = 500,
     progress_every_sec: float = 15.0,
+    checkpoint_every_rows: int = 1_000_000,
 ) -> Tuple[int, int, float]:
     """Score one parquet shard end-to-end. Returns (n_rows, n_failed, mean_score).
 
     If `max_rows` is set, only the first `max_rows` rows of the shard are
-    read, scored, and written (used by the --max_rows option)."""
+    read, scored, and written (used by the --max_rows option).
+
+    For large shards, rows are processed in chunks of `checkpoint_every_rows`.
+    Each completed chunk is written as a part file under
+    `.{stem}.parts/`; when all chunks finish, parts are merged into
+    `out_path` and the part directory is removed. Re-running after an
+    interrupt resumes from existing part files."""
     table = pq.read_table(in_path)
     if max_rows is not None and table.num_rows > max_rows:
         table = table.slice(0, max_rows)
     n = table.num_rows
     if n == 0:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
         pq.write_table(table, out_path, compression=compression)
         return 0, 0, float("nan")
 
@@ -474,70 +595,97 @@ async def score_shard(
             f"got {table.column_names}"
         )
 
-    sources = table["source_text"].to_pylist()
-    targets = table["target_text"].to_pylist()
-
-    overalls: List[Optional[float]] = [None] * n
-
-    # Shared progress counters between concurrent batches.
-    progress = {
-        "rows_done": 0,
-        "rows_failed": 0,
-        "next_row_log": progress_every_rows,
-        "next_time_log": time.monotonic() + progress_every_sec,
-        "t0": time.monotonic(),
-    }
-
-    def _maybe_log_progress(force: bool = False) -> None:
-        now = time.monotonic()
-        rows_done = progress["rows_done"]
-        if (
-            force
-            or rows_done >= progress["next_row_log"]
-            or now >= progress["next_time_log"]
-        ):
-            elapsed = max(0.001, now - progress["t0"])
-            rate = rows_done / elapsed
-            eta = (n - rows_done) / rate if rate > 0 else float("inf")
-            pct = 100.0 * rows_done / n if n else 100.0
-            logger.info(
-                f"{progress_prefix}  progress: {rows_done:,}/{n:,} "
-                f"({pct:5.1f}%) failed={progress['rows_failed']:,} "
-                f"{rate:.1f} rows/s ETA={eta:5.0f}s"
-            )
-            # Schedule the next thresholds (step past the count we just logged).
-            while progress["next_row_log"] <= rows_done:
-                progress["next_row_log"] += progress_every_rows
-            progress["next_time_log"] = now + progress_every_sec
-
-    async def run_one(start: int, end: int):
-        idxs = list(range(start, end))
-        pairs = [(sources[i] or "", targets[i] or "") for i in idxs]
-        ov = await scorer.score_batch(pairs, src_lang, tgt_lang)
-        for k, i in enumerate(idxs):
-            overalls[i] = ov[k]
-        # Update shared progress (single-threaded event loop, no lock needed).
-        progress["rows_done"] += len(idxs)
-        progress["rows_failed"] += sum(1 for v in ov if v is None)
-        _maybe_log_progress()
-
-    tasks = [
-        run_one(start, min(start + batch_size, n))
-        for start in range(0, n, batch_size)
-    ]
-    await asyncio.gather(*tasks)
-    _maybe_log_progress(force=True)
-
-    score_arr = pa.array(overalls, type=pa.float64())
-    new_table = table.append_column(SCORE_COL, score_arr)
-
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    pq.write_table(new_table, out_path, compression=compression)
+    parts_dir = _checkpoint_parts_dir(out_path)
 
-    n_failed = sum(1 for v in overalls if v is None)
-    valid = [v for v in overalls if v is not None]
-    mean_score = (sum(valid) / len(valid)) if valid else float("nan")
-    return n, n_failed, mean_score
+    if checkpoint_every_rows <= 0:
+        checkpoint_every_rows = n
+
+    n_segments = (n + checkpoint_every_rows - 1) // checkpoint_every_rows
+    rows_failed_total = 0
+    score_sum = 0.0
+    score_n = 0
+
+    for seg_idx in range(n_segments):
+        start = seg_idx * checkpoint_every_rows
+        end = min(start + checkpoint_every_rows, n)
+        seg_n = end - start
+        part_path = _checkpoint_part_path(out_path, seg_idx)
+
+        if part_path.exists():
+            part_table = pq.read_table(part_path)
+            if part_table.num_rows != seg_n:
+                logger.warning(
+                    f"{progress_prefix}  checkpoint part {seg_idx} row count "
+                    f"mismatch ({part_table.num_rows:,} vs {seg_n:,}); re-scoring"
+                )
+            else:
+                logger.info(
+                    f"{progress_prefix}  checkpoint part {seg_idx}/{n_segments - 1} "
+                    f"exists (rows {start:,}-{end:,}), skip"
+                )
+                if SCORE_COL in part_table.column_names:
+                    overalls = part_table[SCORE_COL].to_pylist()
+                    seg_failed, seg_mean = _stats_from_overalls(overalls)
+                    rows_failed_total += seg_failed
+                    if seg_n > seg_failed:
+                        score_sum += seg_mean * (seg_n - seg_failed)
+                        score_n += seg_n - seg_failed
+                continue
+
+        seg_prefix = (
+            f"{progress_prefix} [part {seg_idx + 1}/{n_segments} "
+            f"rows {start:,}-{end:,}]"
+        )
+        logger.info(f"{seg_prefix}: scoring...")
+        segment_table = table.slice(start, seg_n)
+        overalls, seg_failed = await _score_table_slice(
+            segment_table=segment_table,
+            src_lang=src_lang,
+            tgt_lang=tgt_lang,
+            scorer=scorer,
+            batch_size=batch_size,
+            progress_prefix=seg_prefix,
+            progress_every_rows=progress_every_rows,
+            progress_every_sec=progress_every_sec,
+            global_row_offset=start,
+            global_n_rows=n,
+        )
+
+        score_arr = pa.array(overalls, type=pa.float64())
+        scored_table = segment_table.append_column(SCORE_COL, score_arr)
+        parts_dir.mkdir(parents=True, exist_ok=True)
+        pq.write_table(scored_table, part_path, compression=compression)
+        logger.info(
+            f"{seg_prefix}: checkpoint saved -> {part_path.name} "
+            f"({seg_n:,} rows, failed={seg_failed:,})"
+        )
+
+        rows_failed_total += seg_failed
+        if seg_n > seg_failed:
+            _, seg_mean = _stats_from_overalls(overalls)
+            score_sum += seg_mean * (seg_n - seg_failed)
+            score_n += seg_n - seg_failed
+
+    part_paths = [_checkpoint_part_path(out_path, i) for i in range(n_segments)]
+    missing = [i for i, p in enumerate(part_paths) if not p.exists()]
+    if missing:
+        raise RuntimeError(
+            f"{in_path.name}: incomplete after scoring; "
+            f"missing checkpoint parts: {missing}"
+        )
+
+    logger.info(
+        f"{progress_prefix}  merging {len(part_paths)} checkpoint part(s) -> {out_path.name}"
+    )
+    merge_checkpoint_parts(part_paths, out_path, compression=compression)
+    for p in part_paths:
+        p.unlink(missing_ok=True)
+    if parts_dir.exists() and not any(parts_dir.iterdir()):
+        parts_dir.rmdir()
+
+    mean_score = (score_sum / score_n) if score_n else float("nan")
+    return n, rows_failed_total, mean_score
 
 
 # ---------------------------------------------------------------------------
@@ -716,6 +864,7 @@ async def amain(args: argparse.Namespace) -> None:
     logger.info(f"chunk_id          : {args.chunk_id} / {args.n_chunks}")
     logger.info(f"skip_existing     : {args.skip_existing}")
     logger.info(f"max_rows          : {args.max_rows or 'all'}")
+    logger.info(f"checkpoint_every  : {args.checkpoint_every_rows:,} rows")
     if combos:
         logger.info(f"pair_combos_json  : {args.pair_combos_json}")
         logger.info(f"class_combos      : {','.join(sorted(combos))}")
@@ -796,6 +945,7 @@ async def amain(args: argparse.Namespace) -> None:
                     progress_prefix=shard_prefix,
                     progress_every_rows=args.progress_every_rows,
                     progress_every_sec=args.progress_every_sec,
+                    checkpoint_every_rows=args.checkpoint_every_rows,
                 )
                 if rows_budget is not None:
                     rows_budget -= n_rows
@@ -907,6 +1057,11 @@ def main() -> None:
                    help="Within a shard, print a progress line every N scored rows.")
     p.add_argument("--progress_every_sec", type=float, default=15.0,
                    help="Within a shard, also print a progress line at least every N seconds.")
+
+    p.add_argument("--checkpoint_every_rows", type=int, default=1_000_000,
+                   help="For large parquets, save a checkpoint part every N scored rows "
+                        "and merge into the final output when all parts are done. "
+                        "Existing parts are reused on resume. 0 = single write at end.")
 
     args = p.parse_args()
     asyncio.run(amain(args))
