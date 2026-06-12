@@ -17,7 +17,7 @@
 #   --batch-size N         Segments per API call (default: 10)
 #   --concurrency N        Max in-flight requests per task (default: 32)
 #   --tpm-total N          Global tokens-per-minute budget (overrides registry for API_KEY_ENV)
-#   --rpm-total N          Global requests-per-minute budget (default: 900)
+#   --rpm-total N          Global requests-per-minute budget (overrides registry for API_KEY_ENV)
 #   --deployment NAME      Azure deployment (overrides registry for API_KEY_ENV)
 #   --endpoint URL         Azure base URL (overrides registry for API_KEY_ENV)
 #                          If omitted, ENDPOINT/DEPLOYMENT are taken from
@@ -40,7 +40,7 @@ STATS_OUTPUT="./stats/llm_judge_stats.csv"
 BATCH_SIZE=10
 CONCURRENCY=32
 TPM_TOTAL=""
-RPM_TOTAL=250
+RPM_TOTAL=""
 DEPLOYMENT=""
 ENDPOINT=""
 MAX_ROWS=0
@@ -51,6 +51,7 @@ API_KEY_ENV="AZURE_API_KEY_1"
 ENDPOINT_EXPLICIT=0
 DEPLOYMENT_EXPLICIT=0
 TPM_TOTAL_EXPLICIT=0
+RPM_TOTAL_EXPLICIT=0
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
@@ -62,7 +63,7 @@ while [[ $# -gt 0 ]]; do
         --batch-size)    BATCH_SIZE="$2"; shift 2 ;;
         --concurrency)   CONCURRENCY="$2"; shift 2 ;;
         --tpm-total)     TPM_TOTAL="$2"; TPM_TOTAL_EXPLICIT=1; shift 2 ;;
-        --rpm-total)     RPM_TOTAL="$2"; shift 2 ;;
+        --rpm-total)     RPM_TOTAL="$2"; RPM_TOTAL_EXPLICIT=1; shift 2 ;;
         --deployment)    DEPLOYMENT="$2"; DEPLOYMENT_EXPLICIT=1; shift 2 ;;
         --endpoint)      ENDPOINT="$2"; ENDPOINT_EXPLICIT=1; shift 2 ;;
         --max-rows)      MAX_ROWS="$2"; shift 2 ;;
@@ -89,10 +90,13 @@ if resolve_azure_from_api_key_env "$API_KEY_ENV"; then
     if [[ $TPM_TOTAL_EXPLICIT -eq 0 ]]; then
         TPM_TOTAL="$RESOLVED_TPM"
     fi
+    if [[ $RPM_TOTAL_EXPLICIT -eq 0 ]]; then
+        RPM_TOTAL="$RESOLVED_RPM"
+    fi
 else
-    if [[ $ENDPOINT_EXPLICIT -eq 0 || $DEPLOYMENT_EXPLICIT -eq 0 || $TPM_TOTAL_EXPLICIT -eq 0 ]]; then
-        echo "ERROR: Unknown --api-key-env '${API_KEY_ENV}' and missing --endpoint/--deployment/--tpm-total." >&2
-        echo "       Known keys: AZURE_API_KEY, AZURE_API_KEY_1 .. AZURE_API_KEY_23" >&2
+    if [[ $ENDPOINT_EXPLICIT -eq 0 || $DEPLOYMENT_EXPLICIT -eq 0 || $TPM_TOTAL_EXPLICIT -eq 0 || $RPM_TOTAL_EXPLICIT -eq 0 ]]; then
+        echo "ERROR: Unknown --api-key-env '${API_KEY_ENV}' and missing --endpoint/--deployment/--tpm-total/--rpm-total." >&2
+        echo "       Known keys: AZURE_API_KEY, AZURE_API_KEY_1 .. AZURE_API_KEY_11" >&2
         exit 1
     fi
 fi
@@ -104,6 +108,11 @@ fi
 
 if [[ -z "$TPM_TOTAL" ]]; then
     echo "ERROR: TPM_TOTAL must be set (via registry or --tpm-total)." >&2
+    exit 1
+fi
+
+if [[ -z "$RPM_TOTAL" ]]; then
+    echo "ERROR: RPM_TOTAL must be set (via registry or --rpm-total)." >&2
     exit 1
 fi
 
