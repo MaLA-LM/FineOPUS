@@ -418,10 +418,10 @@ def build_choice_buttons(field_name: str, options):
 
 def build_entry_html(
     entry_id: str,
-    src_text: str,
-    src_code: str,
-    tgt_text: str,
-    tgt_code: str,
+    lang1_text: str,
+    lang1_code: str,
+    lang2_text: str,
+    lang2_code: str,
     model: str,
     corpus: str,
     version: str,
@@ -430,7 +430,7 @@ def build_entry_html(
         f'<span class="badge badge-neutral">{html.escape(model)}</span>' if model else ""
     )
     return f"""
-        <article class="entry" data-custom-id="{html.escape(entry_id)}" data-src-code="{html.escape(src_code)}" data-tgt-code="{html.escape(tgt_code)}" data-model="{html.escape(model)}" data-corpus="{html.escape(corpus)}" data-version="{html.escape(version)}" data-review-state="pending">
+        <article class="entry" data-custom-id="{html.escape(entry_id)}" data-src-code="{html.escape(lang1_code)}" data-tgt-code="{html.escape(lang2_code)}" data-model="{html.escape(model)}" data-corpus="{html.escape(corpus)}" data-version="{html.escape(version)}" data-review-state="pending">
             <div class="entry-header">
                 <h2>{html.escape(entry_id)}</h2>
                 <div class="badges">
@@ -440,23 +440,23 @@ def build_entry_html(
             </div>
             <div class="entry-content">
                 <section class="panel">
-                    <h3>{html.escape(src_code)}</h3>
-                    <p class="text-block">{html.escape(src_text)}</p>
+                    <h3>{html.escape(lang1_code)}</h3>
+                    <p class="text-block">{html.escape(lang1_text)}</p>
                 </section>
                 <section class="panel">
-                    <h3>{html.escape(tgt_code)}</h3>
-                    <p class="text-block">{html.escape(tgt_text)}</p>
+                    <h3>{html.escape(lang2_code)}</h3>
+                    <p class="text-block">{html.escape(lang2_text)}</p>
                 </section>
             </div>
             <section class="annotation-grid">
                 <section class="choice-panel" data-field="src_correct_natural">
-                    <h3>Is {html.escape(src_code)} language correct and natural?</h3>
+                    <h3>Is {html.escape(lang1_code)} language correct and natural?</h3>
                     <div class="choice-buttons">
                         {build_choice_buttons('src_correct_natural', FLUENCY_OPTIONS)}
                     </div>
                 </section>
                 <section class="choice-panel" data-field="tgt_correct_natural">
-                    <h3>Is {html.escape(tgt_code)} language correct and natural?</h3>
+                    <h3>Is {html.escape(lang2_code)} language correct and natural?</h3>
                     <div class="choice-buttons">
                         {build_choice_buttons('tgt_correct_natural', FLUENCY_OPTIONS)}
                     </div>
@@ -885,8 +885,8 @@ HTML_TEMPLATE = Template(
         function annotationForEntry(entry) {
             return {
                 custom_id: entry.dataset.customId,
-                src_code: entry.dataset.srcCode,
-                tgt_code: entry.dataset.tgtCode,
+                lang1_code: entry.dataset.srcCode,
+                lang2_code: entry.dataset.tgtCode,
                 model: entry.dataset.model || null,
                 corpus: entry.dataset.corpus || null,
                 version: entry.dataset.version || null,
@@ -1054,37 +1054,38 @@ def render_report(input_file: Path, output_file: Path):
     if not rows:
         raise ValueError(f"No data found in {input_file}")
 
-    inferred_src_code, inferred_tgt_code = parse_lang_codes_from_filename(input_file.name)
+    inferred_lang1_code, inferred_lang2_code = parse_lang_codes_from_filename(input_file.name)
 
     entry_cards = []
-    observed_src_code = None
-    observed_tgt_code = None
+    observed_lang1_code = None
+    observed_lang2_code = None
     for index, row in enumerate(rows, start=1):
-        custom_id = str(row.get("id") or row.get("custom_id") or f"item_{index:04d}")
-        src_text = row.get("src_text", row.get("en", ""))
-        tgt_text = row.get("tgt_text", row.get("target_text", ""))
-        src_code = row.get("src_code", inferred_src_code or "SRC")
-        tgt_code = row.get("tgt_code", inferred_tgt_code or "TGT")
+        # custom_id = str(row.get("id") or row.get("custom_id") or f"item_{index:04d}")
+        custom_id = str(row.get("id"))
+        lang1_text = row.get("lang1_text", row.get("en", ""))
+        lang2_text = row.get("lang2_text", row.get("target_text", ""))
+        lang1_code = row.get("lang1_code", inferred_lang1_code or "SRC")
+        lang2_code = row.get("lang2_code", inferred_lang2_code or "TGT")
         model = row.get("model", "")
         corpus = row.get("corpus", "")
         version = row.get("version", "")
-        observed_src_code = observed_src_code or src_code
-        observed_tgt_code = observed_tgt_code or tgt_code
+        observed_lang1_code = observed_lang1_code or lang1_code
+        observed_lang2_code = observed_lang2_code or lang2_code
         entry_cards.append(
             build_entry_html(
                 custom_id,
-                src_text,
-                src_code,
-                tgt_text,
-                tgt_code,
+                lang1_text,
+                lang1_code,
+                lang2_text,
+                lang2_code,
                 model,
                 corpus,
                 version,
             )
         )
 
-    title_src = observed_src_code or inferred_src_code or "src"
-    title_tgt = observed_tgt_code or inferred_tgt_code or "tgt"
+    title_src = observed_lang1_code or inferred_lang1_code or "src"
+    title_tgt = observed_lang2_code or inferred_lang2_code or "tgt"
     report_title = f"{title_src} -> {title_tgt} annotation workspace"
     stylesheet_file = write_stylesheet(output_file.parent)
     rendered_html = HTML_TEMPLATE.substitute(
@@ -1102,8 +1103,8 @@ def render_report(input_file: Path, output_file: Path):
     return {
         "output_file": output_file,
         "total": len(entry_cards),
-        "src_code": observed_src_code or inferred_src_code,
-        "tgt_code": observed_tgt_code or inferred_tgt_code,
+        "lang1_code": observed_lang1_code or inferred_lang1_code,
+        "lang2_code": observed_lang2_code or inferred_lang2_code,
     }
 
 
