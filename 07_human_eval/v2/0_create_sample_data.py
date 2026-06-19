@@ -17,19 +17,25 @@ def chain_forward_backward_datasets(hf_path, lang1_code, lang2_code):
     files_forward = f"hf://datasets/{hf_path}/{lang1_code}-{lang2_code}/*.parquet"
     files_backward = f"hf://datasets/{hf_path}/{lang2_code}-{lang1_code}/*.parquet"
 
-    ds_forward = load_dataset(
-        "parquet",
-        data_files={"train": files_forward},
-        split="train",
-        streaming=True,
-    )
-
-    ds_backward = load_dataset(
-        "parquet",
-        data_files={"train": files_backward},
-        split="train",
-        streaming=True,
-    )
+    try:
+        ds_forward = load_dataset(
+            "parquet",
+            data_files={"train": files_forward},
+            split="train",
+            streaming=True,
+        )
+    except ValueError:
+        ds_forward = iter([])
+    
+    try:
+        ds_backward = load_dataset(
+            "parquet",
+            data_files={"train": files_backward},
+            split="train",
+            streaming=True,
+        )
+    except ValueError:
+        ds_backward = iter([])
 
     return chain(ds_forward, ds_backward)
 
@@ -56,7 +62,6 @@ def stream_save_random_samples(args):
     
     # since sampled data contains both lang1-lang2 and lang2-lang1, we need to ensure that the lang1_code and lang2_code are consistent in the output
     # treat sampled_data[0] as the reference for lang1_code and lang2_code
-    print(sampled_data)
     first_item_lang1_code = sampled_data[0]["src_lang"]
     first_item_lang2_code = sampled_data[0]["tgt_lang"]
     
@@ -100,6 +105,8 @@ if __name__ == "__main__":
     args = arg_parser.parse_args()
     os.makedirs(args.output_folder, exist_ok=True)
     args.output_file = f"{args.output_folder}/sample_{args.lang1_code}_{args.lang2_code}_{args.n_samples}.jsonl"
+    
+    print(args)
     
     stream_save_random_samples(args)
     
