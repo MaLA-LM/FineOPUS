@@ -236,3 +236,4 @@ cython_debug/
 /07_human_eval/annotation_*/
 /*/*/hostfiles/*
 models/*
+.DS_Store

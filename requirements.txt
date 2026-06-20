@@ -1,0 +1,9 @@
+pandas
+pyarrow
+duckdb
+requests
+langcodes
+scikit-learn
+torch
+transformers
+datasets
