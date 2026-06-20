@@ -3,7 +3,6 @@ import os
 import json
 import tqdm
 import argparse
-import multiprocessing
 
 from itertools import chain
 from datasets import load_dataset
@@ -11,8 +10,9 @@ from datasets import load_dataset
 import random 
 random.seed(42) # Set a fixed random seed for reproducible data shuffling/sampling
 
-
-# concat the src-tgt and tgt-src datasets into a single iterable for streaming and sampling
+# A dataset is named in the format of "lang1-lang2", 
+# but when evaluating parallel data for lang1-lang2, 
+# we want to sample from both "lang1-lang2" and "lang2-lang1" datasets. 
 def chain_forward_backward_datasets(hf_path, lang1_code, lang2_code):
     files_forward = f"hf://datasets/{hf_path}/{lang1_code}-{lang2_code}/*.parquet"
     files_backward = f"hf://datasets/{hf_path}/{lang2_code}-{lang1_code}/*.parquet"
@@ -24,7 +24,7 @@ def chain_forward_backward_datasets(hf_path, lang1_code, lang2_code):
             split="train",
             streaming=True,
         )
-    except ValueError:
+    except ValueError: # if lang1-lang2 folder does not exist
         ds_forward = iter([])
     
     try:
@@ -34,7 +34,7 @@ def chain_forward_backward_datasets(hf_path, lang1_code, lang2_code):
             split="train",
             streaming=True,
         )
-    except ValueError:
+    except ValueError: # if lang2-lang1 folder does not exist
         ds_backward = iter([])
 
     return chain(ds_forward, ds_backward)
@@ -55,26 +55,31 @@ def reservoir_sampling(streamed_data, sample_size):
 
 
 def stream_save_random_samples(args):
-    
+    # concat the lang1-lang2 and lang2-lang1 datasets into a single iterable for streaming and sampling
     streamed_data = chain_forward_backward_datasets(args.hf_path, args.lang1_code, args.lang2_code)
     
+    # sample using reservoir sampling
     sampled_data = reservoir_sampling(streamed_data, args.n_samples)
     
-    # since sampled data contains both lang1-lang2 and lang2-lang1, we need to ensure that the lang1_code and lang2_code are consistent in the output
+    # since sampled data contains both lang1-lang2 and lang2-lang1, 
+    # we need to ensure that the lang1_code and lang2_code are consistent in the output
     # treat sampled_data[0] as the reference for lang1_code and lang2_code
     first_item_lang1_code = sampled_data[0]["src_lang"]
     first_item_lang2_code = sampled_data[0]["tgt_lang"]
     
     for item in sampled_data:
         if item["src_lang"] == first_item_lang1_code:
-            continue # this item has the same src/tgt order as the first item
+            # this item has the same lang1/lang2 order as the first item
+            continue
         else:
+            # otherwise, this item must have the lang1/lang2 order reversed
             assert item["src_lang"] == first_item_lang2_code
             assert item["tgt_lang"] == first_item_lang1_code
-            # swap the src and tgt code and text fields
+
+            # swap the lang1 and lang2 codes and text fields
             item["src_lang"], item["tgt_lang"] = item["tgt_lang"], item["src_lang"]
             item["source_text"], item["target_text"] = item["target_text"], item["source_text"]
-    
+
     # write the samples to a JSONL file
     with open(args.output_file, "w", encoding="utf-8") as f:
         for i, item in enumerate(sampled_data):
@@ -93,28 +98,18 @@ def stream_save_random_samples(args):
 
 
 if __name__ == "__main__":
-    arg_parser = argparse.ArgumentParser(description="Create sample data for human evaluation based on src and tgt codes. Sample from both src-tgt and tgt-src datasets.")
+    arg_parser = argparse.ArgumentParser(description="Create sample data for human evaluation based on lang1 and lang2 codes. Sample from both lang1-lang2 and lang2-lang1 datasets.")
     
-    # Use the target repo ID
-    arg_parser.add_argument("--hf_path", type=str, default="MaLA-LM/FineOPUS-Deduplicated")
+    arg_parser.add_argument("--hf_path", type=str, default="MaLA-LM/FineOPUS-Filtered-Stage4")
     arg_parser.add_argument("--n_samples", type=int, default=100)
     arg_parser.add_argument("--lang1_code", type=str, default="abk_Cyrl")
     arg_parser.add_argument("--lang2_code", type=str, default="bos_Latn")
-    arg_parser.add_argument("--output_folder", type=str, default="./data/samples")
+    arg_parser.add_argument("--output_folder", type=str, default="./annotation_samples")
     
     args = arg_parser.parse_args()
     os.makedirs(args.output_folder, exist_ok=True)
-    args.output_file = f"{args.output_folder}/sample_{args.lang1_code}_{args.lang2_code}_{args.n_samples}.jsonl"
+    args.output_file = f"{args.output_folder}/sample_{args.hf_path.split('/')[-1]}_{args.lang1_code}_{args.lang2_code}_{args.n_samples}.jsonl"
     
     print(args)
     
     stream_save_random_samples(args)
-    
-    # somehow I needed multiprocessing to avoid a memory error due to data loading...
-    # process = multiprocessing.Process(
-    #         target=stream_save_random_samples, 
-    #         args=(args,)
-    #     )
-    # process.start()
-    # process.join() 
-    
