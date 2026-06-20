@@ -233,5 +233,6 @@ cython_debug/
 /06_frontier_llm_as_judge/.env
 /06_frontier_llm_as_judge/stats
 /06_frontier_llm_as_judge/azure_api_key_registry.sh
+/07_human_eval/annotation_*/
 /*/*/hostfiles/*
 models/*

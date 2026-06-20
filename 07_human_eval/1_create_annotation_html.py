@@ -23,13 +23,13 @@ def parse_args():
         description="Create a static HTML annotation interface for sentence fluency and parallelism."
     )
     parser.add_argument(
-        "--input-path",
-        default="./data/samples",
+        "--input_path",
+        default="./annotation_samples",
         help="Path to an input JSONL file or a directory of input JSONL files.",
     )
     parser.add_argument(
-        "--output-path",
-        default="data/annotation_htmls",
+        "--output_path",
+        default="./annotation_htmls",
         help="Path to an output HTML file or a directory for generated reports.",
     )
     return parser.parse_args()
@@ -1086,7 +1086,7 @@ def render_report(input_file: Path, output_file: Path):
 
     title_src = observed_lang1_code or inferred_lang1_code or "src"
     title_tgt = observed_lang2_code or inferred_lang2_code or "tgt"
-    report_title = f"{title_src} -> {title_tgt} annotation workspace"
+    report_title = f"{title_src} - {title_tgt} annotation workspace"
     stylesheet_file = write_stylesheet(output_file.parent)
     rendered_html = HTML_TEMPLATE.substitute(
         report_title=html.escape(report_title),
