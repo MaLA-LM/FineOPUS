@@ -1,5 +1,8 @@
 # FineOPUS: Multilingual Parallel Corpora Preparation & Evaluation Pipeline
 
+[![Hugging Face](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Collections-yellow)](https://huggingface.co/collections/MaLA-LM/fineopus)
+[![Discord](https://img.shields.io/discord/1089907604473856000?color=738adb&label=Discord&logo=discord)](https://discord.com/invite/F5mEb7U6we)
+
 Welcome to the **FineOPUS** repository. This project provides a robust, end-to-end, high-performance computing (HPC) pipeline designed to download, clean, normalize, filter, and evaluate multilingual parallel corpora derived from the OPUS collection. 
 
 The pipeline is organized into numbered stages (**00–07**) that lead you from raw, unverified downloads to a clean, high-quality translation corpus suitable for training large language models (LLMs) or machine translation (MT) systems. It is optimized to run on SLURM-managed clusters (such as CSC Mahti and LUMI) via job arrays, but also supports local execution for debugging.
