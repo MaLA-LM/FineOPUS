@@ -110,6 +110,6 @@ if __name__ == "__main__":
     os.makedirs(args.output_folder, exist_ok=True)
     args.output_file = f"{args.output_folder}/sample_{args.hf_path.split('/')[-1]}_{args.lang1_code}_{args.lang2_code}_{args.n_samples}.jsonl"
     
-    print(args)
+    print(args, flush=True)
     
     stream_save_random_samples(args)
