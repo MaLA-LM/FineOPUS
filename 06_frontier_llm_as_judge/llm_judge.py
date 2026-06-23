@@ -752,7 +752,7 @@ def pairs_from_combos_json(
 
     pairs: List[Tuple[str, str]] = []
     skipped = 0
-    for name in sorted(set(names)):
+    for name in dict.fromkeys(names):
         if "-" not in name:
             continue
         src, tgt = name.split("-", 1)
