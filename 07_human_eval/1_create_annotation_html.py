@@ -29,7 +29,7 @@ def parse_args():
     )
     parser.add_argument(
         "--output_path",
-        default="./annotation_htmls",
+        default="./annotation",
         help="Path to an output HTML file or a directory for generated reports.",
     )
     return parser.parse_args()
@@ -1061,7 +1061,8 @@ def render_report(input_file: Path, output_file: Path):
     observed_lang2_code = None
     for index, row in enumerate(rows, start=1):
         # custom_id = str(row.get("id") or row.get("custom_id") or f"item_{index:04d}")
-        custom_id = str(row.get("id"))
+        # custom_id = str(row.get("id"))
+        custom_id = f"item_{index:04d}"
         lang1_text = row.get("lang1_text", row.get("en", ""))
         lang2_text = row.get("lang2_text", row.get("target_text", ""))
         lang1_code = row.get("lang1_code", inferred_lang1_code or "SRC")
