@@ -230,6 +230,7 @@ cython_debug/
 /05_quality_estimation/thresholds/stats/v3
 /05_quality_estimation/thresholds/stats/v4
 /05_quality_estimation/thresholds/stats/v5
+/06_frontier_llm_as_judge/thresholds/stats/data_score_stats.*.csv
 /*/*/hostfiles/*
 models/*
 .DS_Store
