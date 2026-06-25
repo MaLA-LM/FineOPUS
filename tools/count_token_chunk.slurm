@@ -1,13 +1,13 @@
 #!/bin/bash
 
 #SBATCH --job-name=cnt_tok
-#SBATCH --account=project_462001050
+#SBATCH --account=project_462001087
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=128G
-#SBATCH --time=72:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --output=slurmlog/cnt_tok_%A_%a.out.log
 #SBATCH --error=slurmlog/cnt_tok_%A_%a.err.log
 
@@ -16,12 +16,14 @@ set -euo pipefail
 # --- Job Execution ---
 # Inherited variables from count_token_chunk.sh:
 # DATA_DIR, MANIFEST_FILE, OUTPUT_FILE, CHUNK_SIZE, TOKENIZER_BATCH_SIZE,
-# PARQUET_BATCH_SIZE, WORKER_OUTPUT_DIR, SCRIPT_DIR
+# PARQUET_BATCH_SIZE, WORKER_OUTPUT_DIR, SCRIPT_DIR, TOKENIZER, TOKENIZER_NAME
 
 TASK_ID=$SLURM_ARRAY_TASK_ID
-: "${CHUNK_SIZE:=5}"
+: "${CHUNK_SIZE:=200}"
 : "${TOKENIZER_BATCH_SIZE:=1024}"
 : "${PARQUET_BATCH_SIZE:=10000}"
+: "${TOKENIZER:="Qwen/Qwen3.5-9B"}"
+: "${TOKENIZER_NAME:="Qwen3_5"}"
 
 SCRIPT_DIR="${SCRIPT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 WORKER_OUTPUT_DIR="${WORKER_OUTPUT_DIR:?WORKER_OUTPUT_DIR is required}"
@@ -49,6 +51,8 @@ echo "Starting job $SLURM_ARRAY_JOB_ID, task $TASK_ID"
 echo "Running on host: $(hostname)"
 echo "Job started at $(date)"
 echo "Chunk size in parquet files: $CHUNK_SIZE"
+echo "Tokenizer: $TOKENIZER"
+echo "Tokenizer name: $TOKENIZER_NAME"
 echo "Tokenizer batch size: $TOKENIZER_BATCH_SIZE"
 echo "Parquet row batch size: $PARQUET_BATCH_SIZE"
 echo "Manifest file: $MANIFEST_FILE"
@@ -84,6 +88,8 @@ srun --input=none python "$SCRIPT_DIR/count_token.py" \
     --parquet_manifest_file "$MANIFEST_FILE" \
     --worker_id "$TASK_ID" \
     --output_file "$WORKER_OUTPUT_FILE" \
+    --tokenizer "$TOKENIZER" \
+    --tokenizer_name "$TOKENIZER_NAME" \
     --tokenizer_batch_size "$TOKENIZER_BATCH_SIZE" \
     --parquet_batch_size "$PARQUET_BATCH_SIZE"
 
