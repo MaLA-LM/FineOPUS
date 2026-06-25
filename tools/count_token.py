@@ -117,6 +117,18 @@ def parse_args():
         default=10_000,
         help="Number of parquet rows to stream into memory at a time.",
     )
+    parser.add_argument(
+        "--tokenizer",
+        type=str,
+        default="deepseek-ai/DeepSeek-V4-Flash",
+        help="Tokenizer name or path (e.g., 'deepseek-ai/DeepSeek-V4-Flash').",
+    )
+    parser.add_argument(
+        "--tokenizer_name",
+        type=str,
+        default="deepseekv4",
+        help="Suffix for the tokenizer token count columns (e.g., 'deepseekv4').",
+    )
     return parser.parse_args()
 
 
@@ -245,8 +257,8 @@ def load_processed_pairs(processed_file):
     return set()
 
 
-def load_tokenizer():
-    print("Loading tokenizer once for this worker...")
+def load_tokenizer(tokenizer_path_or_name):
+    print(f"Loading tokenizer '{tokenizer_path_or_name}' once for this worker...")
     try:
         # Disabled tokenizers retained for reference.
         # gemma_tokenizer = AutoTokenizer.from_pretrained("google/gemma-2-9b")
@@ -255,7 +267,7 @@ def load_tokenizer():
         # llama3_tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
         # qwen3_tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
         return AutoTokenizer.from_pretrained(
-            "deepseek-ai/DeepSeek-V4-Flash", trust_remote_code=True
+            tokenizer_path_or_name, trust_remote_code=True
         )
     except Exception as e:
         print(f"Error loading tokenizer: {e}", file=sys.stderr)
@@ -293,8 +305,8 @@ def count_parquet_file(file_path, tokenizer, tokenizer_batch_size, parquet_batch
     total_lines = 0
     total_src_tokens_space = 0
     total_tgt_tokens_space = 0
-    total_src_tokens_deepseek = 0
-    total_tgt_tokens_deepseek = 0
+    total_src_tokens_model = 0
+    total_tgt_tokens_model = 0
 
     try:
         parquet_file = pq.ParquetFile(file_path)
@@ -328,10 +340,10 @@ def count_parquet_file(file_path, tokenizer, tokenizer_batch_size, parquet_batch
             total_src_tokens_space += sum(len(text.split()) for text in src_texts)
             total_tgt_tokens_space += sum(len(text.split()) for text in tgt_texts)
 
-            total_src_tokens_deepseek += count_tokenizer_tokens(
+            total_src_tokens_model += count_tokenizer_tokens(
                 tokenizer, src_texts, tokenizer_batch_size
             )
-            total_tgt_tokens_deepseek += count_tokenizer_tokens(
+            total_tgt_tokens_model += count_tokenizer_tokens(
                 tokenizer, tgt_texts, tokenizer_batch_size
             )
     except Exception as e:
@@ -342,8 +354,8 @@ def count_parquet_file(file_path, tokenizer, tokenizer_batch_size, parquet_batch
         total_lines,
         total_src_tokens_space,
         total_tgt_tokens_space,
-        total_src_tokens_deepseek,
-        total_tgt_tokens_deepseek,
+        total_src_tokens_model,
+        total_tgt_tokens_model,
     ]
 
 
@@ -378,8 +390,8 @@ def process_lang_pair(
     total_lines = 0
     total_src_tokens_space = 0
     total_tgt_tokens_space = 0
-    total_src_tokens_deepseek = 0
-    total_tgt_tokens_deepseek = 0
+    total_src_tokens_model = 0
+    total_tgt_tokens_model = 0
 
     for file_path in tqdm(parquet_files, desc=f"{lang_pair}", leave=False):
         counts = count_parquet_file(
@@ -395,15 +407,15 @@ def process_lang_pair(
             num_lines_in_file,
             n_src_tokens_space,
             n_tgt_tokens_space,
-            n_src_tokens_deepseek,
-            n_tgt_tokens_deepseek,
+            n_src_tokens_model,
+            n_tgt_tokens_model,
         ) = counts
 
         total_lines += num_lines_in_file
         total_src_tokens_space += n_src_tokens_space
         total_tgt_tokens_space += n_tgt_tokens_space
-        total_src_tokens_deepseek += n_src_tokens_deepseek
-        total_tgt_tokens_deepseek += n_tgt_tokens_deepseek
+        total_src_tokens_model += n_src_tokens_model
+        total_tgt_tokens_model += n_tgt_tokens_model
 
     print(f"Finished {lang_pair}: {total_lines} lines")
 
@@ -414,8 +426,8 @@ def process_lang_pair(
         total_lines,
         total_src_tokens_space,
         total_tgt_tokens_space,
-        total_src_tokens_deepseek,
-        total_tgt_tokens_deepseek,
+        total_src_tokens_model,
+        total_tgt_tokens_model,
     ]
 
 
@@ -535,7 +547,7 @@ def run_parquet_manifest_mode(args, data_dir, output_file):
         print("No pending parquet files for this worker.")
         return
 
-    tokenizer = load_tokenizer()
+    tokenizer = load_tokenizer(args.tokenizer)
     print("Tokenizer loaded successfully.")
 
     written_rows = 0
@@ -571,7 +583,7 @@ def run_direction_mode(args, data_dir, output_file):
         print("No pending language pairs for this worker.")
         return
 
-    tokenizer = load_tokenizer()
+    tokenizer = load_tokenizer(args.tokenizer)
     print("Tokenizer loaded successfully.")
 
     worker_rows = read_csv_rows(output_file, DIRECTION_HEADER)
@@ -601,6 +613,32 @@ def run_direction_mode(args, data_dir, output_file):
 
 def main():
     args = parse_args()
+    
+    global DIRECTION_HEADER, PARQUET_HEADER, HEADER
+    if args.tokenizer_name:
+        DIRECTION_HEADER = [
+            "lang_pair",
+            "src_lang",
+            "tgt_lang",
+            "n_lines",
+            "n_src_tokens_space",
+            "n_tgt_tokens_space",
+            f"n_src_tokens_{args.tokenizer_name}",
+            f"n_tgt_tokens_{args.tokenizer_name}",
+        ]
+        PARQUET_HEADER = [
+            "lang_pair",
+            "src_lang",
+            "tgt_lang",
+            "parquet_file",
+            "n_lines",
+            "n_src_tokens_space",
+            "n_tgt_tokens_space",
+            f"n_src_tokens_{args.tokenizer_name}",
+            f"n_tgt_tokens_{args.tokenizer_name}",
+        ]
+        HEADER = DIRECTION_HEADER
+
     data_dir = Path(args.data_dir)
     output_file = Path(args.output_file)
 
