@@ -1190,7 +1190,8 @@ def main():
         single_file_mode = True
     elif input_path.is_dir():
         input_files = sorted(input_path.glob("*.jsonl"))
-        input_files = [f for f in input_files if f.name.startswith("shuffled_data")]
+        # input file should start with "shuffled_data_"
+        input_files = [f for f in input_files if f.name.startswith("shuffled_data_")]
         single_file_mode = False
     else:
         raise FileNotFoundError(f"Input path not found: {input_path}")

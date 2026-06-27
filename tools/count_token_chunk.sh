@@ -8,21 +8,26 @@ mkdir -p "$SCRIPT_DIR/slurmlog"
 rm -f "$SCRIPT_DIR"/slurmlog/cnt_tok*.log
 
 # --- Configuration ---
-DATA_DIR="/scratch/project_462001069/opus_qe/merged"
-OUTPUT_FILE="/scratch/project_462001050/FineOPUS/statistics/mala-opus-dedup-2410.csv"
+DATA_DIR="/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage4"
+OUTPUT_FILE="/scratch/project_462000941/members/zihao/OPUS2410/tools/token_stats/FineOPUS-Filtered-Stage4_Qwen3_5.csv"
 
 # Number of parquet files assigned to each array worker.
-CHUNK_SIZE=5
+CHUNK_SIZE=200
 
 # Tune this if tokenizer memory or throughput needs adjustment.
 TOKENIZER_BATCH_SIZE=1024
 
 # Number of parquet rows read into memory at a time.
 PARQUET_BATCH_SIZE=10000
+
+# Tokenizer model name or path
+TOKENIZER="Qwen/Qwen3.5-9B"
+# Suffix used for token count headers in CSV (e.g. n_src_tokens_deepseekv4)
+TOKENIZER_NAME="Qwen3_5"
 # ---------------------
 
-DIRECTION_HEADER="lang_pair,src_lang,tgt_lang,n_lines,n_src_tokens_space,n_tgt_tokens_space,n_src_tokens_deepseekv4,n_tgt_tokens_deepseekv4"
-PARQUET_HEADER="lang_pair,src_lang,tgt_lang,parquet_file,n_lines,n_src_tokens_space,n_tgt_tokens_space,n_src_tokens_deepseekv4,n_tgt_tokens_deepseekv4"
+DIRECTION_HEADER="lang_pair,src_lang,tgt_lang,n_lines,n_src_tokens_space,n_tgt_tokens_space,n_src_tokens_${TOKENIZER_NAME},n_tgt_tokens_${TOKENIZER_NAME}"
+PARQUET_HEADER="lang_pair,src_lang,tgt_lang,parquet_file,n_lines,n_src_tokens_space,n_tgt_tokens_space,n_src_tokens_${TOKENIZER_NAME},n_tgt_tokens_${TOKENIZER_NAME}"
 
 TASK_ROOT_DIR="${TASK_ROOT_DIR:-$(dirname "$OUTPUT_FILE")/token_count_tasks}"
 RUN_ID="$(date +%Y%m%d_%H%M%S)"
@@ -259,6 +264,6 @@ else
 
     cd "$SCRIPT_DIR"
     sbatch --array=1-$NUM_JOBS \
-           --export=ALL,DATA_DIR="$DATA_DIR",MANIFEST_FILE="$MANIFEST_FILE",OUTPUT_FILE="$OUTPUT_FILE",CHUNK_SIZE="$CHUNK_SIZE",TOKENIZER_BATCH_SIZE="$TOKENIZER_BATCH_SIZE",PARQUET_BATCH_SIZE="$PARQUET_BATCH_SIZE",WORKER_OUTPUT_DIR="$WORKER_OUTPUT_DIR",SCRIPT_DIR="$SCRIPT_DIR" \
+           --export=ALL,DATA_DIR="$DATA_DIR",MANIFEST_FILE="$MANIFEST_FILE",OUTPUT_FILE="$OUTPUT_FILE",CHUNK_SIZE="$CHUNK_SIZE",TOKENIZER_BATCH_SIZE="$TOKENIZER_BATCH_SIZE",PARQUET_BATCH_SIZE="$PARQUET_BATCH_SIZE",WORKER_OUTPUT_DIR="$WORKER_OUTPUT_DIR",SCRIPT_DIR="$SCRIPT_DIR",TOKENIZER="$TOKENIZER",TOKENIZER_NAME="$TOKENIZER_NAME" \
            count_token_chunk.slurm
 fi

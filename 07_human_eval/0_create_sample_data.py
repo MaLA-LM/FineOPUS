@@ -5,7 +5,12 @@ import tqdm
 import argparse
 
 from itertools import chain
+
+import datasets
+datasets.config.STREAMING_READ_MAX_RETRIES = 200
+datasets.config.STREAMING_READ_RETRY_INTERVAL = 10
 from datasets import load_dataset
+
 
 import random 
 random.seed(42) # Set a fixed random seed for reproducible data shuffling/sampling
