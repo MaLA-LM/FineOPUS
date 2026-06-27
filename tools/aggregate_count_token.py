@@ -64,6 +64,12 @@ def parse_args():
         action="store_true",
         help="Write reports but do not append rows to the main CSV.",
     )
+    parser.add_argument(
+        "--tokenizer_name",
+        type=str,
+        default="Qwen3_5",
+        help="Suffix for the tokenizer token count columns (e.g., 'Qwen3_5').",
+    )
     return parser.parse_args()
 
 
@@ -431,6 +437,39 @@ def write_text(path, lines):
 
 def main():
     args = parse_args()
+    
+    global DIRECTION_HEADER, PARQUET_HEADER, COUNT_COLUMNS
+    if args.tokenizer_name:
+        tokenizer_name = args.tokenizer_name
+        DIRECTION_HEADER = [
+            "lang_pair",
+            "src_lang",
+            "tgt_lang",
+            "n_lines",
+            "n_src_tokens_space",
+            "n_tgt_tokens_space",
+            f"n_src_tokens_{tokenizer_name}",
+            f"n_tgt_tokens_{tokenizer_name}",
+        ]
+        PARQUET_HEADER = [
+            "lang_pair",
+            "src_lang",
+            "tgt_lang",
+            "parquet_file",
+            "n_lines",
+            "n_src_tokens_space",
+            "n_tgt_tokens_space",
+            f"n_src_tokens_{tokenizer_name}",
+            f"n_tgt_tokens_{tokenizer_name}",
+        ]
+        COUNT_COLUMNS = [
+            "n_lines",
+            "n_src_tokens_space",
+            "n_tgt_tokens_space",
+            f"n_src_tokens_{tokenizer_name}",
+            f"n_tgt_tokens_{tokenizer_name}",
+        ]
+
     data_dir = Path(args.data_dir)
     task_root_dir = Path(args.task_root_dir)
     output_file = Path(args.output_file)

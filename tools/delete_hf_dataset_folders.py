@@ -61,11 +61,14 @@ def main():
 
     api = HfApi(token=args.token)
 
-    # Collect the set of top-level folder names that actually exist in the repo.
+    # Collect the set of top-level folder names and _DONE files that actually exist in the repo.
     logging.info(f"Fetching repo file list for {args.repo_id} ...")
     top_level = set()
+    done_files = []
     try:
         for f in api.list_repo_files(args.repo_id, repo_type="dataset", revision=args.revision):
+            if f.endswith("/_DONE") or f == "_DONE":
+                done_files.append(f)
             head = f.split("/", 1)[0]
             top_level.add(head)
     except Exception as e:
@@ -85,18 +88,31 @@ def main():
         f"(same-code={n_same}, zyyy={n_zyyy}, xxx={n_xxx}; counts may overlap)."
     )
 
+    # Decide which _DONE files to delete (only for folders we are NOT deleting as a whole).
+    to_delete_done = sorted(f for f in done_files if f.split("/", 1)[0] not in to_delete)
+    logging.info(f"Found {len(done_files)} '_DONE' files. Will delete {len(to_delete_done)} '_DONE' files.")
+
     if args.dry_run:
         for d in to_delete[:60]:
             logging.info(f"[DRY] would delete folder: {d}")
         if len(to_delete) > 60:
             logging.info(f"... (total {len(to_delete)} folders)")
+
+        for f in to_delete_done[:60]:
+            logging.info(f"[DRY] would delete file: {f}")
+        if len(to_delete_done) > 60:
+            logging.info(f"... (total {len(to_delete_done)} _DONE files)")
         return
 
-    if not to_delete:
+    if not to_delete and not to_delete_done:
         logging.info("Nothing to delete.")
         return
 
-    ops = [CommitOperationDelete(path_in_repo=f"{d}/", is_folder=True) for d in to_delete]
+    ops = []
+    for d in to_delete:
+        ops.append(CommitOperationDelete(path_in_repo=f"{d}/", is_folder=True))
+    for f in to_delete_done:
+        ops.append(CommitOperationDelete(path_in_repo=f, is_folder=False))
 
     BATCH_SIZE = args.batch_size
     total_batches = (len(ops) + BATCH_SIZE - 1) // BATCH_SIZE
