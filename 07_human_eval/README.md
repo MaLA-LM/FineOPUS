@@ -2,11 +2,13 @@
 
 ## 1. Prerequisites
 
-The only dependancy is the `datasets` library, which is used to load data from Hugging Face.
+If you only need to reservoi sample instances from one HF dataset, the only dependancy is the `datasets` library, which is used to load data from Hugging Face.
+
+If you need to cross-check two HF datasets, the `rbloom` library is also required, which is used to build a bloom filter for the smaller dataset.
 
 ```bash
 pip install datasets
-
+pip install rbloom # optional
 ```
 
 ## 2. Streaming and sampling data
@@ -16,12 +18,19 @@ The script `0_create_sample_data.py` streams data in both `lang1code-lang2code` 
 ```bash
 
 python 0_create_sample_data.py \
-    --hf_path ${hf_path} \
-    --n_samples ${n_samples} \
+    --hf_path ${hfpath} \
+    --n_samples ${nsamples} \
     --lang1_code ${lang1code} \
     --lang2_code ${lang2code} \
-    --output_folder ${annotation_data_path}
+    --output_folder ${outputdatafolder}
 
+```
+
+Run the script below to cross-check the FineOPUS-Original dataset (original) against the FineOPUS-Filtered-Stage4 dataset (final) to find unique items in FineOPUS-Original.
+
+```bash
+python 0_create_sample_data_by_crosschecking.py \
+    --lang1_code ${lang1code} \
 ```
 
 ---
@@ -31,8 +40,8 @@ For all sample data under `annotation_samples`, the script `1_create_annotation_
 
 ```bash
 python 1_create_annotation_html.py \
-    --input_path ${annotation_data_path} \
-    --output_path ${annotation_html_path}
+    --input_path ${outputdatafolder} \
+    --output_path ${outputhtmlfolder}
 ```
 
 The advantage of pre-computing static HTML files is that 1) the data pool to sample from is usually very large, so separating the true sampling process from the annotation task allows for fast interface rendering; 2) it does not require a backend server, so it can be easily deployed or even sent to an annotator as html files for them to open in their browser.
@@ -43,3 +52,4 @@ There are two known drawbacks: 1) since there is no backend server, the annotati
 ## 4. Annotation justification
 
 The nature of the data being annotated are filtered parallel corpus, which is generally for training MT and LLMs, rather than for direct human consumption. Therefore, instead of running a fine-grained error analysis which requires linguistic expertise, we decide to evaluate three aspects: 1) the languages are correct with respect to the language codes; 2) sentences are fluent and natural; 3) the sentences are translations of each other. This annotation work simply requires bilingual or profient speakers of the two languages involved.
+
