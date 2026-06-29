@@ -8,15 +8,14 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --time=0-00:30:00
 #SBATCH --mem=32G
-#SBATCH --account=project_462000964
+#SBATCH --account=project_462001087
 
 start_time=$(date +%s)
 echo "Job started at: $(date)"
 
 module purge
 module use /appl/local/csc/modulefiles/
-module load pytorch/2.5
-source ../torch25_env/bin/activate
+module load pytorch
 
 
 ROOT_DIR=""
