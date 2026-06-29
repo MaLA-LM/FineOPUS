@@ -30,7 +30,7 @@ except ImportError:
 # Headers & column helpers
 # ---------------------------------------------------------------------------
 
-TEXT_COLUMNS = ["source_text", "target_text"]
+DEFAULT_TEXT_COLUMNS = ["source_text", "target_text"]
 
 
 def _direction_header(tokenizer_name: str) -> list[str]:
@@ -172,6 +172,10 @@ def _parse_count_args(subparsers):
                     help="Tokenizer name or path.")
     p.add_argument("--tokenizer_name", type=str, default="deepseekv4",
                     help="Column suffix for tokenizer counts.")
+    p.add_argument("--text_columns", nargs=2, metavar=("SRC_COL", "TGT_COL"),
+                    default=DEFAULT_TEXT_COLUMNS,
+                    help="Parquet column names for source and target text "
+                         "(default: source_text target_text).")
 
 
 def collect_lang_pairs(args):
@@ -276,7 +280,12 @@ def count_tokenizer_tokens(tokenizer, texts: list[str], batch_size: int) -> int:
     return total
 
 
-def count_parquet_file(file_path, tokenizer, tokenizer_batch_size, parquet_batch_size):
+def count_parquet_file(file_path, tokenizer, tokenizer_batch_size, parquet_batch_size,
+                       text_columns=None):
+    if text_columns is None:
+        text_columns = DEFAULT_TEXT_COLUMNS
+    src_col, tgt_col = text_columns
+
     if pq is None:
         print("Error: pyarrow is required. Install it.", file=sys.stderr)
         sys.exit(1)
@@ -290,11 +299,13 @@ def count_parquet_file(file_path, tokenizer, tokenizer_batch_size, parquet_batch
     try:
         pf = pq.ParquetFile(file_path)
         for batch in pf.iter_batches(batch_size=parquet_batch_size,
-                                     columns=TEXT_COLUMNS):
-            src_idx = batch.schema.get_field_index("source_text")
-            tgt_idx = batch.schema.get_field_index("target_text")
+                                     columns=text_columns):
+            src_idx = batch.schema.get_field_index(src_col)
+            tgt_idx = batch.schema.get_field_index(tgt_col)
             if src_idx < 0 or tgt_idx < 0:
-                raise ValueError("Missing required columns: source_text, target_text")
+                raise ValueError(
+                    f"Missing required columns: {src_col}, {tgt_col}"
+                )
 
             src_texts = ["" if t is None else str(t)
                          for t in batch.column(src_idx).to_pylist()]
@@ -329,7 +340,7 @@ def normalize_parquet_task_path(data_dir, lang_pair, parquet_file):
     return data_dir / rel_path, rel_path.as_posix()
 
 
-def process_lang_pair(data_dir, lang_pair, tokenizer, tok_bs, pq_bs):
+def process_lang_pair(data_dir, lang_pair, tokenizer, tok_bs, pq_bs, text_columns):
     parsed = split_lang_pair(lang_pair)
     if parsed is None:
         return None
@@ -346,7 +357,7 @@ def process_lang_pair(data_dir, lang_pair, tokenizer, tok_bs, pq_bs):
     print(f"Processing {lang_pair}: {len(parquet_files)} parquet files")
     totals = [0, 0, 0, 0, 0]
     for fp in tqdm(parquet_files, desc=lang_pair, leave=False):
-        counts = count_parquet_file(fp, tokenizer, tok_bs, pq_bs)
+        counts = count_parquet_file(fp, tokenizer, tok_bs, pq_bs, text_columns)
         if counts is None:
             continue
         for i in range(5):
@@ -355,7 +366,8 @@ def process_lang_pair(data_dir, lang_pair, tokenizer, tok_bs, pq_bs):
     return [f"{src}-{tgt}", src, tgt, *totals]
 
 
-def process_parquet_task(data_dir, lang_pair, parquet_file, tokenizer, tok_bs, pq_bs):
+def process_parquet_task(data_dir, lang_pair, parquet_file, tokenizer, tok_bs, pq_bs,
+                         text_columns):
     parsed = split_lang_pair(lang_pair)
     if parsed is None:
         return None
@@ -365,7 +377,7 @@ def process_parquet_task(data_dir, lang_pair, parquet_file, tokenizer, tok_bs, p
         print(f"Warning: Parquet file not found: {fp}. Skipping.", file=sys.stderr)
         return None
     print(f"Processing {output_pf}")
-    counts = count_parquet_file(fp, tokenizer, tok_bs, pq_bs)
+    counts = count_parquet_file(fp, tokenizer, tok_bs, pq_bs, text_columns)
     if counts is None:
         return None
     return [f"{src}-{tgt}", src, tgt, output_pf, *counts]
@@ -406,7 +418,8 @@ def run_parquet_manifest_mode(args, data_dir, output_file, pq_header):
     for lp, pf in pending:
         row = process_parquet_task(data_dir, lp, pf, tokenizer,
                                    args.tokenizer_batch_size,
-                                   args.parquet_batch_size)
+                                   args.parquet_batch_size,
+                                   args.text_columns)
         if row is not None:
             append_rows(output_file, [row], pq_header)
             processed.add(row[3])
@@ -439,7 +452,8 @@ def run_direction_mode(args, data_dir, output_file, dir_header):
             continue
         row = process_lang_pair(data_dir, lp, tokenizer,
                                 args.tokenizer_batch_size,
-                                args.parquet_batch_size)
+                                args.parquet_batch_size,
+                                args.text_columns)
         if row is not None:
             append_rows(output_file, [row], dir_header)
             worker_pairs.add(row[0])

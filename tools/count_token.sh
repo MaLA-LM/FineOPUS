@@ -12,6 +12,8 @@
 #   TOKENIZER_NAME        Column suffix in CSV (default: Qwen3_5)
 #   TOKENIZER_BATCH_SIZE  Texts per tokenizer batch (default: 1024)
 #   PARQUET_BATCH_SIZE    Parquet rows per batch (default: 10000)
+#   TEXT_COLUMNS          Source/target Parquet columns, comma-separated
+#                         (default: source_text,target_text)
 #
 # Examples:
 #   ./count_token.sh /data/Stage5 stats/stage5.csv
@@ -56,6 +58,8 @@ TOKENIZER="${TOKENIZER:-Qwen/Qwen3.5-9B}"
 TOKENIZER_NAME="${TOKENIZER_NAME:-Qwen3_5}"
 TOKENIZER_BATCH_SIZE="${TOKENIZER_BATCH_SIZE:-1024}"
 PARQUET_BATCH_SIZE="${PARQUET_BATCH_SIZE:-10000}"
+TEXT_COLUMNS="${TEXT_COLUMNS:-source_text,target_text}"
+IFS=',' read -r TEXT_SRC_COL TEXT_TGT_COL <<< "$TEXT_COLUMNS"
 # ==================================================================
 
 # Derived paths.
@@ -76,6 +80,8 @@ if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
     : "${PARQUET_BATCH_SIZE:=10000}"
     : "${TOKENIZER:="Qwen/Qwen3.5-9B"}"
     : "${TOKENIZER_NAME:="Qwen3_5"}"
+    : "${TEXT_COLUMNS:="source_text,target_text"}"
+    IFS=',' read -r TEXT_SRC_COL TEXT_TGT_COL <<< "$TEXT_COLUMNS"
 
     WORKER_OUTPUT_DIR="${WORKER_OUTPUT_DIR:?WORKER_OUTPUT_DIR is required}"
     MANIFEST_FILE="${MANIFEST_FILE:?MANIFEST_FILE is required}"
@@ -96,6 +102,7 @@ if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
     echo "Worker $TASK_ID | Job $SLURM_ARRAY_JOB_ID | $(hostname)"
     echo "Started: $(date)"
     echo "Tokenizer: $TOKENIZER ($TOKENIZER_NAME)"
+    echo "Text columns: $TEXT_SRC_COL, $TEXT_TGT_COL"
     echo "Manifest: $MANIFEST_FILE"
     echo "Worker CSV: $WORKER_OUTPUT_FILE"
     echo "Parquet files assigned: $PARQUET_COUNT"
@@ -115,6 +122,7 @@ if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
         --output_file "$WORKER_OUTPUT_FILE" \
         --tokenizer "$TOKENIZER" \
         --tokenizer_name "$TOKENIZER_NAME" \
+        --text_columns "$TEXT_SRC_COL" "$TEXT_TGT_COL" \
         --tokenizer_batch_size "$TOKENIZER_BATCH_SIZE" \
         --parquet_batch_size "$PARQUET_BATCH_SIZE"
 
@@ -176,7 +184,7 @@ else
     echo "Submitting $ACTUAL_JOBS array jobs (size-balanced across workers)."
     cd "$SCRIPT_DIR"
     sbatch --array=1-$ACTUAL_JOBS \
-           --export=ALL,DATA_DIR="$DATA_DIR",MANIFEST_FILE="$MANIFEST_FILE",OUTPUT_FILE="$OUTPUT_FILE",TOKENIZER_BATCH_SIZE="$TOKENIZER_BATCH_SIZE",PARQUET_BATCH_SIZE="$PARQUET_BATCH_SIZE",WORKER_OUTPUT_DIR="$WORKER_OUTPUT_DIR",SCRIPT_DIR="$SCRIPT_DIR",TOKENIZER="$TOKENIZER",TOKENIZER_NAME="$TOKENIZER_NAME" \
+           --export=ALL,DATA_DIR="$DATA_DIR",MANIFEST_FILE="$MANIFEST_FILE",OUTPUT_FILE="$OUTPUT_FILE",TOKENIZER_BATCH_SIZE="$TOKENIZER_BATCH_SIZE",PARQUET_BATCH_SIZE="$PARQUET_BATCH_SIZE",WORKER_OUTPUT_DIR="$WORKER_OUTPUT_DIR",SCRIPT_DIR="$SCRIPT_DIR",TOKENIZER="$TOKENIZER",TOKENIZER_NAME="$TOKENIZER_NAME",TEXT_COLUMNS="$TEXT_COLUMNS" \
            count_token.sh
 fi
 
