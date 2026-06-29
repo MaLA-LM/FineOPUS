@@ -12,8 +12,10 @@
 #   TOKENIZER_NAME        Column suffix in CSV (default: Qwen3_5)
 #   TOKENIZER_BATCH_SIZE  Texts per tokenizer batch (default: 1024)
 #   PARQUET_BATCH_SIZE    Parquet rows per batch (default: 10000)
-#   TEXT_COLUMNS          Source/target Parquet columns, comma-separated
-#                         (default: source_text,target_text)
+#   TEXT_SRC_COLUMN       Source text Parquet column (default: source_text)
+#   TEXT_TGT_COLUMN       Target text Parquet column (default: target_text)
+#   TEXT_COLUMNS            Deprecated alias: "src_col:tgt_col" (use ':' not ','
+#                           because sbatch --export splits on commas)
 #
 # Examples:
 #   ./count_token.sh /data/Stage5 stats/stage5.csv
@@ -41,6 +43,31 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+resolve_text_columns() {
+    if [ -n "${TEXT_SRC_COLUMN:-}" ] && [ -n "${TEXT_TGT_COLUMN:-}" ]; then
+        return
+    fi
+    if [ -n "${TEXT_COLUMNS:-}" ]; then
+        local sep=""
+        if [[ "$TEXT_COLUMNS" == *:* ]]; then
+            sep=":"
+        elif [[ "$TEXT_COLUMNS" == *,* ]]; then
+            sep=","
+        else
+            echo "Error: TEXT_COLUMNS must be 'src_col:tgt_col' (preferred) or 'src_col,tgt_col'." >&2
+            exit 1
+        fi
+        IFS="$sep" read -r TEXT_SRC_COLUMN TEXT_TGT_COLUMN <<< "$TEXT_COLUMNS"
+    else
+        TEXT_SRC_COLUMN="${TEXT_SRC_COLUMN:-source_text}"
+        TEXT_TGT_COLUMN="${TEXT_TGT_COLUMN:-target_text}"
+    fi
+    if [ -z "${TEXT_SRC_COLUMN:-}" ] || [ -z "${TEXT_TGT_COLUMN:-}" ]; then
+        echo "Error: Both TEXT_SRC_COLUMN and TEXT_TGT_COLUMN must be set." >&2
+        exit 1
+    fi
+}
+
 # ========================= Parse arguments ========================
 MODE="submit"
 if [ "${1:-}" = "aggregate" ]; then
@@ -58,8 +85,7 @@ TOKENIZER="${TOKENIZER:-Qwen/Qwen3.5-9B}"
 TOKENIZER_NAME="${TOKENIZER_NAME:-Qwen3_5}"
 TOKENIZER_BATCH_SIZE="${TOKENIZER_BATCH_SIZE:-1024}"
 PARQUET_BATCH_SIZE="${PARQUET_BATCH_SIZE:-10000}"
-TEXT_COLUMNS="${TEXT_COLUMNS:-source_text,target_text}"
-IFS=',' read -r TEXT_SRC_COL TEXT_TGT_COL <<< "$TEXT_COLUMNS"
+resolve_text_columns
 # ==================================================================
 
 # Derived paths.
@@ -80,8 +106,7 @@ if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
     : "${PARQUET_BATCH_SIZE:=10000}"
     : "${TOKENIZER:="Qwen/Qwen3.5-9B"}"
     : "${TOKENIZER_NAME:="Qwen3_5"}"
-    : "${TEXT_COLUMNS:="source_text,target_text"}"
-    IFS=',' read -r TEXT_SRC_COL TEXT_TGT_COL <<< "$TEXT_COLUMNS"
+    resolve_text_columns
 
     WORKER_OUTPUT_DIR="${WORKER_OUTPUT_DIR:?WORKER_OUTPUT_DIR is required}"
     MANIFEST_FILE="${MANIFEST_FILE:?MANIFEST_FILE is required}"
@@ -102,7 +127,7 @@ if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
     echo "Worker $TASK_ID | Job $SLURM_ARRAY_JOB_ID | $(hostname)"
     echo "Started: $(date)"
     echo "Tokenizer: $TOKENIZER ($TOKENIZER_NAME)"
-    echo "Text columns: $TEXT_SRC_COL, $TEXT_TGT_COL"
+    echo "Text columns: $TEXT_SRC_COLUMN, $TEXT_TGT_COLUMN"
     echo "Manifest: $MANIFEST_FILE"
     echo "Worker CSV: $WORKER_OUTPUT_FILE"
     echo "Parquet files assigned: $PARQUET_COUNT"
@@ -122,7 +147,7 @@ if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
         --output_file "$WORKER_OUTPUT_FILE" \
         --tokenizer "$TOKENIZER" \
         --tokenizer_name "$TOKENIZER_NAME" \
-        --text_columns "$TEXT_SRC_COL" "$TEXT_TGT_COL" \
+        --text_columns "$TEXT_SRC_COLUMN" "$TEXT_TGT_COLUMN" \
         --tokenizer_batch_size "$TOKENIZER_BATCH_SIZE" \
         --parquet_batch_size "$PARQUET_BATCH_SIZE"
 
@@ -184,7 +209,7 @@ else
     echo "Submitting $ACTUAL_JOBS array jobs (size-balanced across workers)."
     cd "$SCRIPT_DIR"
     sbatch --array=1-$ACTUAL_JOBS \
-           --export=ALL,DATA_DIR="$DATA_DIR",MANIFEST_FILE="$MANIFEST_FILE",OUTPUT_FILE="$OUTPUT_FILE",TOKENIZER_BATCH_SIZE="$TOKENIZER_BATCH_SIZE",PARQUET_BATCH_SIZE="$PARQUET_BATCH_SIZE",WORKER_OUTPUT_DIR="$WORKER_OUTPUT_DIR",SCRIPT_DIR="$SCRIPT_DIR",TOKENIZER="$TOKENIZER",TOKENIZER_NAME="$TOKENIZER_NAME",TEXT_COLUMNS="$TEXT_COLUMNS" \
+           --export=ALL,DATA_DIR="$DATA_DIR",MANIFEST_FILE="$MANIFEST_FILE",OUTPUT_FILE="$OUTPUT_FILE",TOKENIZER_BATCH_SIZE="$TOKENIZER_BATCH_SIZE",PARQUET_BATCH_SIZE="$PARQUET_BATCH_SIZE",WORKER_OUTPUT_DIR="$WORKER_OUTPUT_DIR",SCRIPT_DIR="$SCRIPT_DIR",TOKENIZER="$TOKENIZER",TOKENIZER_NAME="$TOKENIZER_NAME",TEXT_SRC_COLUMN="$TEXT_SRC_COLUMN",TEXT_TGT_COLUMN="$TEXT_TGT_COLUMN" \
            count_token.sh
 fi
 
