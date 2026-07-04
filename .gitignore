@@ -234,6 +234,7 @@ cython_debug/
 /06_frontier_llm_as_judge/filter/stats*
 /07_human_eval/annotation*
 /07_human_eval/log*
+/slm_from_scratch/extracted
 /*/*/hostfiles/*
 models/*
 .DS_Store
