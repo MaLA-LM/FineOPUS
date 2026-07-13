@@ -7,7 +7,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --time=1-00:00:00
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH --account=project_462001087
 # Download selected FineWeb-2 language subsets from the Hugging Face Hub.
 # Repo: HuggingFaceFW/fineweb-2  (https://huggingface.co/datasets/HuggingFaceFW/fineweb-2)
@@ -66,31 +66,87 @@ ind_Latn pol_Latn nld_Latn rus_Cyrl ita_Latn por_Latn deu_Latn fra_Latn
 spa_Latn
 "}"
 
+# Map the requested language codes to the exact subset codes that exist in
+# FineWeb-2. After downloading, the directory is renamed to the requested
+# name so the rest of the pipeline sees the expected language code.
+actual_lang_for() {
+    case "$1" in
+        aze_Latn) echo "azj_Latn" ;;   # North Azerbaijani
+        est_Latn) echo "ekk_Latn" ;;   # Standard Estonian
+        lav_Latn) echo "lvs_Latn" ;;   # Standard Latvian
+        mlg_Latn) echo "plt_Latn" ;;   # Plateau Malagasy
+        msa_Latn) echo "zsm_Latn" ;;   # Standard Malay
+        nep_Deva) echo "npi_Deva" ;;   # Nepali
+        pus_Arab) echo "pbt_Arab" ;;   # Southern Pashto
+        sqi_Latn) echo "als_Latn" ;;   # Tosk Albanian
+        swa_Latn) echo "swh_Latn" ;;   # Swahili
+        uzb_Latn) echo "uzn_Latn" ;;   # Northern Uzbek
+        zho_Hans) echo "cmn_Hani" ;;   # Mandarin Chinese
+        *) echo "$1" ;;
+    esac
+}
+
 # Download one language subset. Uses `hf download` if available, else the
 # legacy `huggingface-cli download` syntax.
 download_lang() {
     local lang="$1"
-    local dest="${DEST_ROOT}/data/${lang}"
-    mkdir -p "${dest}"
+    local actual
+    actual="$(actual_lang_for "${lang}")"
+    local download_dest="${DEST_ROOT}/data/${actual}"
+    local final_dest="${DEST_ROOT}/data/${lang}"
 
-    local includes=("data/${lang}/train/*.parquet" "data/${lang}/test/*.parquet")
+    local includes=("data/${actual}/train/*.parquet" "data/${actual}/test/*.parquet")
     if [ "${INCLUDE_REMOVED}" = "1" ]; then
-        includes+=("data/${lang}/removed/*.parquet")
+        includes+=("data/${actual}/removed/*.parquet")
     fi
 
-    echo ">>> [${lang}] downloading -> ${DEST_ROOT}"
+    echo ">>> [${lang}] downloading FineWeb-2 subset '${actual}' -> ${DEST_ROOT}"
+    if [ "${actual}" != "${lang}" ]; then
+        echo "    (mapped ${lang} -> ${actual})"
+    fi
+
+    mkdir -p "${download_dest}"
 
     if [ "${HF_CLI}" = "hf" ]; then
         local args=(download "${REPO_ID}" --repo-type dataset
                     --local-dir "${DEST_ROOT}" --max-workers "${WORKERS}")
         for p in "${includes[@]}"; do args+=(--include "${p}"); done
-        hf "${args[@]}"
+        if ! hf "${args[@]}"; then
+            echo "!!! [${lang}] download failed for subset ${actual}" >&2
+            return 1
+        fi
     else
         local args=(download "${REPO_ID}" --repo-type dataset
                     --local-dir "${DEST_ROOT}" --local-dir-use-symlinks False)
         for p in "${includes[@]}"; do args+=(--include "${p}"); done
-        huggingface-cli "${args[@]}"
+        if ! huggingface-cli "${args[@]}"; then
+            echo "!!! [${lang}] download failed for subset ${actual}" >&2
+            return 1
+        fi
     fi
+
+    # Make sure the subset actually produced files (missing subsets result in
+    # "Fetching 0 files" but the CLI still exits 0).
+    if [ ! -d "${download_dest}" ] || [ -z "$(find "${download_dest}" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+        echo "!!! [${lang}] download produced no files for ${download_dest}" >&2
+        return 1
+    fi
+
+    # If we used a different FineWeb-2 code, rename the directory to the
+    # requested language name.
+    if [ "${actual}" != "${lang}" ]; then
+        if [ -e "${final_dest}" ]; then
+            if [ -d "${final_dest}" ] && [ -z "$(find "${final_dest}" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+                rmdir "${final_dest}"
+            else
+                echo "!!! [${lang}] final destination ${final_dest} already exists; leaving ${download_dest} as-is" >&2
+                return 1
+            fi
+        fi
+        mv -v "${download_dest}" "${final_dest}"
+    fi
+
+    return 0
 }
 
 # ----------------------------------------------------------------------------
