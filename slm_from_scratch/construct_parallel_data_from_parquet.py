@@ -10,6 +10,7 @@ ENG_CODE = "eng_Latn"
 LANG_CODE_TO_NAME = {
     "afr_Latn": "Afrikaans",
     "amh_Ethi": "Amharic",
+    "ara_Arab": "Arabic",
     "aze_Latn": "Azerbaijani",
     "bak_Cyrl": "Bashkir",
     "bel_Cyrl": "Belarusian",
