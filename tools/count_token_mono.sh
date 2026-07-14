@@ -12,7 +12,9 @@
 #   TOKENIZER_NAME        Column suffix in CSV (default: Qwen3_5)
 #   TOKENIZER_BATCH_SIZE  Texts per tokenizer batch (default: 1024)
 #   PARQUET_BATCH_SIZE    Parquet rows per batch (default: 10000)
-#   TEXT_COLUMN           Parquet text column (default: text)
+#   JSONL_BATCH_SIZE      JSONL lines per batch (default: 10000)
+#   FILE_FORMAT           Input format: parquet or jsonl (default: parquet)
+#   TEXT_COLUMN           Text column/key (default: text)
 #
 # Examples:
 #   ./count_token_mono.sh /scratch/project_462001069/nemotron-cc \
@@ -61,8 +63,15 @@ TOKENIZER="${TOKENIZER:-Qwen/Qwen3.5-9B}"
 TOKENIZER_NAME="${TOKENIZER_NAME:-Qwen3_5}"
 TOKENIZER_BATCH_SIZE="${TOKENIZER_BATCH_SIZE:-1024}"
 PARQUET_BATCH_SIZE="${PARQUET_BATCH_SIZE:-10000}"
+JSONL_BATCH_SIZE="${JSONL_BATCH_SIZE:-10000}"
+FILE_FORMAT="${FILE_FORMAT:-parquet}"
 TEXT_COLUMN="${TEXT_COLUMN:-text}"
 # ==================================================================
+
+if [ "$FILE_FORMAT" != "parquet" ] && [ "$FILE_FORMAT" != "jsonl" ]; then
+    echo "FILE_FORMAT must be 'parquet' or 'jsonl'." >&2
+    exit 1
+fi
 
 # Derived paths.
 LANG_HEADER="lang,n_lines,n_tokens_space,n_tokens_${TOKENIZER_NAME}"
@@ -80,8 +89,10 @@ if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
     TASK_ID=$SLURM_ARRAY_TASK_ID
     : "${TOKENIZER_BATCH_SIZE:=1024}"
     : "${PARQUET_BATCH_SIZE:=10000}"
+    : "${JSONL_BATCH_SIZE:=10000}"
     : "${TOKENIZER:="Qwen/Qwen3.5-9B"}"
     : "${TOKENIZER_NAME:="Qwen3_5"}"
+    : "${FILE_FORMAT:="parquet"}"
     : "${TEXT_COLUMN:="text"}"
 
     WORKER_OUTPUT_DIR="${WORKER_OUTPUT_DIR:?WORKER_OUTPUT_DIR is required}"
@@ -89,13 +100,13 @@ if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
     WORKER_OUTPUT_FILE="$WORKER_OUTPUT_DIR/counts_${SLURM_ARRAY_JOB_ID}_${TASK_ID}.csv"
 
     if [ ! -f "$MANIFEST_FILE" ]; then
-        echo "Parquet manifest not found: $MANIFEST_FILE" >&2
+        echo "Manifest not found: $MANIFEST_FILE" >&2
         exit 1
     fi
 
     mkdir -p "$WORKER_OUTPUT_DIR"
 
-    PARQUET_COUNT=$(awk -F'\t' -v task_id="$TASK_ID" \
+    FILE_COUNT=$(awk -F'\t' -v task_id="$TASK_ID" \
         'NR > 1 && $1 == task_id { count++ } END { print count + 0 }' \
         "$MANIFEST_FILE")
 
@@ -103,29 +114,37 @@ if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
     echo "Worker $TASK_ID | Job $SLURM_ARRAY_JOB_ID | $(hostname)"
     echo "Started: $(date)"
     echo "Tokenizer: $TOKENIZER ($TOKENIZER_NAME)"
-    echo "Text column: $TEXT_COLUMN"
+    echo "File format: $FILE_FORMAT"
+    echo "Text column/key: $TEXT_COLUMN"
     echo "Manifest: $MANIFEST_FILE"
     echo "Worker CSV: $WORKER_OUTPUT_FILE"
-    echo "Parquet files assigned: $PARQUET_COUNT"
+    echo "Files assigned: $FILE_COUNT"
     awk -F'\t' -v task_id="$TASK_ID" \
         'NR > 1 && $1 == task_id { print "  " $3 }' "$MANIFEST_FILE"
     echo "--------------------------------------------------------"
 
-    if [ "$PARQUET_COUNT" -eq 0 ]; then
-        echo "No parquet files assigned. Nothing to do."
+    if [ "$FILE_COUNT" -eq 0 ]; then
+        echo "No files assigned. Nothing to do."
         exit 0
+    fi
+
+    MANIFEST_ARG="--parquet_manifest_file"
+    if [ "$FILE_FORMAT" = "jsonl" ]; then
+        MANIFEST_ARG="--jsonl_manifest_file"
     fi
 
     srun --input=none python ./count_token_mono.py count \
         --data_dir "$DATA_DIR" \
-        --parquet_manifest_file "$MANIFEST_FILE" \
+        "$MANIFEST_ARG" "$MANIFEST_FILE" \
         --worker_id "$TASK_ID" \
         --output_file "$WORKER_OUTPUT_FILE" \
         --tokenizer "$TOKENIZER" \
         --tokenizer_name "$TOKENIZER_NAME" \
+        --file_format "$FILE_FORMAT" \
         --text_column "$TEXT_COLUMN" \
         --tokenizer_batch_size "$TOKENIZER_BATCH_SIZE" \
-        --parquet_batch_size "$PARQUET_BATCH_SIZE"
+        --parquet_batch_size "$PARQUET_BATCH_SIZE" \
+        --jsonl_batch_size "$JSONL_BATCH_SIZE"
 
     if [ ! -s "$WORKER_OUTPUT_FILE" ]; then
         echo "Worker completed but produced no output rows."
@@ -149,6 +168,7 @@ if [ "$MODE" = "aggregate" ]; then
         --task_root_dir "$TASK_ROOT_DIR" \
         --output_file "$OUTPUT_FILE" \
         --report_dir "$REPORT_DIR" \
+        --file_format "$FILE_FORMAT" \
         --tokenizer_name "$TOKENIZER_NAME"
 
     echo "Aggregation reports written to $REPORT_DIR"
@@ -164,6 +184,9 @@ RUN_ID="$(date +%Y%m%d_%H%M%S)"
 RUN_TASK_DIR="$TASK_ROOT_DIR/run_$RUN_ID"
 WORKER_OUTPUT_DIR="$RUN_TASK_DIR/worker_outputs"
 MANIFEST_FILE="$RUN_TASK_DIR/parquet_manifest.tsv"
+if [ "$FILE_FORMAT" = "jsonl" ]; then
+    MANIFEST_FILE="$RUN_TASK_DIR/jsonl_manifest.tsv"
+fi
 
 mkdir -p "$RUN_TASK_DIR" "$WORKER_OUTPUT_DIR" "$(dirname "$OUTPUT_FILE")" \
          "$(dirname "$SCRIPT_DIR")/logs/count_token_mono"
@@ -174,6 +197,7 @@ python ./count_token_mono.py build-manifest \
     --main_csv "$OUTPUT_FILE" \
     --task_root_dir "$TASK_ROOT_DIR" \
     --num_jobs "$NUM_JOBS" \
+    --file_format "$FILE_FORMAT" \
     --tokenizer_name "$TOKENIZER_NAME" \
     --output_dir "$RUN_TASK_DIR"
 
@@ -186,6 +210,6 @@ else
     echo "Submitting $ACTUAL_JOBS array jobs (size-balanced across workers)."
     cd "$SCRIPT_DIR"
     sbatch --array=1-$ACTUAL_JOBS \
-           --export=ALL,DATA_DIR="$DATA_DIR",MANIFEST_FILE="$MANIFEST_FILE",OUTPUT_FILE="$OUTPUT_FILE",TOKENIZER_BATCH_SIZE="$TOKENIZER_BATCH_SIZE",PARQUET_BATCH_SIZE="$PARQUET_BATCH_SIZE",WORKER_OUTPUT_DIR="$WORKER_OUTPUT_DIR",SCRIPT_DIR="$SCRIPT_DIR",TOKENIZER="$TOKENIZER",TOKENIZER_NAME="$TOKENIZER_NAME",TEXT_COLUMN="$TEXT_COLUMN" \
+           --export=ALL,DATA_DIR="$DATA_DIR",MANIFEST_FILE="$MANIFEST_FILE",OUTPUT_FILE="$OUTPUT_FILE",TOKENIZER_BATCH_SIZE="$TOKENIZER_BATCH_SIZE",PARQUET_BATCH_SIZE="$PARQUET_BATCH_SIZE",JSONL_BATCH_SIZE="$JSONL_BATCH_SIZE",FILE_FORMAT="$FILE_FORMAT",WORKER_OUTPUT_DIR="$WORKER_OUTPUT_DIR",SCRIPT_DIR="$SCRIPT_DIR",TOKENIZER="$TOKENIZER",TOKENIZER_NAME="$TOKENIZER_NAME",TEXT_COLUMN="$TEXT_COLUMN" \
            count_token_mono.sh
 fi

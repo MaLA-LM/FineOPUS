@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Count and aggregate token statistics for monolingual Parquet files.
+"""Count and aggregate token statistics for monolingual Parquet/JSONL files.
 
 Subcommands
 -----------
 count      Count lines and tokens.  Two modes:
            • language mode  – one row per language folder
-           • parquet-manifest mode – one row per parquet file (for chunked
-             SLURM workers)
-aggregate  Merge parquet-level worker CSVs into the main language-level CSV.
+           • manifest mode – one row per data file (for chunked SLURM workers)
+aggregate  Merge file-level worker CSVs into the main language-level CSV.
 """
 
 import argparse
 import csv
+import json
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -31,6 +31,19 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 DEFAULT_TEXT_COLUMN = "text"
+SUPPORTED_FILE_FORMATS = ("parquet", "jsonl")
+
+
+def _file_column(file_format: str) -> str:
+    return f"{file_format}_file"
+
+
+def _file_suffix(file_format: str) -> str:
+    return f".{file_format}"
+
+
+def _file_label(file_format: str) -> str:
+    return "Parquet" if file_format == "parquet" else "JSONL"
 
 
 def _lang_header(tokenizer_name: str) -> list[str]:
@@ -42,10 +55,10 @@ def _lang_header(tokenizer_name: str) -> list[str]:
     ]
 
 
-def _parquet_header(tokenizer_name: str) -> list[str]:
+def _file_header(tokenizer_name: str, file_format: str) -> list[str]:
     return [
         "lang",
-        "parquet_file",
+        _file_column(file_format),
         "n_lines",
         "n_tokens_space",
         f"n_tokens_{tokenizer_name}",
@@ -123,7 +136,7 @@ def write_text(path: Path, lines: list[str]):
 def _parse_count_args(subparsers):
     p = subparsers.add_parser(
         "count",
-        help="Count lines and tokens in monolingual data (Parquet files).",
+        help="Count lines and tokens in monolingual data files.",
     )
     p.add_argument("--data_dir", required=True, type=str,
                     help="Root data directory.")
@@ -135,8 +148,10 @@ def _parse_count_args(subparsers):
                     help="Text file with one language folder per line.")
     p.add_argument("--parquet_manifest_file", type=str,
                     help="TSV manifest with worker_id, lang, parquet_file.")
+    p.add_argument("--jsonl_manifest_file", type=str,
+                    help="TSV manifest with worker_id, lang, jsonl_file.")
     p.add_argument("--worker_id", type=str,
-                    help="Worker id to select from --parquet_manifest_file.")
+                    help="Worker id to select from a manifest file.")
     p.add_argument("--output_file", required=True, type=str,
                     help="Path to the output CSV file.")
     p.add_argument("--processed_file", type=str,
@@ -145,13 +160,18 @@ def _parse_count_args(subparsers):
                     help="Texts per tokenizer batch.")
     p.add_argument("--parquet_batch_size", type=int, default=10_000,
                     help="Parquet rows streamed per batch.")
+    p.add_argument("--jsonl_batch_size", type=int, default=10_000,
+                    help="JSONL lines streamed per batch.")
+    p.add_argument("--file_format", choices=SUPPORTED_FILE_FORMATS,
+                    default="parquet",
+                    help="Input file format to count (default: parquet).")
     p.add_argument("--tokenizer", type=str,
                     default="Qwen/Qwen3.5-9B",
                     help="Tokenizer name or path.")
     p.add_argument("--tokenizer_name", type=str, default="Qwen3_5",
                     help="Column suffix for tokenizer counts.")
     p.add_argument("--text_column", type=str, default=DEFAULT_TEXT_COLUMN,
-                    help="Parquet column name for text (default: text).")
+                    help="Text column/key name (default: text).")
 
 
 def collect_langs(args):
@@ -181,31 +201,33 @@ def collect_langs(args):
     return deduped
 
 
-def collect_parquet_tasks(manifest_file, worker_id):
+def collect_file_tasks(manifest_file, worker_id, file_format):
     manifest_file = Path(manifest_file)
     if not manifest_file.is_file():
-        print(f"Error: Parquet manifest not found: {manifest_file}", file=sys.stderr)
+        print(f"Error: {_file_label(file_format)} manifest not found: {manifest_file}",
+              file=sys.stderr)
         sys.exit(1)
     if worker_id is None or str(worker_id).strip() == "":
-        print("Error: --worker_id is required with --parquet_manifest_file.",
+        print("Error: --worker_id is required with a manifest file.",
               file=sys.stderr)
         sys.exit(1)
 
     tasks, seen = [], set()
+    file_col = _file_column(file_format)
     with manifest_file.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f, delimiter="\t")
-        required = {"worker_id", "lang", "parquet_file"}
+        required = {"worker_id", "lang", file_col}
         if reader.fieldnames is None or not required.issubset(reader.fieldnames):
             print("Error: Manifest must be TSV with columns: "
-                  "worker_id, lang, parquet_file.", file=sys.stderr)
+                  f"worker_id, lang, {file_col}.", file=sys.stderr)
             sys.exit(1)
         for row in reader:
             if row.get("worker_id") != str(worker_id):
                 continue
             lang = (row.get("lang") or "").strip()
-            pf = (row.get("parquet_file") or "").strip()
-            key = (lang, pf)
-            if not lang or not pf or key in seen:
+            data_file = (row.get(file_col) or "").strip()
+            key = (lang, data_file)
+            if not lang or not data_file or key in seen:
                 continue
             tasks.append(key)
             seen.add(key)
@@ -289,30 +311,99 @@ def count_parquet_file(file_path, tokenizer, tokenizer_batch_size, parquet_batch
     return [total_lines, total_space, total_model]
 
 
-def normalize_parquet_task_path(data_dir, lang, parquet_file):
-    parquet_path = Path(parquet_file)
-    if parquet_path.is_absolute():
-        return parquet_path, parquet_path.as_posix()
-    if parquet_path.parts and parquet_path.parts[0] == lang:
-        return data_dir / parquet_path, parquet_path.as_posix()
-    rel_path = Path(lang) / parquet_path
+def count_jsonl_file(file_path, tokenizer, tokenizer_batch_size, jsonl_batch_size,
+                     text_column=None):
+    if text_column is None:
+        text_column = DEFAULT_TEXT_COLUMN
+
+    total_lines = 0
+    total_space = 0
+    total_model = 0
+    texts = []
+
+    def flush_batch():
+        nonlocal total_lines, total_space, total_model, texts
+        if not texts:
+            return
+        total_lines += len(texts)
+        total_space += sum(len(t.split()) for t in texts)
+        total_model += count_tokenizer_tokens(tokenizer, texts,
+                                              tokenizer_batch_size)
+        texts = []
+
+    try:
+        with Path(file_path).open("r", encoding="utf-8") as f:
+            for line_no, line in enumerate(f, start=1):
+                line = line.rstrip("\n")
+                if not line.strip():
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    raise ValueError(f"invalid JSON on line {line_no}: {exc}") from exc
+
+                if isinstance(record, dict):
+                    value = record.get(text_column)
+                else:
+                    value = record
+                texts.append("" if value is None else str(value))
+
+                if len(texts) >= jsonl_batch_size:
+                    flush_batch()
+        flush_batch()
+    except Exception as e:
+        print(f"Error reading {file_path}: {e}", file=sys.stderr)
+        return None
+
+    return [total_lines, total_space, total_model]
+
+
+def count_data_file(file_path, file_format, tokenizer, tokenizer_batch_size,
+                    parquet_batch_size, jsonl_batch_size, text_column=None):
+    if file_format == "parquet":
+        return count_parquet_file(file_path, tokenizer, tokenizer_batch_size,
+                                  parquet_batch_size, text_column)
+    if file_format == "jsonl":
+        return count_jsonl_file(file_path, tokenizer, tokenizer_batch_size,
+                                jsonl_batch_size, text_column)
+    raise ValueError(f"Unsupported file format: {file_format}")
+
+
+def normalize_task_path(data_dir, lang, data_file):
+    data_path = Path(data_file)
+    if data_path.is_absolute():
+        return data_path, data_path.as_posix()
+    root_path = data_dir / data_path
+    if root_path.is_file():
+        return root_path, data_path.as_posix()
+    if data_path.parts and data_path.parts[0] == lang:
+        return data_dir / data_path, data_path.as_posix()
+    rel_path = Path(lang) / data_path
     return data_dir / rel_path, rel_path.as_posix()
 
 
-def process_lang(data_dir, lang, tokenizer, tok_bs, pq_bs, text_column):
+def process_lang(data_dir, lang, file_format, tokenizer, tok_bs, pq_bs,
+                 jsonl_bs, text_column):
     lang_dir = data_dir / lang
-    if not lang_dir.is_dir():
+    flat_file = data_dir / f"{lang}{_file_suffix(file_format)}"
+    if not lang_dir.is_dir() and not flat_file.is_file():
         print(f"Warning: Directory not found: {lang_dir}. Skipping.", file=sys.stderr)
         return None
-    parquet_files = sorted(lang_dir.glob("*.parquet"))
-    if not parquet_files:
-        print(f"Warning: No .parquet files in {lang_dir}. Skipping.", file=sys.stderr)
+    data_files = []
+    if lang_dir.is_dir():
+        data_files.extend(sorted(lang_dir.glob(f"*{_file_suffix(file_format)}")))
+    if flat_file.is_file():
+        data_files.append(flat_file)
+    if not data_files:
+        print(f"Warning: No {_file_suffix(file_format)} files in {lang_dir}. "
+              "Skipping.", file=sys.stderr)
         return None
 
-    print(f"Processing {lang}: {len(parquet_files)} parquet files")
+    print(f"Processing {lang}: {len(data_files)} {file_format} files")
     totals = [0, 0, 0]
-    for fp in tqdm(parquet_files, desc=lang, leave=False):
-        counts = count_parquet_file(fp, tokenizer, tok_bs, pq_bs, text_column)
+    for fp in tqdm(data_files, desc=lang, leave=False):
+        counts = count_data_file(fp, file_format, tokenizer, tok_bs, pq_bs,
+                                 jsonl_bs, text_column)
         if counts is None:
             continue
         for i in range(3):
@@ -321,62 +412,69 @@ def process_lang(data_dir, lang, tokenizer, tok_bs, pq_bs, text_column):
     return [lang, *totals]
 
 
-def process_parquet_task(data_dir, lang, parquet_file, tokenizer, tok_bs, pq_bs,
-                         text_column):
-    fp, output_pf = normalize_parquet_task_path(data_dir, lang, parquet_file)
+def process_file_task(data_dir, lang, data_file, file_format, tokenizer, tok_bs,
+                      pq_bs, jsonl_bs, text_column):
+    fp, output_file = normalize_task_path(data_dir, lang, data_file)
     if not fp.is_file():
-        print(f"Warning: Parquet file not found: {fp}. Skipping.", file=sys.stderr)
+        print(f"Warning: {_file_label(file_format)} file not found: {fp}. "
+              "Skipping.", file=sys.stderr)
         return None
-    print(f"Processing {output_pf}")
-    counts = count_parquet_file(fp, tokenizer, tok_bs, pq_bs, text_column)
+    print(f"Processing {output_file}")
+    counts = count_data_file(fp, file_format, tokenizer, tok_bs, pq_bs,
+                             jsonl_bs, text_column)
     if counts is None:
         return None
-    return [lang, output_pf, *counts]
+    return [lang, output_file, *counts]
 
 
-def load_processed_parquet_files(output_file: Path, header: list[str]) -> set[str]:
+def load_processed_files(output_file: Path, header: list[str],
+                         file_format: str) -> set[str]:
     if not output_file.is_file() or output_file.stat().st_size == 0:
         return set()
     processed = set()
+    file_col = _file_column(file_format)
     with output_file.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         if reader.fieldnames != header:
             return processed
         for row in reader:
-            pf = (row.get("parquet_file") or "").strip()
-            if pf:
-                processed.add(pf)
+            data_file = (row.get(file_col) or "").strip()
+            if data_file:
+                processed.add(data_file)
     return processed
 
 
-def run_parquet_manifest_mode(args, data_dir, output_file, pq_header):
-    tasks = collect_parquet_tasks(args.parquet_manifest_file, args.worker_id)
-    processed = load_processed_parquet_files(output_file, pq_header)
+def run_manifest_mode(args, data_dir, output_file, file_header):
+    manifest_file = (args.jsonl_manifest_file if args.file_format == "jsonl"
+                     else args.parquet_manifest_file)
+    tasks = collect_file_tasks(manifest_file, args.worker_id, args.file_format)
+    processed = load_processed_files(output_file, file_header, args.file_format)
     pending = [
-        (lang, pf) for lang, pf in tasks
-        if normalize_parquet_task_path(data_dir, lang, pf)[1] not in processed
+        (lang, data_file) for lang, data_file in tasks
+        if normalize_task_path(data_dir, lang, data_file)[1] not in processed
     ]
-    print(f"Parquet tasks for worker {args.worker_id}: {len(tasks)}")
+    print(f"{_file_label(args.file_format)} tasks for worker {args.worker_id}: "
+          f"{len(tasks)}")
     print(f"Already checkpointed: {len(tasks) - len(pending)}")
     print(f"Pending: {len(pending)}")
     if not pending:
-        print("No pending parquet files.")
+        print(f"No pending {args.file_format} files.")
         return
 
     tokenizer = load_tokenizer(args.tokenizer)
     print("Tokenizer loaded successfully.")
     written = 0
-    for lang, pf in pending:
-        row = process_parquet_task(data_dir, lang, pf, tokenizer,
-                                   args.tokenizer_batch_size,
-                                   args.parquet_batch_size,
-                                   args.text_column)
+    for lang, data_file in pending:
+        row = process_file_task(data_dir, lang, data_file, args.file_format,
+                                tokenizer, args.tokenizer_batch_size,
+                                args.parquet_batch_size, args.jsonl_batch_size,
+                                args.text_column)
         if row is not None:
-            append_rows(output_file, [row], pq_header)
+            append_rows(output_file, [row], file_header)
             processed.add(row[1])
             written += 1
-            print(f"Checkpointed {row[1]} → {output_file}")
-    print(f"Wrote {written} parquet rows to {output_file}")
+            print(f"Checkpointed {row[1]} -> {output_file}")
+    print(f"Wrote {written} {args.file_format} rows to {output_file}")
 
 
 def run_language_mode(args, data_dir, output_file, lang_header):
@@ -401,9 +499,9 @@ def run_language_mode(args, data_dir, output_file, lang_header):
         if lang in worker_langs:
             print(f"Worker CSV already has {lang}. Skipping.")
             continue
-        row = process_lang(data_dir, lang, tokenizer,
+        row = process_lang(data_dir, lang, args.file_format, tokenizer,
                            args.tokenizer_batch_size,
-                           args.parquet_batch_size,
+                           args.parquet_batch_size, args.jsonl_batch_size,
                            args.text_column)
         if row is not None:
             append_rows(output_file, [row], lang_header)
@@ -416,7 +514,7 @@ def run_language_mode(args, data_dir, output_file, lang_header):
 def cmd_count(args):
     tok_name = args.tokenizer_name
     lang_header = _lang_header(tok_name)
-    pq_header = _parquet_header(tok_name)
+    file_header = _file_header(tok_name, args.file_format)
 
     data_dir = Path(args.data_dir)
     output_file = Path(args.output_file)
@@ -430,9 +528,24 @@ def cmd_count(args):
     if args.parquet_batch_size <= 0:
         print("Error: --parquet_batch_size must be positive.", file=sys.stderr)
         sys.exit(1)
+    if args.jsonl_batch_size <= 0:
+        print("Error: --jsonl_batch_size must be positive.", file=sys.stderr)
+        sys.exit(1)
+    if args.parquet_manifest_file and args.jsonl_manifest_file:
+        print("Error: Use only one of --parquet_manifest_file or "
+              "--jsonl_manifest_file.", file=sys.stderr)
+        sys.exit(1)
+    if args.file_format == "jsonl" and args.parquet_manifest_file:
+        print("Error: Use --jsonl_manifest_file with --file_format jsonl.",
+              file=sys.stderr)
+        sys.exit(1)
+    if args.file_format == "parquet" and args.jsonl_manifest_file:
+        print("Error: Use --parquet_manifest_file with --file_format parquet.",
+              file=sys.stderr)
+        sys.exit(1)
 
-    if args.parquet_manifest_file:
-        run_parquet_manifest_mode(args, data_dir, output_file, pq_header)
+    if args.parquet_manifest_file or args.jsonl_manifest_file:
+        run_manifest_mode(args, data_dir, output_file, file_header)
     else:
         run_language_mode(args, data_dir, output_file, lang_header)
 
@@ -444,7 +557,7 @@ def cmd_count(args):
 def _parse_aggregate_args(subparsers):
     p = subparsers.add_parser(
         "aggregate",
-        help="Merge parquet-level worker CSVs into language-level CSV.",
+        help="Merge file-level worker CSVs into language-level CSV.",
     )
     p.add_argument("--data_dir", required=True, help="Root data directory.")
     p.add_argument("--task_root_dir", required=True,
@@ -455,6 +568,9 @@ def _parse_aggregate_args(subparsers):
                     help="Directory for aggregation reports.")
     p.add_argument("--dry_run", action="store_true",
                     help="Write reports but don't append to main CSV.")
+    p.add_argument("--file_format", choices=SUPPORTED_FILE_FORMATS,
+                    default="parquet",
+                    help="Worker file format to aggregate (default: parquet).")
     p.add_argument("--tokenizer_name", type=str, default="Qwen3_5",
                     help="Column suffix for tokenizer counts.")
 
@@ -483,7 +599,7 @@ def _load_main_completed(output_file: Path) -> set[str]:
     return completed
 
 
-def _parse_count_value(value, path, row_num, column, bad_rows):
+def _parse_count_value(value, path, row_num, column, bad_rows, file_col):
     value = clean(value)
     try:
         return int(value)
@@ -491,55 +607,59 @@ def _parse_count_value(value, path, row_num, column, bad_rows):
         bad_rows.append({
             "source_csv": str(path), "row_number": row_num,
             "reason": f"invalid integer in {column}",
-            "lang": "", "parquet_file": "",
+            "lang": "", file_col: "",
         })
         return None
 
 
-def _normalize_parquet_id(data_dir, lang, parquet_file):
-    pp = Path(parquet_file)
-    if pp.is_absolute():
+def _normalize_file_id(data_dir, lang, data_file):
+    fp = Path(data_file)
+    if fp.is_absolute():
         try:
-            return pp.relative_to(data_dir).as_posix()
+            return fp.relative_to(data_dir).as_posix()
         except ValueError:
-            return pp.as_posix()
-    if pp.parts and pp.parts[0] == lang:
-        return pp.as_posix()
-    return (Path(lang) / pp).as_posix()
+            return fp.as_posix()
+    if (data_dir / fp).is_file():
+        return fp.as_posix()
+    if fp.parts and fp.parts[0] == lang:
+        return fp.as_posix()
+    return (Path(lang) / fp).as_posix()
 
 
-def _load_parquet_rows(data_dir, worker_csvs, pq_header, count_cols):
-    rows_by_parquet = {}
-    parquet_sources = defaultdict(list)
+def _load_file_rows(data_dir, worker_csvs, file_header, count_cols, file_format):
+    file_col = _file_column(file_format)
+    rows_by_file = {}
+    file_sources = defaultdict(list)
     dup_conflicts = []
     dup_identical = []
     bad_rows = []
-    pq_csvs = []
+    file_csvs = []
     skipped_csvs = []
 
     for path in worker_csvs:
         header = read_csv_header(path)
-        if header != pq_header:
+        if header != file_header:
             skipped_csvs.append(str(path))
             continue
-        pq_csvs.append(str(path))
+        file_csvs.append(str(path))
         with path.open("r", newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for rn, row in enumerate(reader, start=2):
                 lang = clean(row.get("lang"))
-                pf = clean(row.get("parquet_file"))
-                if not lang or not pf:
+                data_file = clean(row.get(file_col))
+                if not lang or not data_file:
                     bad_rows.append({
                         "source_csv": str(path), "row_number": rn,
-                        "reason": "missing lang or parquet_file",
-                        "lang": lang, "parquet_file": pf,
+                        "reason": f"missing lang or {file_col}",
+                        "lang": lang, file_col: data_file,
                     })
                     continue
 
                 counts = {}
                 valid = True
                 for col in count_cols:
-                    v = _parse_count_value(row.get(col), path, rn, col, bad_rows)
+                    v = _parse_count_value(row.get(col), path, rn, col,
+                                           bad_rows, file_col)
                     if v is None:
                         valid = False
                         break
@@ -547,32 +667,32 @@ def _load_parquet_rows(data_dir, worker_csvs, pq_header, count_cols):
                 if not valid:
                     continue
 
-                norm_pf = _normalize_parquet_id(data_dir, lang, pf)
+                norm_file = _normalize_file_id(data_dir, lang, data_file)
                 norm_row = {
                     "lang": lang,
-                    "parquet_file": norm_pf,
+                    file_col: norm_file,
                     **counts,
                     "source_csv": str(path),
                     "row_number": rn,
                 }
 
-                existing = rows_by_parquet.get(norm_pf)
+                existing = rows_by_file.get(norm_file)
                 if existing is None:
-                    rows_by_parquet[norm_pf] = norm_row
-                    parquet_sources[norm_pf].append(str(path))
+                    rows_by_file[norm_file] = norm_row
+                    file_sources[norm_file].append(str(path))
                     continue
 
-                parquet_sources[norm_pf].append(str(path))
+                file_sources[norm_file].append(str(path))
                 cmp_cols = ["lang", *count_cols]
                 if all(existing[c] == norm_row[c] for c in cmp_cols):
                     dup_identical.append({
-                        "parquet_file": norm_pf,
+                        file_col: norm_file,
                         "kept_source_csv": existing["source_csv"],
                         "duplicate_source_csv": str(path),
                     })
                 else:
                     dup_conflicts.append({
-                        "parquet_file": norm_pf,
+                        file_col: norm_file,
                         "first_source_csv": existing["source_csv"],
                         "conflicting_source_csv": str(path),
                         "first_lang": existing["lang"],
@@ -584,46 +704,51 @@ def _load_parquet_rows(data_dir, worker_csvs, pq_header, count_cols):
                     })
 
     return {
-        "rows_by_parquet": rows_by_parquet,
-        "parquet_sources": parquet_sources,
+        "rows_by_file": rows_by_file,
+        "file_sources": file_sources,
         "duplicate_conflicts": dup_conflicts,
         "duplicate_identical": dup_identical,
         "bad_rows": bad_rows,
-        "parquet_worker_csvs": pq_csvs,
+        "file_worker_csvs": file_csvs,
         "skipped_worker_csvs": skipped_csvs,
     }
 
 
-def _collect_expected_parquets(data_dir):
+def _collect_expected_files(data_dir, file_format):
     expected = {}
-    no_pq_dirs = []
+    no_file_dirs = []
+    suffix = _file_suffix(file_format)
+    for path in sorted(p for p in data_dir.iterdir()
+                       if p.is_file() and p.suffix == suffix):
+        expected.setdefault(path.stem, set()).add(path.name)
     for lang_dir in sorted(p for p in data_dir.iterdir() if p.is_dir()):
         lang = lang_dir.name
         files = sorted(
             f"{lang}/{p.name}" for p in lang_dir.iterdir()
-            if p.is_file() and p.suffix == ".parquet"
+            if p.is_file() and p.suffix == suffix
         )
         if files:
             expected[lang] = set(files)
         else:
-            no_pq_dirs.append(lang)
-    return expected, no_pq_dirs
+            no_file_dirs.append(lang)
+    return expected, no_file_dirs
 
 
-def _aggregate_complete(expected_pq, completed_main, rows_by_pq,
-                        conflict_files, count_cols):
+def _aggregate_complete(expected_files, completed_main, rows_by_file,
+                        conflict_files, count_cols, file_format):
     rows_to_append = []
     added = []
     missing_report = []
     missing_detail = []
     conflict_report = []
     already_done = []
+    file_col = _file_column(file_format)
 
-    for lang, exp_files in sorted(expected_pq.items()):
+    for lang, exp_files in sorted(expected_files.items()):
         if lang in completed_main:
             already_done.append({
                 "lang": lang,
-                "expected_parquet_files": len(exp_files),
+                f"expected_{file_format}_files": len(exp_files),
                 "reason": "already present in main CSV",
             })
             continue
@@ -632,34 +757,34 @@ def _aggregate_complete(expected_pq, completed_main, rows_by_pq,
         if lang_conflicts:
             conflict_report.append({
                 "lang": lang,
-                "conflicting_parquet_files": len(lang_conflicts),
+                f"conflicting_{file_format}_files": len(lang_conflicts),
                 "examples": "|".join(lang_conflicts[:20]),
             })
             continue
 
-        available = exp_files & rows_by_pq.keys()
+        available = exp_files & rows_by_file.keys()
         missing = sorted(exp_files - available)
         if missing:
             missing_report.append({
                 "lang": lang,
-                "expected_parquet_files": len(exp_files),
-                "completed_parquet_files": len(available),
-                "missing_parquet_files": len(missing),
+                f"expected_{file_format}_files": len(exp_files),
+                f"completed_{file_format}_files": len(available),
+                f"missing_{file_format}_files": len(missing),
                 "examples": "|".join(missing[:20]),
             })
-            for pf in missing:
-                missing_detail.append({"lang": lang, "missing_parquet_file": pf})
+            for data_file in missing:
+                missing_detail.append({"lang": lang, f"missing_{file_col}": data_file})
             continue
 
         totals = {c: 0 for c in count_cols}
-        for pf in sorted(exp_files):
-            row = rows_by_pq[pf]
+        for data_file in sorted(exp_files):
+            row = rows_by_file[data_file]
             for c in count_cols:
                 totals[c] += row[c]
 
         out_row = {"lang": lang, **totals}
         rows_to_append.append(out_row)
-        added.append({**out_row, "parquet_files": len(exp_files)})
+        added.append({**out_row, f"{file_format}_files": len(exp_files)})
 
     return {
         "rows_to_append": rows_to_append,
@@ -671,17 +796,18 @@ def _aggregate_complete(expected_pq, completed_main, rows_by_pq,
     }
 
 
-def _collect_orphan_rows(expected_pq, rows_by_pq):
+def _collect_orphan_rows(expected_files, rows_by_file, file_format):
     all_expected = set()
-    for files in expected_pq.values():
+    file_col = _file_column(file_format)
+    for files in expected_files.values():
         all_expected.update(files)
     orphans = []
-    for pf, row in sorted(rows_by_pq.items()):
-        if pf not in all_expected:
+    for data_file, row in sorted(rows_by_file.items()):
+        if data_file not in all_expected:
             orphans.append({
-                "lang": row["lang"], "parquet_file": pf,
+                "lang": row["lang"], file_col: data_file,
                 "source_csv": row["source_csv"],
-                "reason": "parquet file not found in current DATA_DIR scan",
+                "reason": f"{file_format} file not found in current DATA_DIR scan",
             })
     return orphans
 
@@ -702,8 +828,9 @@ def _append_lang_rows(output_file, rows, lang_header):
 def cmd_aggregate(args):
     tok_name = args.tokenizer_name
     lang_header = _lang_header(tok_name)
-    pq_header = _parquet_header(tok_name)
+    file_header = _file_header(tok_name, args.file_format)
     count_cols = _count_columns(tok_name)
+    file_col = _file_column(args.file_format)
 
     data_dir = Path(args.data_dir)
     task_root_dir = Path(args.task_root_dir)
@@ -715,69 +842,78 @@ def cmd_aggregate(args):
 
     worker_csvs = _list_worker_csvs(task_root_dir)
     completed_main = _load_main_completed(output_file)
-    loaded = _load_parquet_rows(data_dir, worker_csvs, pq_header, count_cols)
-    expected_pq, no_pq_dirs = _collect_expected_parquets(data_dir)
-    orphans = _collect_orphan_rows(expected_pq, loaded["rows_by_parquet"])
+    loaded = _load_file_rows(data_dir, worker_csvs, file_header, count_cols,
+                             args.file_format)
+    expected_files, no_file_dirs = _collect_expected_files(data_dir,
+                                                           args.file_format)
+    orphans = _collect_orphan_rows(expected_files, loaded["rows_by_file"],
+                                   args.file_format)
 
-    conflict_files = {r["parquet_file"] for r in loaded["duplicate_conflicts"]}
-    agg = _aggregate_complete(expected_pq, completed_main,
-                              loaded["rows_by_parquet"],
-                              conflict_files, count_cols)
+    conflict_files = {r[file_col] for r in loaded["duplicate_conflicts"]}
+    agg = _aggregate_complete(expected_files, completed_main,
+                              loaded["rows_by_file"],
+                              conflict_files, count_cols, args.file_format)
 
     if not args.dry_run:
         _append_lang_rows(output_file, agg["rows_to_append"], lang_header)
 
     write_csv(report_dir / "complete_languages_added.csv",
-              [*lang_header, "parquet_files"], agg["added_report"])
+              [*lang_header, f"{args.file_format}_files"], agg["added_report"])
     write_csv(report_dir / "missing_languages.csv",
-              ["lang", "expected_parquet_files", "completed_parquet_files",
-               "missing_parquet_files", "examples"], agg["missing_report"])
-    write_csv(report_dir / "missing_parquet_files.csv",
-              ["lang", "missing_parquet_file"], agg["missing_detail"])
-    write_csv(report_dir / "conflicting_duplicate_parquet_rows.csv",
-              ["parquet_file", "first_source_csv", "conflicting_source_csv",
+              ["lang", f"expected_{args.file_format}_files",
+               f"completed_{args.file_format}_files",
+               f"missing_{args.file_format}_files", "examples"],
+              agg["missing_report"])
+    write_csv(report_dir / f"missing_{args.file_format}_files.csv",
+              ["lang", f"missing_{file_col}"], agg["missing_detail"])
+    write_csv(report_dir / f"conflicting_duplicate_{args.file_format}_rows.csv",
+              [file_col, "first_source_csv", "conflicting_source_csv",
                "first_lang", "conflicting_lang",
                "first_counts", "conflicting_counts"],
               loaded["duplicate_conflicts"])
     write_csv(report_dir / "languages_blocked_by_conflicts.csv",
-              ["lang", "conflicting_parquet_files", "examples"],
+              ["lang", f"conflicting_{args.file_format}_files", "examples"],
               agg["conflict_lang_report"])
     write_csv(report_dir / "bad_worker_rows.csv",
-              ["source_csv", "row_number", "reason", "lang", "parquet_file"],
+              ["source_csv", "row_number", "reason", "lang", file_col],
               loaded["bad_rows"])
-    write_csv(report_dir / "orphan_parquet_rows.csv",
-              ["lang", "parquet_file", "source_csv", "reason"], orphans)
+    write_csv(report_dir / f"orphan_{args.file_format}_rows.csv",
+              ["lang", file_col, "source_csv", "reason"], orphans)
     write_csv(report_dir / "already_in_main.csv",
-              ["lang", "expected_parquet_files", "reason"],
+              ["lang", f"expected_{args.file_format}_files", "reason"],
               agg["already_completed_report"])
-    write_csv(report_dir / "languages_without_parquet_files.csv",
+    write_csv(report_dir / f"languages_without_{args.file_format}_files.csv",
               ["lang"],
-              [{"lang": lang} for lang in no_pq_dirs])
-    write_csv(report_dir / "identical_duplicate_parquet_rows.csv",
-              ["parquet_file", "kept_source_csv", "duplicate_source_csv"],
+              [{"lang": lang} for lang in no_file_dirs])
+    write_csv(report_dir / f"identical_duplicate_{args.file_format}_rows.csv",
+              [file_col, "kept_source_csv", "duplicate_source_csv"],
               loaded["duplicate_identical"])
-    write_text(report_dir / "parquet_worker_csvs_used.txt",
-               loaded["parquet_worker_csvs"])
-    write_text(report_dir / "worker_csvs_skipped_non_parquet.txt",
+    write_text(report_dir / f"{args.file_format}_worker_csvs_used.txt",
+               loaded["file_worker_csvs"])
+    write_text(report_dir / f"worker_csvs_skipped_non_{args.file_format}.txt",
                loaded["skipped_worker_csvs"])
 
     summary = [
         f"dry_run: {args.dry_run}",
+        f"file_format: {args.file_format}",
         f"worker_csvs_found: {len(worker_csvs)}",
-        f"parquet_worker_csvs_used: {len(loaded['parquet_worker_csvs'])}",
-        f"non_parquet_worker_csvs_skipped: {len(loaded['skipped_worker_csvs'])}",
-        f"deduplicated_parquet_rows: {len(loaded['rows_by_parquet'])}",
-        f"identical_duplicate_parquet_rows: {len(loaded['duplicate_identical'])}",
-        f"conflicting_duplicate_parquet_rows: {len(loaded['duplicate_conflicts'])}",
+        f"{args.file_format}_worker_csvs_used: {len(loaded['file_worker_csvs'])}",
+        f"non_{args.file_format}_worker_csvs_skipped: "
+        f"{len(loaded['skipped_worker_csvs'])}",
+        f"deduplicated_{args.file_format}_rows: {len(loaded['rows_by_file'])}",
+        f"identical_duplicate_{args.file_format}_rows: "
+        f"{len(loaded['duplicate_identical'])}",
+        f"conflicting_duplicate_{args.file_format}_rows: "
+        f"{len(loaded['duplicate_conflicts'])}",
         f"bad_worker_rows: {len(loaded['bad_rows'])}",
-        f"orphan_parquet_rows: {len(orphans)}",
+        f"orphan_{args.file_format}_rows: {len(orphans)}",
         f"languages_already_in_main: {len(agg['already_completed_report'])}",
         f"languages_added_to_main: {len(agg['added_report']) if not args.dry_run else 0}",
         f"languages_complete_but_not_appended_due_to_dry_run: "
         f"{len(agg['added_report']) if args.dry_run else 0}",
-        f"languages_missing_parquet_rows: {len(agg['missing_report'])}",
+        f"languages_missing_{args.file_format}_rows: {len(agg['missing_report'])}",
         f"languages_blocked_by_conflicts: {len(agg['conflict_lang_report'])}",
-        f"languages_without_parquet_files: {len(no_pq_dirs)}",
+        f"languages_without_{args.file_format}_files: {len(no_file_dirs)}",
         f"main_csv: {output_file}",
         f"report_dir: {report_dir}",
     ]
@@ -793,7 +929,7 @@ def cmd_aggregate(args):
 def _parse_build_manifest_args(subparsers):
     p = subparsers.add_parser(
         "build-manifest",
-        help="Build a size-balanced parquet manifest for SLURM workers.",
+        help="Build a size-balanced file manifest for SLURM workers.",
     )
     p.add_argument("--data_dir", required=True,
                     help="Root data directory.")
@@ -803,29 +939,44 @@ def _parse_build_manifest_args(subparsers):
                     help="Root dir containing previous run_* worker output folders.")
     p.add_argument("--num_jobs", type=int, required=True,
                     help="Number of SLURM array jobs to distribute work across.")
+    p.add_argument("--file_format", choices=SUPPORTED_FILE_FORMATS,
+                    default="parquet",
+                    help="Input file format to schedule (default: parquet).")
     p.add_argument("--tokenizer_name", type=str, default="Qwen3_5",
                     help="Column suffix for tokenizer counts.")
     p.add_argument("--output_dir", required=True,
                     help="Directory where manifest and reports are written.")
 
 
-def _scan_parquet_files_with_sizes(data_dir: Path, langs: list[str]):
-    """Return list of (lang, relative_path, size_bytes) for all parquets."""
+def _scan_files_with_sizes(data_dir: Path, langs: list[str], file_format: str):
+    """Return list of (lang, relative_path, size_bytes) for all data files."""
     results = []
-    no_parquet_dirs = []
+    no_file_dirs = []
+    suffix = _file_suffix(file_format)
     for lang in langs:
         lang_dir = data_dir / lang
-        if not lang_dir.is_dir():
-            continue
         found = False
-        for f in sorted(lang_dir.iterdir()):
-            if f.is_file() and f.suffix == ".parquet":
-                rel = f"{lang}/{f.name}"
-                results.append((lang, rel, f.stat().st_size))
-                found = True
+        flat_file = data_dir / f"{lang}{suffix}"
+        if flat_file.is_file():
+            results.append((lang, flat_file.name, flat_file.stat().st_size))
+            found = True
+        if lang_dir.is_dir():
+            for f in sorted(lang_dir.iterdir()):
+                if f.is_file() and f.suffix == suffix:
+                    rel = f"{lang}/{f.name}"
+                    results.append((lang, rel, f.stat().st_size))
+                    found = True
         if not found:
-            no_parquet_dirs.append(lang)
-    return results, no_parquet_dirs
+            no_file_dirs.append(lang)
+    return results, no_file_dirs
+
+
+def _collect_language_ids(data_dir: Path, file_format: str) -> list[str]:
+    suffix = _file_suffix(file_format)
+    langs = {d.name for d in data_dir.iterdir() if d.is_dir()}
+    langs.update(p.stem for p in data_dir.iterdir()
+                 if p.is_file() and p.suffix == suffix)
+    return sorted(langs)
 
 
 def _greedy_bin_pack(items: list[tuple[str, str, int]], num_bins: int):
@@ -858,7 +1009,8 @@ def cmd_build_manifest(args):
     num_jobs = args.num_jobs
     tok_name = args.tokenizer_name
     lang_header = _lang_header(tok_name)
-    pq_header = _parquet_header(tok_name)
+    file_header = _file_header(tok_name, args.file_format)
+    file_col = _file_column(args.file_format)
 
     if not data_dir.is_dir():
         print(f"Error: Data directory not found: {data_dir}", file=sys.stderr)
@@ -916,29 +1068,29 @@ def cmd_build_manifest(args):
     completed_parquets = set()
     for wcsv in worker_csvs:
         header = read_csv_header(wcsv)
-        if header != pq_header:
+        if header != file_header:
             continue
         with wcsv.open("r", newline="", encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                pf = clean(row.get("parquet_file"))
-                if pf:
-                    completed_parquets.add(pf)
-    print(f"Completed parquet files from workers: {len(completed_parquets)}")
+                data_file = clean(row.get(file_col))
+                if data_file:
+                    completed_parquets.add(data_file)
+    print(f"Completed {args.file_format} files from workers: "
+          f"{len(completed_parquets)}")
 
-    all_folders = sorted(
-        d.name for d in data_dir.iterdir() if d.is_dir()
-    )
-    incomplete = [lang for lang in all_folders if lang not in completed_langs]
-    print(f"Total folders: {len(all_folders)}")
+    all_languages = _collect_language_ids(data_dir, args.file_format)
+    incomplete = [lang for lang in all_languages if lang not in completed_langs]
+    print(f"Total languages/filesets: {len(all_languages)}")
     print(f"Incomplete languages: {len(incomplete)}")
 
-    print("Scanning parquet files with sizes...")
-    all_parquets, no_parquet_dirs = _scan_parquet_files_with_sizes(
-        data_dir, incomplete
+    print(f"Scanning {args.file_format} files with sizes...")
+    all_parquets, no_parquet_dirs = _scan_files_with_sizes(
+        data_dir, incomplete, args.file_format
     )
-    print(f"Total parquet files in incomplete languages: {len(all_parquets)}")
-    print(f"Languages without parquet files: {len(no_parquet_dirs)}")
+    print(f"Total {args.file_format} files in incomplete languages: "
+          f"{len(all_parquets)}")
+    print(f"Languages without {args.file_format} files: {len(no_parquet_dirs)}")
 
     missing = [(lang, pf, sz) for lang, pf, sz in all_parquets
                if pf not in completed_parquets]
@@ -947,14 +1099,15 @@ def cmd_build_manifest(args):
     langs_with_missing = {lang for lang, _, _ in missing}
     ready_for_agg = langs_with_parquets - langs_with_missing
     print(f"Languages ready for aggregation: {len(ready_for_agg)}")
-    print(f"Languages with missing parquet work: {len(langs_with_missing)}")
-    print(f"Missing parquet files to process: {len(missing)}")
+    print(f"Languages with missing {args.file_format} work: "
+          f"{len(langs_with_missing)}")
+    print(f"Missing {args.file_format} files to process: {len(missing)}")
 
-    manifest_file = output_dir / "parquet_manifest.tsv"
+    manifest_file = output_dir / f"{args.file_format}_manifest.tsv"
     if not missing:
         with manifest_file.open("w", encoding="utf-8") as f:
-            f.write("worker_id\tlang\tparquet_file\n")
-        print("No parquet files need processing. Nothing to submit.")
+            f.write(f"worker_id\tlang\t{file_col}\n")
+        print(f"No {args.file_format} files need processing. Nothing to submit.")
         (output_dir / "num_jobs.txt").write_text("0\n")
         return
 
@@ -963,7 +1116,7 @@ def cmd_build_manifest(args):
 
     total_size = sum(sz for _, _, sz in missing)
     with manifest_file.open("w", encoding="utf-8") as f:
-        f.write("worker_id\tlang\tparquet_file\n")
+        f.write(f"worker_id\tlang\t{file_col}\n")
         for wid, lang, pf, _ in assignments:
             f.write(f"{wid}\t{lang}\t{pf}\n")
 
@@ -989,9 +1142,9 @@ def cmd_build_manifest(args):
 
     write_text(output_dir / "languages_ready_for_aggregation.txt",
                sorted(ready_for_agg))
-    write_text(output_dir / "languages_without_parquets.txt",
+    write_text(output_dir / f"languages_without_{args.file_format}s.txt",
                sorted(no_parquet_dirs))
-    write_text(output_dir / "languages_with_missing_parquets.txt",
+    write_text(output_dir / f"languages_with_missing_{args.file_format}s.txt",
                sorted(langs_with_missing))
 
 
@@ -1001,7 +1154,8 @@ def cmd_build_manifest(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Count and aggregate token statistics for monolingual Parquet files.",
+        description="Count and aggregate token statistics for monolingual "
+                    "Parquet/JSONL files.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
