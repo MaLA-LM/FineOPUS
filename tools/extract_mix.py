@@ -1,18 +1,21 @@
 #!/usr/bin/env python3
-"""Extract a token-budgeted multilingual parallel mix from three source corpora.
+"""Extract a token-budgeted multilingual parallel mix from source corpora.
 
 For every target language pair (row) in the quota CSV, extract approximately
 ``quota_Qwen3_5_tokens`` tokens (source+target tokens, Qwen/Qwen3.5-9B tokenizer)
-from each of the three datasets (NLLB, MaLA_Bi, FineOPUS).
+from each configured dataset.
 
 The exact number of rows to sample is derived from the *pre-computed* per-source-pair
 token statistics (token_stats/*.csv): rows = allocated_tokens / (tokens_per_line).
 This avoids re-tokenizing tens of billions of tokens while still hitting the
 token budget in expectation. Random Bernoulli sampling (seeded) is used.
+If the quota is larger than the available tokens, the available rows are
+upsampled by writing complete repeats plus a sampled remainder.
 
 If a target pair maps to several source pairs (``a|b|...``) the token budget is
 split as evenly as possible across them (water-filling, respecting each pair's
-available tokens).
+available tokens). When upsampling is needed, the extra budget is distributed
+proportionally to each source pair's available tokens.
 
 Every output pair folder keeps a single parquet with two columns
 ``source_text`` (always eng_Latn) and ``target_text`` (the foreign side), so a
@@ -52,9 +55,37 @@ DATASETS = {
         "src_col": "src_text",
         "tgt_col": "tgt_text",
     },
-    "FineOPUS": {
+    "FineOPUS-Filtered-Stage5": {
         "data_dir": Path("/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage5"),
         "stats_csv": STATS_DIR / "FineOPUS-Filtered-Stage5_Qwen3_5.csv",
+        "csv_col": "FineOPUS_csv_lang_pair_rows",
+        "src_col": "source_text",
+        "tgt_col": "target_text",
+    },
+    "FineOPUS-Filtered-Stage4": {
+        "data_dir": Path("/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage4"),
+        "stats_csv": STATS_DIR / "FineOPUS-Filtered-Stage4_Qwen3_5.csv",
+        "csv_col": "FineOPUS_csv_lang_pair_rows",
+        "src_col": "source_text",
+        "tgt_col": "target_text",
+    },
+    "FineOPUS-Filtered-Stage3": {
+        "data_dir": Path("/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage3"),
+        "stats_csv": STATS_DIR / "FineOPUS-Filtered-Stage3_Qwen3_5.csv",
+        "csv_col": "FineOPUS_csv_lang_pair_rows",
+        "src_col": "source_text",
+        "tgt_col": "target_text",
+    },
+    "FineOPUS-Filtered-Stage2": {
+        "data_dir": Path("/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage2"),
+        "stats_csv": STATS_DIR / "FineOPUS-Filtered-Stage2_Qwen3_5.csv",
+        "csv_col": "FineOPUS_csv_lang_pair_rows",
+        "src_col": "source_text",
+        "tgt_col": "target_text",
+    },
+    "FineOPUS-Filtered-Stage1": {
+        "data_dir": Path("/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage1"),
+        "stats_csv": STATS_DIR / "FineOPUS-Filtered-Stage1_Qwen3_5.csv",
         "csv_col": "FineOPUS_csv_lang_pair_rows",
         "src_col": "source_text",
         "tgt_col": "target_text",
@@ -64,6 +95,15 @@ DATASETS = {
 ENG = "eng_Latn"
 TOK_COLS = ("n_src_tokens_Qwen3_5", "n_tgt_tokens_Qwen3_5")
 FLUSH_ROWS = 200_000
+
+
+def parse_int(value: str, field_name: str) -> int:
+    """Parse integer fields that may contain thousands separators."""
+    text = str(value).strip().replace(",", "").replace("_", "")
+    try:
+        return int(text)
+    except ValueError as e:
+        raise ValueError(f"invalid integer in {field_name}: {value!r}") from e
 
 
 # ---------------------------------------------------------------------------
@@ -79,14 +119,15 @@ def load_stats(stats_csv: Path) -> dict[str, tuple[int, int]]:
             lp = (row.get("lang_pair") or "").strip()
             if not lp:
                 continue
-            n_lines = int(row["n_lines"])
-            toks = int(row[TOK_COLS[0]]) + int(row[TOK_COLS[1]])
+            n_lines = parse_int(row["n_lines"], "n_lines")
+            toks = (parse_int(row[TOK_COLS[0]], TOK_COLS[0]) +
+                    parse_int(row[TOK_COLS[1]], TOK_COLS[1]))
             stats[lp] = (n_lines, toks)
     return stats
 
 
 # ---------------------------------------------------------------------------
-# Water-filling: allocate quota across source pairs as evenly as possible
+# Token allocation
 # ---------------------------------------------------------------------------
 
 def water_fill(quota: int, caps: list[int]) -> list[int]:
@@ -108,6 +149,35 @@ def water_fill(quota: int, caps: list[int]) -> list[int]:
             remaining -= alloc[idx]
         left -= 1
     return alloc
+
+
+def proportional_alloc(total: int, weights: list[int]) -> list[int]:
+    """Allocate ``total`` integer units in proportion to ``weights``."""
+    if total <= 0:
+        return [0] * len(weights)
+    weight_sum = sum(weights)
+    if weight_sum <= 0:
+        return [0] * len(weights)
+
+    raw = [total * w / weight_sum for w in weights]
+    alloc = [int(x) for x in raw]
+    remainder = total - sum(alloc)
+    order = sorted(range(len(weights)), key=lambda i: raw[i] - alloc[i],
+                   reverse=True)
+    for i in order[:remainder]:
+        alloc[i] += 1
+    return alloc
+
+
+def allocate_tokens(quota: int, caps: list[int]) -> list[int]:
+    """Allocate tokens, upsampling proportionally when quota exceeds caps."""
+    available = sum(caps)
+    if quota <= available:
+        return water_fill(quota, caps)
+
+    extra = quota - available
+    extra_alloc = proportional_alloc(extra, caps)
+    return [cap + add for cap, add in zip(caps, extra_alloc)]
 
 
 # ---------------------------------------------------------------------------
@@ -171,11 +241,17 @@ def plan_pair(target_pair: str, quota: int, source_pairs: list[str],
         return plan
 
     caps = [toks for _, _, toks, _ in valid]
-    allocs = water_fill(quota, caps)
+    available = sum(caps)
+    if quota > available:
+        plan.warnings.append(
+            f"quota exceeds available tokens; upsampling "
+            f"{available:,} -> {quota:,}"
+        )
+    allocs = allocate_tokens(quota, caps)
 
     for (sp, n_lines, toks, eis), alloc in zip(valid, allocs):
         avg = toks / n_lines
-        rows = min(n_lines, int(round(alloc / avg))) if avg > 0 else 0
+        rows = int(round(alloc / avg)) if avg > 0 else 0
         plan.sources.append(SourcePlan(
             source_pair=sp, n_lines=n_lines, total_tokens=toks,
             alloc_tokens=alloc, rows=rows, eng_is_source=eis,
@@ -246,12 +322,29 @@ def sample_source(sp_plan: SourcePlan, data_dir: Path, cfg: dict,
     if tot == 0 or sp_plan.rows <= 0:
         return 0
 
-    p = min(1.0, sp_plan.rows / tot)
+    full_repeats = sp_plan.rows // tot
+    remainder_rows = sp_plan.rows % tot
+    remainder_p = min(1.0, remainder_rows / tot)
     rng = np.random.default_rng(seed)
 
     src_col, tgt_col = cfg["src_col"], cfg["tgt_col"]
     # Output source_text must be eng. If eng is on source side, keep; else swap.
     read_cols = [src_col, tgt_col]
+    source_start = writer.written
+
+    def add_cols(col_src: list, col_tgt: list):
+        if sp_plan.eng_is_source:
+            writer.add(col_src, col_tgt)
+        else:
+            writer.add(col_tgt, col_src)
+
+    def add_batch(batch: pa.RecordBatch, idx: np.ndarray | None = None):
+        if idx is None:
+            add_cols(batch.column(0).to_pylist(), batch.column(1).to_pylist())
+        else:
+            take_idx = pa.array(idx)
+            add_cols(batch.column(0).take(take_idx).to_pylist(),
+                     batch.column(1).take(take_idx).to_pylist())
 
     for fp in files:
         pf = pq.ParquetFile(fp)
@@ -259,17 +352,20 @@ def sample_source(sp_plan: SourcePlan, data_dir: Path, cfg: dict,
             n = batch.num_rows
             if n == 0:
                 continue
-            mask = rng.random(n) < p
-            if not mask.any():
+
+            if full_repeats:
+                col_src = batch.column(0).to_pylist()
+                col_tgt = batch.column(1).to_pylist()
+                for _ in range(full_repeats):
+                    add_cols(col_src, col_tgt)
+
+            if remainder_rows <= 0:
                 continue
-            idx = np.nonzero(mask)[0]
-            col_src = batch.column(0).take(pa.array(idx)).to_pylist()
-            col_tgt = batch.column(1).take(pa.array(idx)).to_pylist()
-            if sp_plan.eng_is_source:
-                writer.add(col_src, col_tgt)
-            else:
-                writer.add(col_tgt, col_src)
-    return writer.written
+            mask = rng.random(n) < remainder_p
+            if mask.any():
+                add_batch(batch, np.nonzero(mask)[0])
+
+    return writer.written - source_start
 
 
 # ---------------------------------------------------------------------------
@@ -318,7 +414,7 @@ def main():
     plan_records = []
     for r in rows:
         target_pair = r["pair_key"]
-        quota = int(r["quota_Qwen3_5_tokens"])
+        quota = parse_int(r["quota_Qwen3_5_tokens"], "quota_Qwen3_5_tokens")
         source_pairs = [s for s in r[cfg["csv_col"]].split("|") if s]
         plan = plan_pair(target_pair, quota, source_pairs, stats, data_dir)
 
@@ -341,6 +437,7 @@ def main():
                 "avail_tokens": s.total_tokens,
                 "avail_lines": s.n_lines,
                 "rows_to_sample": s.rows,
+                "upsample_factor": s.rows / s.n_lines if s.n_lines else 0,
             })
 
         if args.dry_run:

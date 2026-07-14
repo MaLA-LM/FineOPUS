@@ -15,7 +15,11 @@
 # Submit (one array per dataset, chunked over the target pairs):
 #   NUM_CHUNKS=32 ./extract_mix.sh NLLB
 #   NUM_CHUNKS=32 ./extract_mix.sh MaLA_Bi
-#   NUM_CHUNKS=32 ./extract_mix.sh FineOPUS
+#   NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage5
+#   NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage4
+#   NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage3
+#   NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage2
+#   NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage1
 #
 # Worker mode is entered automatically when SLURM sets SLURM_ARRAY_TASK_ID.
 
@@ -25,11 +29,11 @@ set -euo pipefail
 # copy in worker mode, so it cannot be used to locate extract_mix.py).
 TOOLS_DIR="${TOOLS_DIR:-/scratch/project_462001427/FineOPUS/tools}"
 
-DATASET="${1:?Usage: ./extract_mix.sh <NLLB|MaLA_Bi|FineOPUS>}"
+DATASET="${1:?Usage: ./extract_mix.sh <NLLB|MaLA_Bi|FineOPUS-Filtered-Stage5|FineOPUS-Filtered-Stage4|FineOPUS-Filtered-Stage3|FineOPUS-Filtered-Stage2|FineOPUS-Filtered-Stage1>}"
 NUM_CHUNKS="${NUM_CHUNKS:-32}"
 SEED="${SEED:-42}"
-CSV="${CSV:-/scratch/project_462001427/FineOPUS/slm_from_scratch/data/parallel/multilingual_mix/english_ntrex128_97_fair_50B_quota_alpha0.5.csv}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-/scratch/project_462001427/FineOPUS/slm_from_scratch/data/parallel/multilingual_mix}"
+CSV="${CSV:-/scratch/project_462001427/FineOPUS/slm_from_scratch/data/parallel/multilingual_mix/Multilingual-Mix-Parallel.csv}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-/scratch/project_462001427/FineOPUS/slm_from_scratch/data/parallel/multilingual_mix/_parquet}"
 
 # --------------------------- Worker mode ---------------------------
 if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
