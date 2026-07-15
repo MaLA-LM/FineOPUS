@@ -19,6 +19,9 @@
 #   NUM_CHUNKS=8 LANGS="eng_Latn deu_Latn" ./extract_mono.sh
 #   NUM_CHUNKS=32 OVERWRITE=1 ./extract_mono.sh
 #
+# Languages whose monolingual quota exceeds the available corpus are
+# automatically upsampled with complete repeats plus a sampled remainder.
+#
 # Worker mode is entered automatically when SLURM sets SLURM_ARRAY_TASK_ID.
 
 set -euo pipefail

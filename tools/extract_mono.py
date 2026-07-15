@@ -4,7 +4,9 @@
 The quota CSV provides ``monolingual_quota_tokens`` for each language.
 English (``eng_Latn``) is sampled from Nemotron-CC; every other language is
 sampled from FineWeb-2.  Sampling is based on pre-computed token statistics:
-rows_to_sample ~= quota_tokens / average_tokens_per_row.
+rows_to_sample ~= quota_tokens / average_tokens_per_row.  If the quota is
+larger than the available tokens, the source rows are upsampled by writing
+complete repeats plus a randomly sampled remainder.
 
 Output is one JSONL file per language:
     <output_dir>/<lang>.jsonl
@@ -133,7 +135,9 @@ def build_plan(lang: str, quota: int, fineweb_stats, nemotron_stats,
         prob = 0.0
     else:
         avg_tokens = n_tokens / n_lines
-        rows = min(n_lines, int(round(quota / avg_tokens)))
+        # Do not cap at n_lines: quotas above the available token count are
+        # fulfilled by repeating the corpus in sample_language().
+        rows = int(round(quota / avg_tokens))
         prob = min(1.0, rows / n_lines)
 
     return LangPlan(
@@ -206,6 +210,14 @@ def sample_language(plan: LangPlan, out_file: Path, seed: int, batch_size: int,
     if not files:
         return 0
 
+    # Stats determine the target rows via average tokens/row, but parquet
+    # metadata is authoritative for the number of rows currently on disk.
+    total_rows = sum(pq.ParquetFile(fp).metadata.num_rows for fp in files)
+    if total_rows <= 0:
+        return 0
+    full_repeats, remainder_rows = divmod(plan.rows_to_sample, total_rows)
+    remainder_prob = remainder_rows / total_rows
+
     rng = np.random.default_rng(stable_seed(seed, plan.dataset, plan.lang))
     with JsonlWriter(out_file, output_text_key, include_lang, plan.lang) as writer:
         for fp in files:
@@ -218,10 +230,14 @@ def sample_language(plan: LangPlan, out_file: Path, seed: int, batch_size: int,
                 if n == 0:
                     continue
                 col = batch.column(batch.schema.get_field_index(input_text_column))
-                if plan.sample_prob >= 1.0:
-                    writer.add_texts(col.to_pylist())
+                if full_repeats:
+                    texts = col.to_pylist()
+                    for _ in range(full_repeats):
+                        writer.add_texts(texts)
+
+                if remainder_rows <= 0:
                     continue
-                mask = rng.random(n) < plan.sample_prob
+                mask = rng.random(n) < remainder_prob
                 if not mask.any():
                     continue
                 idx = np.nonzero(mask)[0]
@@ -283,10 +299,13 @@ def main():
         planned_tokens = int(round(plan.rows_to_sample *
                                    (plan.available_tokens / plan.available_lines))) \
             if plan.available_lines else 0
+        upsample_factor = (plan.rows_to_sample / plan.available_lines
+                           if plan.available_lines else 0)
         print(f"[PLAN] {plan.lang} dataset={plan.dataset} "
               f"quota={plan.quota_tokens:,} avail={plan.available_tokens:,} "
               f"rows={plan.rows_to_sample:,}/{plan.available_lines:,} "
-              f"p={plan.sample_prob:.8f}")
+              f"p={plan.sample_prob:.8f} "
+              f"upsample={upsample_factor:.4f}x")
 
         plan_records.append({
             "language": plan.lang,
@@ -297,6 +316,7 @@ def main():
             "available_lines": plan.available_lines,
             "rows_to_sample": plan.rows_to_sample,
             "sample_prob": f"{plan.sample_prob:.12g}",
+            "upsample_factor": upsample_factor,
             "planned_tokens": planned_tokens,
         })
 
