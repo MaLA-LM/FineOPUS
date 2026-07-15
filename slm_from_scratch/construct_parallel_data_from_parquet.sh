@@ -5,9 +5,9 @@
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=8
 #SBATCH --time=1-00:00:00
-#SBATCH --mem=128G
+#SBATCH --mem=256G
 #SBATCH --account=project_462001087
 
 set -euo pipefail
