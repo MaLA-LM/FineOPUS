@@ -238,6 +238,9 @@ cython_debug/
 /slm_from_scratch/Megatron-LM
 /slm_from_scratch/tools
 /slm_from_scratch/tokenizer
+/slm_from_scratch/logs
+/slm_from_scratch/output
+/slm_from_scratch/cache
 /*/*/hostfiles/*
 models/*
 .DS_Store

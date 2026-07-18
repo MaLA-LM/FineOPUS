@@ -187,16 +187,23 @@ export NVTE_DEBUG_LEVEL=0
 # Megatron --data-path: alternating weight then prefix per source.
 # Edit one line per dataset; weights should sum to 1.0.
 DATASET_ROOT="$BASE_DIR/dataset"
-_DATA_MIX=(
-    1.0  xxx
-)
+# `_DATA_MIX` can be exported by submit_train_0_4B.sh as a whitespace-separated
+# "weight path [weight path ...]" string. Keep the current dataset as default.
+if [[ -n "${_DATA_MIX:-}" ]]; then
+    DATA_MIX_SPEC="$_DATA_MIX"
+    read -r -a _DATA_MIX <<< "$DATA_MIX_SPEC"
+else
+    _DATA_MIX=(
+        1.0 /scratch/project_462001427/FineOPUS/slm_from_scratch/data/combined/multilingual_mix/_bin/FineOPUS/combined_text_document
+    )
+fi
 DATA_PATH="${_DATA_MIX[*]}"
 DATA_CACHE_PATH="$BASE_DIR/cache"
 TOKENIZER_MODEL="$BASE_DIR/tokenizer/qwen3_5"
 
 # ❗❗❗WEIGHTS & BIASES CONFIG
-WANDB_PROJECT=""
-WANDB_EXP_NAME=""
+WANDB_PROJECT="${WANDB_PROJECT:-FineOPUS_Models}"
+WANDB_EXP_NAME="${WANDB_EXP_NAME:-0.4B_Pretrain_multilingual_FineOPUS}"
 
 # MODEL
 NUM_LAYERS=28
