@@ -17,8 +17,7 @@ echo "Job started at: $(date)"
 
 module purge
 module use /appl/local/csc/modulefiles/
-module load pytorch/2.5
-source ../torch25_env/bin/activate
+module load pytorch/2.7
 
 INPUT_DIR="/scratch/project_462001249/MaLA-LM/FineOPUS-ReLID"
 OUTPUT_DIR="/scratch/project_462001249/MaLA-LM/FineOPUS-ReLID-sample5k"
