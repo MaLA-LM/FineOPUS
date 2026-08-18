@@ -1165,6 +1165,9 @@ def render_index(reports, output_dir: Path):
 </head>
 <body>
     <main>
+        <h1>Contribute</h1>
+        <p>Language pairs listed here are undergoing human evaluation. If you would like to contribute to a new language pair, please contact shaoxiong.ji@utu.fi.</p>
+        
         <h1>Annotation workspaces</h1>
         <ul>$items</ul>
     </main>
