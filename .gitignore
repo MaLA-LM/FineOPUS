@@ -241,6 +241,11 @@ cython_debug/
 /slm_from_scratch/logs
 /slm_from_scratch/output
 /slm_from_scratch/cache
+/evaluation/data
+/evaluation/eval_env
+/evaluation/logs
+/evaluation/results
+/evaluation/tmp
 /*/*/hostfiles/*
 models/*
 .DS_Store
