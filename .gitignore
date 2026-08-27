@@ -245,6 +245,7 @@ cython_debug/
 /evaluation/eval_env
 /evaluation/logs
 /evaluation/results
+/evaluation/plots
 /evaluation/tmp
 /*/*/hostfiles/*
 models/*
