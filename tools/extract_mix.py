@@ -8,7 +8,10 @@ from each configured dataset.
 The exact number of rows to sample is derived from the *pre-computed* per-source-pair
 token statistics (token_stats/*.csv): rows = allocated_tokens / (tokens_per_line).
 This avoids re-tokenizing tens of billions of tokens while still hitting the
-token budget in expectation. Random Bernoulli sampling (seeded) is used.
+token budget in expectation. Random Bernoulli sampling (seeded) is used by
+default. For Stage4/Stage5, ``--quality_priority`` instead uses low-memory,
+score-weighted systematic sampling that favours rows with higher
+``similarity_score`` and ``qe_score`` and with longer text on both sides.
 If the quota is larger than the available tokens, the available rows are
 upsampled by writing complete repeats plus a sampled remainder.
 
@@ -55,6 +58,13 @@ DATASETS = {
         "src_col": "src_text",
         "tgt_col": "tgt_text",
     },
+    "MaLA_Bi_NLLB": {
+        "data_dir": Path("/scratch/project_462001069/mala-bi-nllb"),
+        "stats_csv": STATS_DIR / "mala-bi-nllb_Qwen3_5.csv",
+        "csv_col": "mala_bi_nllb_csv_lang_pair_rows",
+        "src_col": "source_text",
+        "tgt_col": "target_text",
+    },
     "FineOPUS-Filtered-Stage5": {
         "data_dir": Path("/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage5"),
         "stats_csv": STATS_DIR / "FineOPUS-Filtered-Stage5_Qwen3_5.csv",
@@ -95,6 +105,18 @@ DATASETS = {
 ENG = "eng_Latn"
 TOK_COLS = ("n_src_tokens_Qwen3_5", "n_tgt_tokens_Qwen3_5")
 FLUSH_ROWS = 200_000
+QUALITY_DATASETS = {
+    "FineOPUS-Filtered-Stage4",
+    "FineOPUS-Filtered-Stage5",
+}
+QUALITY_COLS = (
+    "similarity_score",
+    "qe_score",
+    "src_char_len",
+    "trg_char_len",
+)
+QUALITY_LENGTH_CAP = 512
+QUALITY_HIST_BINS = 65_536
 
 
 def parse_int(value: str, field_name: str) -> int:
@@ -272,6 +294,116 @@ def total_rows(files: list[Path]) -> int:
     return sum(pq.read_metadata(p).num_rows for p in files)
 
 
+def quality_weights(batch: pa.RecordBatch, strength: float) -> np.ndarray:
+    """Return bounded positive weights for score- and length-biased sampling.
+
+    The minimum of the two character lengths is used so that one very long
+    side cannot compensate for a short other side. Length preference is
+    logarithmic and capped, preventing a few extreme rows from dominating.
+    Missing/non-finite quality values receive the lowest preference.
+    """
+    values: dict[str, np.ndarray] = {}
+    for name in QUALITY_COLS:
+        idx = batch.schema.get_field_index(name)
+        if idx < 0:
+            raise ValueError(f"missing quality-priority column: {name}")
+        arr = np.asarray(
+            batch.column(idx).to_numpy(zero_copy_only=False),
+            dtype=np.float64,
+        )
+        values[name] = np.nan_to_num(
+            arr, nan=0.0, posinf=0.0, neginf=0.0,
+        )
+
+    similarity = np.clip(values["similarity_score"], 0.0, 1.0)
+    qe = np.clip(values["qe_score"], 0.0, 1.0)
+    both_sides_len = np.minimum(
+        values["src_char_len"], values["trg_char_len"],
+    )
+    length_score = np.log1p(
+        np.clip(both_sides_len, 0.0, QUALITY_LENGTH_CAP),
+    ) / np.log1p(QUALITY_LENGTH_CAP)
+
+    # Improvements in each signal multiply together. Bounded inputs keep the
+    # exponential weights numerically well behaved.
+    return np.exp(strength * (similarity + qe + length_score))
+
+
+def quality_probability_scale(
+    files: list[Path], target_rows: int, batch_size: int, strength: float,
+) -> float:
+    """Find ``scale`` such that sum(min(1, scale * weight)) ~= target_rows.
+
+    Only a fixed-size histogram is retained, so memory use is independent of
+    corpus size. Within a narrow histogram bucket, its exact mean weight is
+    used. With 65k log-spaced buckets the approximation error is negligible
+    compared with the existing row/token-budget approximation.
+    """
+    max_log_weight = 3.0 * strength
+    counts = np.zeros(QUALITY_HIST_BINS, dtype=np.int64)
+    weight_sums = np.zeros(QUALITY_HIST_BINS, dtype=np.float64)
+
+    for fp in files:
+        pf = pq.ParquetFile(fp)
+        missing = [c for c in QUALITY_COLS if c not in pf.schema_arrow.names]
+        if missing:
+            raise ValueError(
+                f"{fp} is missing quality-priority columns: "
+                f"{', '.join(missing)}"
+            )
+        for batch in pf.iter_batches(batch_size=batch_size,
+                                     columns=list(QUALITY_COLS)):
+            weights = quality_weights(batch, strength)
+            if max_log_weight == 0.0:
+                bucket = np.zeros(batch.num_rows, dtype=np.int64)
+            else:
+                log_weights = np.log(weights)
+                bucket = np.minimum(
+                    (log_weights / max_log_weight * QUALITY_HIST_BINS)
+                    .astype(np.int64),
+                    QUALITY_HIST_BINS - 1,
+                )
+            counts += np.bincount(bucket, minlength=QUALITY_HIST_BINS)
+            weight_sums += np.bincount(
+                bucket, weights=weights, minlength=QUALITY_HIST_BINS,
+            )
+
+    nonempty = counts > 0
+    mean_weights = weight_sums[nonempty] / counts[nonempty]
+    bucket_counts = counts[nonempty]
+
+    def expected_rows(scale: float) -> float:
+        return float(np.minimum(1.0, scale * mean_weights) @ bucket_counts)
+
+    low, high = 0.0, 1.0
+    while expected_rows(high) < target_rows:
+        high *= 2.0
+    for _ in range(64):
+        mid = (low + high) / 2.0
+        if expected_rows(mid) < target_rows:
+            low = mid
+        else:
+            high = mid
+    return (low + high) / 2.0
+
+
+def systematic_indices(
+    probabilities: np.ndarray, cumulative: float, next_threshold: float,
+) -> tuple[np.ndarray, float, float]:
+    """Select rows using one shared systematic-probability sampling stream."""
+    if probabilities.size == 0:
+        return np.empty(0, dtype=np.int64), cumulative, next_threshold
+    cumulative_values = cumulative + np.cumsum(probabilities)
+    end = float(cumulative_values[-1])
+    if end < next_threshold:
+        return np.empty(0, dtype=np.int64), end, next_threshold
+
+    n_thresholds = int(np.floor(end - next_threshold)) + 1
+    thresholds = next_threshold + np.arange(n_thresholds, dtype=np.float64)
+    indices = np.searchsorted(cumulative_values, thresholds, side="left")
+    return indices.astype(np.int64, copy=False), end, next_threshold + n_thresholds
+
+
 OUT_SCHEMA = pa.schema([
     ("source_text", pa.string()),
     ("target_text", pa.string()),
@@ -314,7 +446,9 @@ class PairWriter:
 
 
 def sample_source(sp_plan: SourcePlan, data_dir: Path, cfg: dict,
-                  writer: PairWriter, seed: int, batch_size: int) -> int:
+                  writer: PairWriter, seed: int, batch_size: int,
+                  quality_priority: bool = False,
+                  quality_strength: float = 4.0) -> int:
     files = list_parquets(data_dir / sp_plan.source_pair)
     if not files:
         return 0
@@ -327,9 +461,20 @@ def sample_source(sp_plan: SourcePlan, data_dir: Path, cfg: dict,
     remainder_p = min(1.0, remainder_rows / tot)
     rng = np.random.default_rng(seed)
 
+    quality_scale: float | None = None
+    quality_cumulative = 0.0
+    quality_next_threshold = 0.0
+    if quality_priority and remainder_rows > 0:
+        quality_next_threshold = float(rng.random())
+        quality_scale = quality_probability_scale(
+            files, remainder_rows, batch_size, quality_strength,
+        )
+
     src_col, tgt_col = cfg["src_col"], cfg["tgt_col"]
     # Output source_text must be eng. If eng is on source side, keep; else swap.
     read_cols = [src_col, tgt_col]
+    if quality_priority:
+        read_cols.extend(c for c in QUALITY_COLS if c not in read_cols)
     source_start = writer.written
 
     def add_cols(col_src: list, col_tgt: list):
@@ -361,9 +506,25 @@ def sample_source(sp_plan: SourcePlan, data_dir: Path, cfg: dict,
 
             if remainder_rows <= 0:
                 continue
-            mask = rng.random(n) < remainder_p
-            if mask.any():
-                add_batch(batch, np.nonzero(mask)[0])
+            if quality_priority:
+                assert quality_scale is not None
+                probabilities = np.minimum(
+                    1.0,
+                    quality_scale * quality_weights(batch, quality_strength),
+                )
+                idx, quality_cumulative, quality_next_threshold = (
+                    systematic_indices(
+                        probabilities,
+                        quality_cumulative,
+                        quality_next_threshold,
+                    )
+                )
+                if idx.size:
+                    add_batch(batch, idx)
+            else:
+                mask = rng.random(n) < remainder_p
+                if mask.any():
+                    add_batch(batch, np.nonzero(mask)[0])
 
     return writer.written - source_start
 
@@ -400,10 +561,29 @@ def main():
     ap.add_argument("--chunk", type=int)
     ap.add_argument("--total_chunks", type=int)
     ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument(
+        "--quality_priority", action="store_true",
+        help=("For FineOPUS Stage4/Stage5, favour high similarity_score, "
+              "high qe_score, and longer text on both sides."),
+    )
+    ap.add_argument(
+        "--quality_strength", type=float, default=4.0,
+        help=("Strength of quality bias when --quality_priority is enabled "
+              "(default: 4.0; range: 0-20; 0 is uniform)."),
+    )
     ap.add_argument("--dry_run", action="store_true")
     ap.add_argument("--plan_csv", type=Path,
                     help="Write the per-source plan to this CSV (dry-run).")
     args = ap.parse_args()
+
+    if args.quality_priority and args.dataset not in QUALITY_DATASETS:
+        ap.error(
+            "--quality_priority is only supported for "
+            "FineOPUS-Filtered-Stage4/Stage5"
+        )
+    if (not np.isfinite(args.quality_strength)
+            or not 0 <= args.quality_strength <= 20):
+        ap.error("--quality_strength must be a finite number in [0, 20]")
 
     cfg = DATASETS[args.dataset]
     data_dir = cfg["data_dir"]
@@ -425,7 +605,8 @@ def main():
         planned_rows = sum(s.rows for s in plan.sources)
         print(f"[PLAN] {args.dataset} {target_pair}: quota={quota:,} "
               f"alloc={planned_tokens:,} rows={planned_rows:,} "
-              f"sources={len(plan.sources)}")
+              f"sources={len(plan.sources)} "
+              f"quality_priority={args.quality_priority}")
         for s in plan.sources:
             plan_records.append({
                 "dataset": args.dataset,
@@ -438,6 +619,8 @@ def main():
                 "avail_lines": s.n_lines,
                 "rows_to_sample": s.rows,
                 "upsample_factor": s.rows / s.n_lines if s.n_lines else 0,
+                "quality_priority": args.quality_priority,
+                "quality_strength": args.quality_strength,
             })
 
         if args.dry_run:
@@ -453,7 +636,11 @@ def main():
             for s in plan.sources:
                 # Distinct seed per (target, source) for reproducibility.
                 sp_seed = args.seed + (hash((target_pair, s.source_pair)) & 0xFFFF)
-                sample_source(s, data_dir, cfg, writer, sp_seed, args.batch_size)
+                sample_source(
+                    s, data_dir, cfg, writer, sp_seed, args.batch_size,
+                    quality_priority=args.quality_priority,
+                    quality_strength=args.quality_strength,
+                )
         finally:
             writer.close()
         print(f"[DONE] {out_file} rows={writer.written:,}")
