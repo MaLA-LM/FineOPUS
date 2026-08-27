@@ -2,8 +2,10 @@
 """Extract a token-budgeted monolingual mix as JSONL.
 
 The quota CSV provides ``monolingual_quota_tokens`` for each language.
-English (``eng_Latn``) is sampled from Nemotron-CC; every other language is
-sampled from FineWeb-2.  Sampling is based on pre-computed token statistics:
+English (``eng_Latn``, ``eng_Latn_45B``, ``eng_Latn_46_5B``, or
+``eng_Latn_47_5B``) is sampled from Nemotron-CC's ``eng_Latn`` data; every
+other language is sampled from FineWeb-2.  Sampling is based on pre-computed
+token statistics:
 rows_to_sample ~= quota_tokens / average_tokens_per_row.  If the quota is
 larger than the available tokens, the source rows are upsampled by writing
 complete repeats plus a randomly sampled remainder.
@@ -28,7 +30,7 @@ from pathlib import Path
 import numpy as np
 
 
-ENG = "eng_Latn"
+ENG = {"eng_Latn", "eng_Latn_45B", "eng_Latn_46_5B", "eng_Latn_47_5B"}
 TOKEN_COL = "n_tokens_Qwen3_5"
 FLUSH_LINES = 50_000
 
@@ -47,6 +49,7 @@ DATASETS = {
 @dataclass
 class LangPlan:
     lang: str
+    source_lang: str
     dataset: str
     data_dir: Path
     quota_tokens: int
@@ -118,15 +121,17 @@ def list_parquets(lang_dir: Path) -> list[Path]:
 
 def build_plan(lang: str, quota: int, fineweb_stats, nemotron_stats,
                fineweb_dir: Path, nemotron_dir: Path) -> LangPlan:
-    dataset = "Nemotron-CC" if lang == ENG else "FineWeb-2"
-    data_dir = nemotron_dir if lang == ENG else fineweb_dir
-    stats = nemotron_stats if lang == ENG else fineweb_stats
+    is_english = lang in ENG
+    source_lang = "eng_Latn" if is_english else lang
+    dataset = "Nemotron-CC" if is_english else "FineWeb-2"
+    data_dir = nemotron_dir if is_english else fineweb_dir
+    stats = nemotron_stats if is_english else fineweb_stats
     warnings: list[str] = []
 
-    n_lines, n_tokens = stats.get(lang, (0, 0))
-    lang_dir = data_dir / lang
+    n_lines, n_tokens = stats.get(source_lang, (0, 0))
+    lang_dir = data_dir / source_lang
     if n_lines <= 0 or n_tokens <= 0:
-        warnings.append(f"missing or empty stats for {lang}")
+        warnings.append(f"missing or empty stats for {source_lang}")
     if not lang_dir.is_dir():
         warnings.append(f"missing folder: {lang_dir}")
 
@@ -142,6 +147,7 @@ def build_plan(lang: str, quota: int, fineweb_stats, nemotron_stats,
 
     return LangPlan(
         lang=lang,
+        source_lang=source_lang,
         dataset=dataset,
         data_dir=data_dir,
         quota_tokens=quota,
@@ -206,7 +212,7 @@ def sample_language(plan: LangPlan, out_file: Path, seed: int, batch_size: int,
     if plan.rows_to_sample <= 0:
         return 0
 
-    files = list_parquets(plan.data_dir / plan.lang)
+    files = list_parquets(plan.data_dir / plan.source_lang)
     if not files:
         return 0
 
@@ -309,6 +315,7 @@ def main():
 
         plan_records.append({
             "language": plan.lang,
+            "source_language": plan.source_lang,
             "dataset": plan.dataset,
             "data_dir": str(plan.data_dir),
             "quota_tokens": plan.quota_tokens,
