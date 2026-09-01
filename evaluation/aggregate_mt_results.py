@@ -5,14 +5,16 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fnmatch
 import json
 from pathlib import Path
 
 
 FIELDS = [
     "status", "model", "checkpoint", "dataset", "source", "target", "language",
-    "num_examples", "bleu", "chrf", "seconds", "few_shot", "limit", "bleu_tokenizer",
-    "chrf_word_order", "result_dir",
+    "num_examples", "bleu", "chrf", "comet", "seconds", "comet_seconds",
+    "few_shot", "limit", "bleu_tokenizer", "bleu_signature", "chrf_word_order",
+    "comet_model", "comet_num_examples", "result_dir",
 ]
 
 
@@ -20,6 +22,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-root", type=Path, required=True)
     parser.add_argument("--output-prefix", default="all_results")
+    parser.add_argument("--model-glob", action="append", default=[])
+    parser.add_argument("--bleu-tokenizer")
+    parser.add_argument("--comet-model")
+    parser.add_argument("--include-incomplete", action="store_true")
     args = parser.parse_args()
 
     rows = []
@@ -29,8 +35,22 @@ def main() -> int:
         except (OSError, json.JSONDecodeError) as exc:
             print(f"Skipping invalid {path}: {exc}")
             continue
-        if row.get("status") == "complete":
-            rows.append(row)
+        row.pop("bleu_13a", None)
+        row.pop("bleu_13a_tokenizer", None)
+        if row.get("status") != "complete":
+            continue
+        if not args.include_incomplete and not (path.parents[2] / "_SUCCESS").is_file():
+            continue
+        if args.model_glob and not any(
+            fnmatch.fnmatchcase(str(row.get("model", "")), pattern)
+            for pattern in args.model_glob
+        ):
+            continue
+        if args.bleu_tokenizer and row.get("bleu_tokenizer") != args.bleu_tokenizer:
+            continue
+        if args.comet_model and row.get("comet_model") != args.comet_model:
+            continue
+        rows.append(row)
     rows.sort(key=lambda row: tuple(str(row.get(key, "")) for key in ("model", "checkpoint", "dataset", "source", "target")))
     if not rows:
         raise SystemExit(f"No completed metrics.json files under {args.results_root}")

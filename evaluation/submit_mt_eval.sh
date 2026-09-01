@@ -20,6 +20,9 @@ KEEP_HF=0
 OVERWRITE=0
 ENFORCE_EAGER=0
 SKIP_PREFLIGHT=0
+COMET_MODEL="Unbabel/wmt22-comet-da"
+COMET_BATCH_SIZE=8
+NO_COMET=0
 MODEL_GLOBS=()
 
 usage() {
@@ -41,6 +44,9 @@ Options:
   --overwrite              Re-run completed directions in included tasks
   --keep-hf                Preserve each converted HF model
   --enforce-eager          Use vLLM eager mode
+  --comet-model MODEL      COMET checkpoint (default: $COMET_MODEL)
+  --comet-batch-size N     COMET inference batch size (default: 8)
+  --no-comet               Disable COMET and only compute BLEU/chrF++
   --skip-preflight         Submit without local data/runtime checks
   --dry-run                Build and print the manifest, do not submit
 
@@ -67,6 +73,9 @@ while (( $# )); do
         --overwrite) OVERWRITE=1; shift ;;
         --keep-hf) KEEP_HF=1; shift ;;
         --enforce-eager) ENFORCE_EAGER=1; shift ;;
+        --comet-model) COMET_MODEL="$2"; shift 2 ;;
+        --comet-batch-size) COMET_BATCH_SIZE="$2"; shift 2 ;;
+        --no-comet) NO_COMET=1; shift ;;
         --skip-preflight) SKIP_PREFLIGHT=1; shift ;;
         --dry-run) DRY_RUN=1; shift ;;
         -h|--help) usage; exit 0 ;;
@@ -113,14 +122,19 @@ with open(sys.argv[1], newline="", encoding="utf-8") as handle:
     print(",".join(sorted({lang for row in rows for lang in row["languages"].split(",")})))
 PY
 )
-    python "$SCRIPT_DIR/mt_eval.py" \
-        --data-root "$DATA_ROOT" \
-        --output-dir "$RESULTS_ROOT/.preflight" \
-        --languages "$all_languages" \
-        --datasets "$DATASETS" \
-        --few-shot "$FEW_SHOT" \
-        --preflight-only \
+    preflight_args=(
+        --data-root "$DATA_ROOT"
+        --output-dir "$RESULTS_ROOT/.preflight"
+        --languages "$all_languages"
+        --datasets "$DATASETS"
+        --few-shot "$FEW_SHOT"
+        --comet-model "$COMET_MODEL"
+        --comet-batch-size "$COMET_BATCH_SIZE"
+        --preflight-only
         --check-runtime
+    )
+    [[ "$NO_COMET" == 0 ]] || preflight_args+=(--no-comet)
+    python "$SCRIPT_DIR/mt_eval.py" "${preflight_args[@]}"
 fi
 
 worker_args=(
@@ -128,11 +142,14 @@ worker_args=(
     --data-root "$DATA_ROOT"
     --datasets "$DATASETS"
     --few-shot "$FEW_SHOT"
+    --comet-model "$COMET_MODEL"
+    --comet-batch-size "$COMET_BATCH_SIZE"
 )
 [[ -z "$LIMIT" ]] || worker_args+=(--limit "$LIMIT")
 [[ "$KEEP_HF" == 0 ]] || worker_args+=(--keep-hf)
 [[ "$OVERWRITE" == 0 ]] || worker_args+=(--overwrite)
 [[ "$ENFORCE_EAGER" == 0 ]] || worker_args+=(--enforce-eager)
+[[ "$NO_COMET" == 0 ]] || worker_args+=(--no-comet)
 
 pushd "$SCRIPT_DIR" >/dev/null
 submission=$(sbatch --array="0-$((task_count - 1))%$MAX_CONCURRENT" \

@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --mem=64G
 #SBATCH --partition=small-g
-#SBATCH --time=1-00:00:00
+#SBATCH --time=0-08:00:00
 #SBATCH --gpus-per-node=1
 #SBATCH --account=project_462001087
 #SBATCH --output=logs/eval/%x_%A_%a.out
@@ -42,6 +42,10 @@ OUTPUT_DIR=""
 KEEP_HF=0
 OVERWRITE=0
 ENFORCE_EAGER=0
+COMET_MODEL="Unbabel/wmt22-comet-da"
+COMET_BATCH_SIZE=8
+COMET_GPUS=1
+NO_COMET=0
 
 usage() {
     cat <<EOF
@@ -60,6 +64,10 @@ Options:
   --keep-hf               Keep converted model under OUTPUT_DIR/hf_model
   --overwrite             Re-run completed direction results
   --enforce-eager         Pass enforce_eager=True to vLLM
+  --comet-model MODEL     COMET checkpoint (default: $COMET_MODEL)
+  --comet-batch-size N    COMET inference batch size (default: 8)
+  --comet-gpus N          GPUs used by COMET after vLLM exits (default: 1)
+  --no-comet              Disable COMET and only compute BLEU/chrF++
 EOF
 }
 
@@ -83,6 +91,10 @@ while (( $# )); do
         --keep-hf) KEEP_HF=1; shift ;;
         --overwrite) OVERWRITE=1; shift ;;
         --enforce-eager) ENFORCE_EAGER=1; shift ;;
+        --comet-model) COMET_MODEL="$2"; shift 2 ;;
+        --comet-batch-size) COMET_BATCH_SIZE="$2"; shift 2 ;;
+        --comet-gpus) COMET_GPUS="$2"; shift 2 ;;
+        --no-comet) NO_COMET=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
     esac
@@ -143,8 +155,18 @@ source "$SCRIPT_DIR/eval_env/bin/activate"
 export PYTHONNOUSERSITE=1
 export TOKENIZERS_PARALLELISM=false
 export HF_MODULES_CACHE="${JOB_TMP}/hf_modules"
+export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
+
+# Conversion and vLLM each create a single-process torch.distributed store.
+# Array tasks can share a node, so an inherited/default MASTER_PORT causes
+# intermittent EADDRINUSE failures. Derive a stable, distinct port per task.
+port_job_id="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}"
+port_task_id="${SLURM_ARRAY_TASK_ID:-0}"
+export MASTER_ADDR=127.0.0.1
+export MASTER_PORT=$((20000 + (port_job_id + port_task_id * 997) % 40000))
+echo "Distributed rendezvous: ${MASTER_ADDR}:${MASTER_PORT}"
 
 preflight_args=(
     --data-root "$DATA_ROOT"
@@ -152,9 +174,13 @@ preflight_args=(
     --languages "$LANGUAGES"
     --datasets "$DATASETS"
     --few-shot "$FEW_SHOT"
+    --comet-model "$COMET_MODEL"
+    --comet-batch-size "$COMET_BATCH_SIZE"
+    --comet-gpus "$COMET_GPUS"
     --preflight-only
     --check-runtime
 )
+[[ "$NO_COMET" == 0 ]] || preflight_args+=(--no-comet)
 python "$SCRIPT_DIR/mt_eval.py" "${preflight_args[@]}"
 
 echo "Converting checkpoint to Hugging Face format: $(date --iso-8601=seconds)"
@@ -170,10 +196,14 @@ eval_args=(
     --languages "$LANGUAGES"
     --datasets "$DATASETS"
     --few-shot "$FEW_SHOT"
+    --comet-model "$COMET_MODEL"
+    --comet-batch-size "$COMET_BATCH_SIZE"
+    --comet-gpus "$COMET_GPUS"
 )
 [[ -z "$LIMIT" ]] || eval_args+=(--limit "$LIMIT")
 [[ "$OVERWRITE" == 0 ]] || eval_args+=(--overwrite)
 [[ "$ENFORCE_EAGER" == 0 ]] || eval_args+=(--enforce-eager)
+[[ "$NO_COMET" == 0 ]] || eval_args+=(--no-comet)
 
 echo "Starting vLLM evaluation: $(date --iso-8601=seconds)"
 python "$SCRIPT_DIR/mt_eval.py" "${eval_args[@]}"

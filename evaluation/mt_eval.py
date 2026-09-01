@@ -5,12 +5,18 @@ from __future__ import annotations
 
 import argparse
 import csv
+import fnmatch
 import importlib
 import json
+import os
 import re
+import shlex
+import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -81,8 +87,17 @@ LANGUAGE_NAME_OVERRIDES = {
     "zho": "Chinese",
 }
 
+SUMMARY_FIELDS = [
+    "status", "model", "checkpoint", "dataset", "source", "target", "language",
+    "num_examples", "bleu", "chrf", "comet", "seconds", "comet_seconds",
+    "few_shot", "limit", "bleu_tokenizer", "bleu_signature", "chrf_word_order",
+    "comet_model", "comet_num_examples", "reason", "result_dir",
+]
 
-def parse_args() -> argparse.Namespace:
+DEFAULT_COMET_MODEL = "Unbabel/wmt22-comet-da"
+
+
+def parse_eval_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", type=Path)
     parser.add_argument("--model-name", default="unknown")
@@ -101,9 +116,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, help="Score at most this many rows per direction")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--enforce-eager", action="store_true")
+    parser.add_argument("--comet-model", default=DEFAULT_COMET_MODEL)
+    parser.add_argument("--comet-batch-size", type=int, default=8)
+    parser.add_argument("--comet-gpus", type=int, default=1)
+    parser.add_argument("--no-comet", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
     parser.add_argument("--check-runtime", action="store_true")
-    return parser.parse_args()
+    parser.epilog = (
+        "Saved predictions can be rescored with the 'rescore' and "
+        "'submit-rescore' commands."
+    )
+    return parser.parse_args(argv)
 
 
 def split_csv(value: str) -> list[str]:
@@ -163,9 +186,12 @@ def discover_files(
     return cases, skipped
 
 
-def runtime_preflight() -> None:
+def runtime_preflight(use_comet: bool) -> None:
     missing = []
-    for module in ("pandas", "pyarrow", "sacrebleu", "transformers", "vllm"):
+    modules = ["pandas", "pyarrow", "sacrebleu", "transformers", "vllm"]
+    if use_comet:
+        modules.append("comet")
+    for module in modules:
         try:
             importlib.import_module(module)
         except Exception as exc:  # imports may fail due to incompatible versions
@@ -305,14 +331,15 @@ def atomic_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
 
 def write_summary(output_dir: Path, rows: list[dict[str, Any]]) -> None:
     atomic_json(output_dir / "summary.json", rows)
-    fields = [
-        "status", "model", "checkpoint", "dataset", "source", "target", "language",
-        "num_examples", "bleu", "chrf", "seconds", "few_shot", "limit",
-        "bleu_tokenizer", "chrf_word_order", "reason", "result_dir",
-    ]
     temporary = output_dir / "summary.tsv.tmp"
     with temporary.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", extrasaction="ignore", lineterminator="\n")
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=SUMMARY_FIELDS,
+            delimiter="\t",
+            extrasaction="ignore",
+            lineterminator="\n",
+        )
         writer.writeheader()
         writer.writerows(rows)
     temporary.replace(output_dir / "summary.tsv")
@@ -347,8 +374,11 @@ def load_direction_data(
     return shots, test_rows
 
 
-def main() -> int:
-    args = parse_args()
+def evaluate(args: argparse.Namespace) -> int:
+    if args.comet_batch_size < 1:
+        raise ValueError("--comet-batch-size must be positive")
+    if args.comet_gpus < 0:
+        raise ValueError("--comet-gpus cannot be negative")
     languages = split_csv(args.languages)
     specs = selected_specs(split_csv(args.datasets))
     if not languages:
@@ -358,7 +388,7 @@ def main() -> int:
         raise RuntimeError("No requested language is available in the selected datasets")
     data_preflight(cases, args.few_shot)
     if args.check_runtime:
-        runtime_preflight()
+        runtime_preflight(not args.no_comet)
     if args.preflight_only:
         print(f"Preflight passed: {len(cases)} dataset/language cases, {len(skipped)} unavailable combinations")
         return 0
@@ -386,7 +416,7 @@ def main() -> int:
         max_tokens=args.max_new_tokens,
         stop=["\n", "<|im_end|>", "<|endoftext|>"],
     )
-    bleu = BLEU(tokenize="13a", effective_order=True)
+    bleu = BLEU(tokenize="flores200", effective_order=True)
     chrf = CHRF(word_order=2)
     summary: list[dict[str, Any]] = skipped
 
@@ -443,7 +473,8 @@ def main() -> int:
                 "result_dir": str(result_dir),
                 "few_shot": args.few_shot,
                 "limit": args.limit,
-                "bleu_tokenizer": "13a",
+                "bleu_tokenizer": "flores200",
+                "bleu_signature": str(bleu.get_signature()),
                 "chrf_word_order": 2,
             }
             atomic_json(metrics_path, metrics)
@@ -460,9 +491,552 @@ def main() -> int:
         raise RuntimeError("No translation direction was evaluated")
     write_summary(args.output_dir, summary)
     marker = "_SUCCESS" if args.limit is None else f"_SMOKE_SUCCESS_limit_{args.limit}"
-    (args.output_dir / marker).write_text(f"completed_directions={completed}\n", encoding="utf-8")
-    print(f"Evaluation complete: {completed} directions; summary: {args.output_dir / 'summary.tsv'}")
+    if args.no_comet:
+        (args.output_dir / marker).write_text(
+            f"completed_directions={completed}\n", encoding="utf-8"
+        )
+        print(f"Evaluation complete: {completed} directions; summary: {args.output_dir / 'summary.tsv'}")
+        return 0
+
+    (args.output_dir / marker).unlink(missing_ok=True)
+    print(f"Inference complete: {completed} directions; restarting process for COMET scoring")
+    sys.stdout.flush()
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "score-comet",
+        "--checkpoint-dir",
+        str(args.output_dir.resolve()),
+        "--model",
+        args.comet_model,
+        "--batch-size",
+        str(args.comet_batch_size),
+        "--gpus",
+        str(args.comet_gpus),
+        "--success-marker",
+        marker,
+    ]
+    if args.overwrite:
+        command.append("--overwrite")
+    os.execv(sys.executable, command)
+    raise AssertionError("os.execv returned unexpectedly")
+
+
+class _NonMistralModelInfo:
+    config = {"model_type": "xlm-roberta"}
+    tags: list[str] = []
+    siblings: list[object] = []
+
+    def __getattr__(self, name: str) -> None:
+        return None
+
+
+@contextmanager
+def skip_xlmr_mistral_hub_probe() -> Iterable[None]:
+    """Avoid a Transformers Hub metadata probe for the offline XLM-R encoder."""
+    patched: list[tuple[Any, str, Any]] = []
+    try:
+        import huggingface_hub
+    except ImportError:
+        huggingface_hub = None
+    if huggingface_hub is not None and hasattr(huggingface_hub, "model_info"):
+        patched.append((huggingface_hub, "model_info", huggingface_hub.model_info))
+
+    try:
+        import transformers.tokenization_utils_base as tokenization_utils_base
+    except ImportError:
+        tokenization_utils_base = None
+    if tokenization_utils_base is not None and hasattr(tokenization_utils_base, "model_info"):
+        patched.append(
+            (tokenization_utils_base, "model_info", tokenization_utils_base.model_info)
+        )
+
+    def make_model_info(original: Any) -> Any:
+        def model_info(model_id: str, *args: Any, **kwargs: Any) -> Any:
+            normalized = str(model_id).lower()
+            if "xlm-roberta" in normalized or "xlmr" in normalized:
+                return _NonMistralModelInfo()
+            return original(model_id, *args, **kwargs)
+
+        return model_info
+
+    for module, name, original in patched:
+        setattr(module, name, make_model_info(original))
+    try:
+        yield
+    finally:
+        for module, name, original in patched:
+            setattr(module, name, original)
+
+
+def read_prediction_rows(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with path.open(encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, 1):
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}:{line_number}: invalid JSON: {exc}") from exc
+            if not isinstance(row, dict):
+                raise TypeError(f"{path}:{line_number}: prediction row must be an object")
+            rows.append(row)
+    if not rows:
+        raise ValueError(f"No predictions in {path}")
+    return rows
+
+
+def read_predictions(path: Path) -> tuple[list[str], list[str]]:
+    predictions: list[str] = []
+    references: list[str] = []
+    for line_number, row in enumerate(read_prediction_rows(path), 1):
+        try:
+            prediction = row["prediction"]
+            reference = row["reference"]
+        except KeyError as exc:
+            raise ValueError(f"{path}:{line_number}: missing field {exc}") from exc
+        if not isinstance(prediction, str) or not isinstance(reference, str):
+            raise TypeError(f"{path}:{line_number}: prediction/reference must be strings")
+        predictions.append(prediction)
+        references.append(reference)
+    return predictions, references
+
+
+def load_comet_model(model_name: str) -> Any:
+    from comet import download_model, load_from_checkpoint
+
+    offline_values = {"1", "on", "true", "yes"}
+    offline = any(
+        os.environ.get(name, "").lower() in offline_values
+        for name in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
+    )
+    model_path = download_model(model_name, local_files_only=offline)
+    with skip_xlmr_mistral_hub_probe():
+        return load_from_checkpoint(model_path, local_files_only=offline)
+
+
+def comet_output_scores(output: Any) -> tuple[list[float], float]:
+    raw_scores = getattr(output, "scores", None)
+    if raw_scores is None and isinstance(output, dict):
+        raw_scores = output.get("scores")
+    if raw_scores is None:
+        raise TypeError("COMET prediction output does not contain sentence scores")
+    scores = [float(score) for score in raw_scores]
+    if not scores:
+        raise ValueError("COMET returned no sentence scores")
+
+    raw_system_score = getattr(output, "system_score", None)
+    if raw_system_score is None and isinstance(output, dict):
+        raw_system_score = output.get("system_score")
+    system_score = (
+        float(raw_system_score)
+        if raw_system_score is not None
+        else sum(scores) / len(scores)
+    )
+    return scores, system_score
+
+
+def score_comet_checkpoint(
+    checkpoint_dir: Path,
+    model_name: str,
+    batch_size: int,
+    gpus: int,
+    *,
+    overwrite: bool = False,
+    success_marker: str | None = None,
+) -> int:
+    checkpoint_dir = checkpoint_dir.resolve()
+    if not checkpoint_dir.is_dir():
+        raise FileNotFoundError(checkpoint_dir)
+    if batch_size < 1:
+        raise ValueError("COMET batch size must be positive")
+    if gpus < 0:
+        raise ValueError("COMET GPU count cannot be negative")
+    if success_marker is not None and Path(success_marker).name != success_marker:
+        raise ValueError("--success-marker must be a filename, not a path")
+
+    metric_paths = sorted(checkpoint_dir.glob("*/*/metrics.json"))
+    if not metric_paths:
+        raise RuntimeError(f"No metrics.json files under {checkpoint_dir}")
+
+    model: Any | None = None
+    completed = 0
+    for metrics_path in metric_paths:
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        if metrics.get("status") not in {"complete", "smoke"}:
+            continue
+        if (
+            not overwrite
+            and metrics.get("comet") is not None
+            and metrics.get("comet_model") == model_name
+        ):
+            completed += 1
+            print(f"Skipping matching COMET result: {metrics_path.parent}")
+            continue
+
+        predictions_path = metrics_path.with_name("predictions.jsonl")
+        rows = read_prediction_rows(predictions_path)
+        expected = metrics.get("num_examples")
+        if expected is not None and int(expected) != len(rows):
+            raise ValueError(
+                f"{predictions_path}: found {len(rows)} rows, metrics expect {expected}"
+            )
+
+        samples: list[dict[str, str]] = []
+        for line_number, row in enumerate(rows, 1):
+            try:
+                sample = {
+                    "src": row["source"],
+                    "mt": row["prediction"],
+                    "ref": row["reference"],
+                }
+            except KeyError as exc:
+                raise ValueError(f"{predictions_path}:{line_number}: missing field {exc}") from exc
+            if not all(isinstance(value, str) for value in sample.values()):
+                raise TypeError(
+                    f"{predictions_path}:{line_number}: source/prediction/reference must be strings"
+                )
+            samples.append(sample)
+
+        if model is None:
+            print(f"Loading COMET model: {model_name}")
+            model = load_comet_model(model_name)
+        started = time.monotonic()
+        output = model.predict(samples, batch_size=batch_size, gpus=gpus)
+        elapsed = time.monotonic() - started
+        sentence_scores, system_score = comet_output_scores(output)
+        if len(sentence_scores) != len(rows):
+            raise ValueError(
+                f"COMET returned {len(sentence_scores)} scores for {len(rows)} predictions"
+            )
+
+        for row, score in zip(rows, sentence_scores):
+            row["comet_score"] = round(score, 6)
+        atomic_jsonl(predictions_path, rows)
+        metrics["comet"] = round(system_score, 6)
+        metrics["comet_model"] = model_name
+        metrics["comet_num_examples"] = len(sentence_scores)
+        metrics["comet_seconds"] = round(elapsed, 3)
+        atomic_json(metrics_path, metrics)
+        completed += 1
+        print(
+            f"Completed COMET {metrics.get('dataset')}/"
+            f"{metrics.get('source')}__to__{metrics.get('target')}: "
+            f"n={len(sentence_scores)} score={metrics['comet']:.6f}"
+        )
+
+    if completed == 0:
+        raise RuntimeError(f"No completed metrics to score under {checkpoint_dir}")
+    rebuild_checkpoint_summary(checkpoint_dir)
+    if success_marker is not None:
+        (checkpoint_dir / success_marker).write_text(
+            f"completed_directions={completed}\ncomet_model={model_name}\n",
+            encoding="utf-8",
+        )
+    print(
+        f"COMET scoring complete: {completed} directions; "
+        f"summary: {checkpoint_dir / 'summary.tsv'}"
+    )
+    return completed
+
+
+def parse_score_comet_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Score saved MT predictions with reference-based COMET."
+    )
+    parser.add_argument("--checkpoint-dir", type=Path, required=True)
+    parser.add_argument("--model", default=DEFAULT_COMET_MODEL)
+    parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--gpus", type=int, default=1)
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--success-marker", help=argparse.SUPPRESS)
+    return parser.parse_args(argv)
+
+
+def run_score_comet(argv: list[str]) -> int:
+    args = parse_score_comet_args(argv)
+    score_comet_checkpoint(
+        args.checkpoint_dir,
+        args.model,
+        args.batch_size,
+        args.gpus,
+        overwrite=args.overwrite,
+        success_marker=args.success_marker,
+    )
     return 0
+
+
+def rebuild_checkpoint_summary(checkpoint_dir: Path) -> None:
+    skipped: list[dict[str, Any]] = []
+    old_summary = checkpoint_dir / "summary.json"
+    if old_summary.is_file():
+        try:
+            skipped = [
+                row
+                for row in json.loads(old_summary.read_text(encoding="utf-8"))
+                if row.get("status") == "skipped"
+            ]
+        except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+            skipped = []
+
+    rows = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in checkpoint_dir.glob("*/*/metrics.json")
+    ]
+    rows.sort(key=lambda row: tuple(str(row.get(key, "")) for key in ("dataset", "source", "target")))
+    write_summary(checkpoint_dir, rows + skipped)
+
+
+def rescore_checkpoint(
+    checkpoint_dir: Path,
+    tokenizer: str,
+    *,
+    allow_incomplete: bool = False,
+    dry_run: bool = False,
+) -> int:
+    checkpoint_dir = checkpoint_dir.resolve()
+    if not checkpoint_dir.is_dir():
+        raise FileNotFoundError(checkpoint_dir)
+    if not allow_incomplete and not (checkpoint_dir / "_SUCCESS").is_file():
+        raise RuntimeError(f"Refusing incomplete checkpoint without _SUCCESS: {checkpoint_dir}")
+
+    from sacrebleu.metrics import BLEU
+
+    bleu = BLEU(tokenize=tokenizer, effective_order=True)
+    metric_paths = sorted(checkpoint_dir.glob("*/*/metrics.json"))
+    if not metric_paths:
+        raise RuntimeError(f"No metrics.json files under {checkpoint_dir}")
+
+    rescored = 0
+    for metrics_path in metric_paths:
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        if metrics.get("status") not in {"complete", "smoke"}:
+            continue
+        predictions_path = metrics_path.with_name("predictions.jsonl")
+        if not predictions_path.is_file():
+            raise FileNotFoundError(predictions_path)
+        predictions, references = read_predictions(predictions_path)
+        expected = metrics.get("num_examples")
+        if expected is not None and int(expected) != len(predictions):
+            raise ValueError(
+                f"{predictions_path}: found {len(predictions)} rows, metrics expect {expected}"
+            )
+
+        metrics.pop("bleu_13a", None)
+        metrics.pop("bleu_13a_tokenizer", None)
+        score = bleu.corpus_score(predictions, [references])
+        metrics["bleu"] = round(score.score, 4)
+        metrics["bleu_tokenizer"] = tokenizer
+        metrics["bleu_signature"] = str(bleu.get_signature())
+        if not dry_run:
+            atomic_json(metrics_path, metrics)
+        rescored += 1
+
+    if rescored == 0:
+        raise RuntimeError(f"No completed metrics to rescore under {checkpoint_dir}")
+    if not dry_run:
+        rebuild_checkpoint_summary(checkpoint_dir)
+        (checkpoint_dir / f"_RESCORED_{tokenizer}").write_text(
+            f"rescored_directions={rescored}\n", encoding="utf-8"
+        )
+    print(f"Rescored {rescored} directions with {tokenizer}: {checkpoint_dir}")
+    return rescored
+
+
+def parse_rescore_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Recompute BLEU from saved MT predictions.")
+    parser.add_argument("--checkpoint-dir", type=Path, required=True)
+    parser.add_argument("--tokenizer", default="flores200")
+    parser.add_argument("--allow-incomplete", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+
+def run_rescore(argv: list[str]) -> int:
+    args = parse_rescore_args(argv)
+    rescore_checkpoint(
+        args.checkpoint_dir,
+        args.tokenizer,
+        allow_incomplete=args.allow_incomplete,
+        dry_run=args.dry_run,
+    )
+    return 0
+
+
+def parse_rescore_worker_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Rescore checkpoint directories assigned to a Slurm worker.")
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--task-id", type=int)
+    parser.add_argument("--task-count", type=int)
+    parser.add_argument("--tokenizer", default="flores200")
+    return parser.parse_args(argv)
+
+
+def run_rescore_worker(argv: list[str]) -> int:
+    args = parse_rescore_worker_args(argv)
+    task_id = args.task_id
+    task_count = args.task_count
+    if task_id is None:
+        value = os.environ.get("SLURM_ARRAY_TASK_ID")
+        if value is None:
+            raise ValueError("--task-id or SLURM_ARRAY_TASK_ID is required")
+        task_id = int(value)
+    if task_count is None:
+        task_count = int(os.environ.get("SLURM_ARRAY_TASK_COUNT", "1"))
+    if task_count < 1 or not 0 <= task_id < task_count:
+        raise ValueError(f"Invalid worker assignment: task_id={task_id}, task_count={task_count}")
+    if not args.manifest.is_file():
+        raise FileNotFoundError(f"Manifest missing: {args.manifest}")
+
+    checkpoints = [Path(line) for line in args.manifest.read_text(encoding="utf-8").splitlines() if line]
+    processed = 0
+    for index in range(task_id, len(checkpoints), task_count):
+        rescore_checkpoint(checkpoints[index], args.tokenizer)
+        processed += 1
+    print(f"Worker {task_id}/{task_count} processed {processed} checkpoints")
+    return 0
+
+
+def parse_submit_rescore_args(argv: list[str]) -> argparse.Namespace:
+    script_dir = Path(__file__).resolve().parent
+    parser = argparse.ArgumentParser(
+        description="Submit CPU-only BLEU rescoring and a dependent aggregate job."
+    )
+    parser.add_argument("--results-root", type=Path, default=script_dir / "results")
+    parser.add_argument("--model-glob", default="0.4B_*")
+    parser.add_argument("--tokenizer", default="flores200")
+    parser.add_argument("--max-concurrent", type=int, default=32)
+    parser.add_argument("--workers", type=int, default=64)
+    parser.add_argument("--output-prefix", default="all_results_0.4B_flores200")
+    parser.add_argument("--account", default="project_465002530")
+    parser.add_argument("--partition", default="small")
+    parser.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+
+def submit_job(command: list[str], *, cwd: Path) -> str:
+    completed = subprocess.run(
+        command,
+        cwd=cwd,
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+    )
+    return completed.stdout.strip().split(";", 1)[0]
+
+
+def run_submit_rescore(argv: list[str]) -> int:
+    args = parse_submit_rescore_args(argv)
+    if args.workers < 1 or args.max_concurrent < 1:
+        raise ValueError("--workers and --max-concurrent must be positive")
+
+    script_path = Path(__file__).resolve()
+    script_dir = script_path.parent
+    results_root = args.results_root.resolve()
+    manifest_dir = results_root / "task_manifests"
+    log_dir = script_dir / "logs" / "rescore"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoints = [
+        marker.parent.resolve()
+        for marker in sorted(results_root.glob("*/*/_SUCCESS"))
+        if marker.is_file() and fnmatch.fnmatchcase(marker.parent.parent.name, args.model_glob)
+    ]
+    if not checkpoints:
+        raise RuntimeError(f"No completed checkpoints matched {args.model_glob}")
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    manifest = manifest_dir / f"rescore_{args.tokenizer}_{stamp}.txt"
+    manifest.write_text("".join(f"{path}\n" for path in checkpoints), encoding="utf-8")
+    print(f"Wrote {len(checkpoints)} completed checkpoints to {manifest}")
+    if args.dry_run:
+        for checkpoint in checkpoints[:10]:
+            print(checkpoint)
+        print(
+            f"Would submit one {args.workers}-worker array with at most "
+            f"{args.max_concurrent} running"
+        )
+        return 0
+
+    worker_parts = [
+        "module purge",
+        "module use /appl/local/csc/modulefiles/",
+        "module load pytorch/2.7",
+        f"source {shlex.quote(str(script_dir / 'eval_env' / 'bin' / 'activate'))}",
+        "export PYTHONNOUSERSITE=1",
+        " ".join(
+            shlex.quote(part)
+            for part in (
+                "python",
+                str(script_path),
+                "rescore-worker",
+                "--manifest",
+                str(manifest),
+                "--tokenizer",
+                args.tokenizer,
+            )
+        ),
+    ]
+    worker_command = f"bash -lc {shlex.quote(' && '.join(worker_parts))}"
+    array_job = submit_job(
+        [
+            "sbatch",
+            "--parsable",
+            f"--array=0-{args.workers - 1}%{args.max_concurrent}",
+            "--job-name=rescore-mt",
+            "--cpus-per-task=2",
+            "--ntasks=1",
+            "--mem=8G",
+            f"--partition={args.partition}",
+            "--time=0-06:00:00",
+            f"--account={args.account}",
+            "--output=logs/rescore/%x_%A_%a.out",
+            "--error=logs/rescore/%x_%A_%a.err",
+            "--wrap",
+            worker_command,
+        ],
+        cwd=script_dir,
+    )
+
+    aggregate_job = submit_job(
+        [
+            "sbatch",
+            "--parsable",
+            f"--dependency=afterok:{array_job}",
+            str(script_dir / "aggregate_mt_results.sh"),
+            "--results-root",
+            str(results_root),
+            "--output-prefix",
+            args.output_prefix,
+            "--model-glob",
+            args.model_glob,
+            "--bleu-tokenizer",
+            args.tokenizer,
+        ],
+        cwd=script_dir,
+    )
+    print(
+        f"Submitted rescoring array: {array_job} "
+        f"({args.workers} workers for {len(checkpoints)} checkpoints)"
+    )
+    print(f"Submitted dependent aggregate: {aggregate_job}")
+    print(
+        f"Aggregate outputs: {results_root / args.output_prefix}.tsv "
+        f"and {results_root / args.output_prefix}.json"
+    )
+    return 0
+
+
+def main() -> int:
+    commands = {
+        "rescore": run_rescore,
+        "rescore-worker": run_rescore_worker,
+        "score-comet": run_score_comet,
+        "submit-rescore": run_submit_rescore,
+    }
+    if len(sys.argv) > 1 and sys.argv[1] in commands:
+        return commands[sys.argv[1]](sys.argv[2:])
+    return evaluate(parse_eval_args())
 
 
 if __name__ == "__main__":
