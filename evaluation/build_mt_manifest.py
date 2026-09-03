@@ -12,7 +12,7 @@ from pathlib import Path
 
 BILINGUAL_RE = re.compile(
     r"^0\.4B_Pretrain_eng_Latn-(?P<lang>.+?)_"
-    r"(?:FineOPUS-Stage[1-4]|MaLA_Bi|NLLB)$"
+    r"(?:FineOPUS-Stage(?:[1-3]|4(?:-High)?)|MaLA_Bi(?:_NLLB)?|NLLB)$"
 )
 HF_TEMPLATES = {
     "0.4B": "openeurollm/Qwen3-0.4B-ne",
@@ -111,16 +111,17 @@ def main() -> int:
             if not args.force and (task_output / "_SUCCESS").is_file():
                 skipped_complete += 1
                 continue
+            # Preserve /scratch paths, which are visible through the evaluation container bind.
             tasks.append(
                 {
                     "task_id": str(len(tasks)),
                     "model_name": name,
-                    "model_dir": str(model_dir.resolve()),
+                    "model_dir": str(model_dir.absolute()),
                     "checkpoint_name": checkpoint.name,
-                    "checkpoint_dir": str(checkpoint.resolve()),
+                    "checkpoint_dir": str(checkpoint.absolute()),
                     "hf_template": hf_template,
                     "languages": ",".join(languages),
-                    "output_dir": str(task_output.resolve()),
+                    "output_dir": str(task_output.absolute()),
                 }
             )
 

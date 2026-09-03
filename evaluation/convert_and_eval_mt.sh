@@ -7,7 +7,7 @@
 #SBATCH --partition=small-g
 #SBATCH --time=0-08:00:00
 #SBATCH --gpus-per-node=1
-#SBATCH --account=project_462001087
+#SBATCH --account=project_465002530
 #SBATCH --output=logs/eval/%x_%A_%a.out
 #SBATCH --error=logs/eval/%x_%A_%a.err
 

@@ -30,6 +30,11 @@ if [[ $# -ne 4 ]]; then
     exit 1
 fi
 
+# /scratch/project_* entries are symlinks to separate Lustre mounts. Binding
+# /scratch is not recursive, so explicitly expose this checkpoint's real mount.
+CHECKPOINT_REAL=$(realpath "$1")
+BIND_DIRS+=",$CHECKPOINT_REAL"
+
 # If this script is run without sbatch, invoke with sbatch here.
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     sbatch "$0" "$@"
