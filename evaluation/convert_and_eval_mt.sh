@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --mem=64G
 #SBATCH --partition=small-g
-#SBATCH --time=0-08:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --gpus-per-node=1
 #SBATCH --account=project_465002530
 #SBATCH --output=logs/eval/%x_%A_%a.out
@@ -32,6 +32,8 @@ FEW_SHOT=3
 LIMIT=""
 TASK_MANIFEST=""
 TASK_ID="${SLURM_ARRAY_TASK_ID:-}"
+TASK_COUNT=""
+CHECKPOINTS_PER_JOB=1
 MODEL_NAME=""
 MODEL_DIR=""
 CHECKPOINT_NAME=""
@@ -56,6 +58,8 @@ Usage:
 
 Options:
   --data-root DIR         Dataset root (default: $DATA_ROOT)
+  --task-count N          Total manifest tasks (enables packed-job mode)
+  --checkpoints-per-job N Checkpoints handled sequentially by this job
   --tokenizer DIR         Training tokenizer (default: $TOKENIZER)
   --tmp-base DIR          Temporary HF export parent (default: $TMP_BASE)
   --datasets LIST         Comma-separated dataset names
@@ -75,6 +79,8 @@ while (( $# )); do
     case "$1" in
         --task-manifest) TASK_MANIFEST="$2"; shift 2 ;;
         --task-id) TASK_ID="$2"; shift 2 ;;
+        --task-count) TASK_COUNT="$2"; shift 2 ;;
+        --checkpoints-per-job) CHECKPOINTS_PER_JOB="$2"; shift 2 ;;
         --model-name) MODEL_NAME="$2"; shift 2 ;;
         --model-dir) MODEL_DIR="$2"; shift 2 ;;
         --checkpoint-name) CHECKPOINT_NAME="$2"; shift 2 ;;
@@ -99,6 +105,69 @@ while (( $# )); do
         *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+if [[ -n "$TASK_COUNT" ]]; then
+    [[ -n "$TASK_MANIFEST" && -f "$TASK_MANIFEST" ]] || {
+        echo "Packed-job mode requires an existing --task-manifest" >&2
+        exit 2
+    }
+    [[ -n "${SLURM_ARRAY_TASK_ID:-}" ]] || {
+        echo "Packed-job mode requires SLURM_ARRAY_TASK_ID" >&2
+        exit 2
+    }
+    [[ "$TASK_COUNT" =~ ^[1-9][0-9]*$ && "$CHECKPOINTS_PER_JOB" =~ ^[1-9][0-9]*$ ]] || {
+        echo "--task-count and --checkpoints-per-job must be positive integers" >&2
+        exit 2
+    }
+
+    chunk_id="$SLURM_ARRAY_TASK_ID"
+    start_task=$(( chunk_id * CHECKPOINTS_PER_JOB ))
+    end_task=$(( start_task + CHECKPOINTS_PER_JOB ))
+    (( end_task <= TASK_COUNT )) || end_task="$TASK_COUNT"
+    (( start_task < end_task )) || {
+        echo "Packed job $chunk_id starts beyond the $TASK_COUNT manifest tasks" >&2
+        exit 2
+    }
+
+    child_args=(
+        --task-manifest "$TASK_MANIFEST"
+        --data-root "$DATA_ROOT"
+        --tokenizer "$TOKENIZER"
+        --tmp-base "$TMP_BASE"
+        --datasets "$DATASETS"
+        --few-shot "$FEW_SHOT"
+        --comet-model "$COMET_MODEL"
+        --comet-batch-size "$COMET_BATCH_SIZE"
+        --comet-gpus "$COMET_GPUS"
+    )
+    [[ -z "$LIMIT" ]] || child_args+=(--limit "$LIMIT")
+    [[ "$KEEP_HF" == 0 ]] || child_args+=(--keep-hf)
+    [[ "$OVERWRITE" == 0 ]] || child_args+=(--overwrite)
+    [[ "$ENFORCE_EAGER" == 0 ]] || child_args+=(--enforce-eager)
+    [[ "$NO_COMET" == 0 ]] || child_args+=(--no-comet)
+
+    echo "Packed job $chunk_id: manifest tasks $start_task-$((end_task - 1))"
+    failed_task_ids=()
+    for (( task_id = start_task; task_id < end_task; task_id++ )); do
+        echo "===== Starting manifest task $task_id ====="
+        if bash "$SCRIPT_DIR/convert_and_eval_mt.sh" \
+            --task-id "$task_id" "${child_args[@]}"; then
+            echo "===== Completed manifest task $task_id ====="
+        else
+            status=$?
+            failed_task_ids+=("$task_id")
+            echo "===== Failed manifest task $task_id (exit $status); continuing =====" >&2
+        fi
+    done
+
+    if (( ${#failed_task_ids[@]} )); then
+        failed_csv=$(IFS=,; echo "${failed_task_ids[*]}")
+        echo "Packed job $chunk_id failed tasks: $failed_csv" >&2
+        exit 1
+    fi
+    echo "Packed job $chunk_id completed all $((end_task - start_task)) tasks."
+    exit 0
+fi
 
 if [[ -n "$TASK_MANIFEST" ]]; then
     [[ -n "$TASK_ID" ]] || { echo "--task-id or SLURM_ARRAY_TASK_ID is required" >&2; exit 2; }
@@ -159,14 +228,18 @@ export HF_HUB_OFFLINE=1
 export TRANSFORMERS_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
 
-# Conversion and vLLM each create a single-process torch.distributed store.
-# Array tasks can share a node, so an inherited/default MASTER_PORT causes
-# intermittent EADDRINUSE failures. Derive a stable, distinct port per task.
-port_job_id="${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-0}}"
-port_task_id="${SLURM_ARRAY_TASK_ID:-0}"
 export MASTER_ADDR=127.0.0.1
-export MASTER_PORT=$((20000 + (port_job_id + port_task_id * 997) % 40000))
-echo "Distributed rendezvous: ${MASTER_ADDR}:${MASTER_PORT}"
+set_master_port() {
+    MASTER_PORT=$(python - <<'PY'
+import socket
+
+with socket.socket() as sock:
+    sock.bind(("127.0.0.1", 0))
+    print(sock.getsockname()[1])
+PY
+)
+    export MASTER_PORT
+}
 
 preflight_args=(
     --data-root "$DATA_ROOT"
@@ -184,6 +257,8 @@ preflight_args=(
 python "$SCRIPT_DIR/mt_eval.py" "${preflight_args[@]}"
 
 echo "Converting checkpoint to Hugging Face format: $(date --iso-8601=seconds)"
+set_master_port
+echo "Conversion rendezvous: ${MASTER_ADDR}:${MASTER_PORT}"
 bash "$SCRIPT_DIR/megatron-to-hf-lumi.sh" \
     "$CHECKPOINT_DIR" "$HF_OUTPUT" "$HF_MODEL" "$TOKENIZER"
 
@@ -206,5 +281,7 @@ eval_args=(
 [[ "$NO_COMET" == 0 ]] || eval_args+=(--no-comet)
 
 echo "Starting vLLM evaluation: $(date --iso-8601=seconds)"
+set_master_port
+echo "Evaluation rendezvous: ${MASTER_ADDR}:${MASTER_PORT}"
 python "$SCRIPT_DIR/mt_eval.py" "${eval_args[@]}"
 echo "Job completed: $(date --iso-8601=seconds)"

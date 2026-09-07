@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Submit model/checkpoint translation evaluations as a bounded Slurm array.
+# Pack model/checkpoint translation evaluations into a small Slurm array.
 
 set -euo pipefail
 
@@ -12,7 +12,8 @@ LANGUAGE_MANIFEST="$REPO_ROOT/tools/token_stats/token_count_tasks_Multilingual-M
 CHECKPOINT="latest"
 DATASETS="FLORES-200,NTREX-128,BOUQuET_Sentence"
 FEW_SHOT=3
-MAX_CONCURRENT=4
+CHECKPOINTS_PER_JOB=4
+JOB_TIME=""
 LIMIT=""
 DRY_RUN=0
 FORCE=0
@@ -35,7 +36,9 @@ Options:
   --datasets LIST          Comma-separated datasets (default: all three)
   --few-shot N             Demonstrations per prompt (default: 3)
   --limit N                Score at most N examples/direction (smoke run)
-  --max-concurrent N       Maximum simultaneous array jobs (default: 4)
+  --max-concurrent N       Checkpoints packed sequentially per job (default: 4)
+  --checkpoints-per-job N  Alias for --max-concurrent
+  --job-time TIME          Override the worker's #SBATCH time limit
   --models-root DIR        Trained model root
   --data-root DIR          Prepared dataset root
   --results-root DIR       Evaluation output root
@@ -64,7 +67,8 @@ while (( $# )); do
         --datasets) DATASETS="$2"; shift 2 ;;
         --few-shot) FEW_SHOT="$2"; shift 2 ;;
         --limit) LIMIT="$2"; shift 2 ;;
-        --max-concurrent) MAX_CONCURRENT="$2"; shift 2 ;;
+        --max-concurrent|--checkpoints-per-job) CHECKPOINTS_PER_JOB="$2"; shift 2 ;;
+        --job-time) JOB_TIME="$2"; shift 2 ;;
         --models-root) MODELS_ROOT="$2"; shift 2 ;;
         --data-root) DATA_ROOT="$2"; shift 2 ;;
         --results-root) RESULTS_ROOT="$2"; shift 2 ;;
@@ -92,6 +96,7 @@ module use /appl/local/csc/modulefiles/
 module load pytorch/2.7
 source "$SCRIPT_DIR/eval_env/bin/activate"
 export PYTHONNOUSERSITE=1
+export HF_HOME=/scratch/project_462001427/cache/huggingface
 
 manifest_args=(
     --models-root "$MODELS_ROOT"
@@ -108,6 +113,18 @@ task_count=$(( $(wc -l < "$TASK_MANIFEST") - 1 ))
 echo "Task manifest: $TASK_MANIFEST"
 sed -n '1,6p' "$TASK_MANIFEST"
 if (( task_count > 5 )); then echo "... ($task_count tasks total)"; fi
+
+[[ "$CHECKPOINTS_PER_JOB" =~ ^[1-9][0-9]*$ ]] || {
+    echo "--max-concurrent/--checkpoints-per-job must be a positive integer" >&2
+    exit 2
+}
+if (( task_count == 0 )); then
+    echo "No unfinished checkpoint tasks; nothing to submit."
+    exit 0
+fi
+
+job_count=$(( (task_count + CHECKPOINTS_PER_JOB - 1) / CHECKPOINTS_PER_JOB ))
+echo "Packed jobs: $job_count (up to $CHECKPOINTS_PER_JOB checkpoints/job)"
 
 if [[ "$DRY_RUN" == 1 ]]; then
     echo "Dry run only; no job submitted."
@@ -139,6 +156,8 @@ fi
 
 worker_args=(
     --task-manifest "$TASK_MANIFEST"
+    --task-count "$task_count"
+    --checkpoints-per-job "$CHECKPOINTS_PER_JOB"
     --data-root "$DATA_ROOT"
     --datasets "$DATASETS"
     --few-shot "$FEW_SHOT"
@@ -152,9 +171,12 @@ worker_args=(
 [[ "$NO_COMET" == 0 ]] || worker_args+=(--no-comet)
 
 pushd "$SCRIPT_DIR" >/dev/null
-submission=$(sbatch --array="0-$((task_count - 1))%$MAX_CONCURRENT" \
+sbatch_args=(--array="0-$((job_count - 1))")
+[[ -z "$JOB_TIME" ]] || sbatch_args+=(--time="$JOB_TIME")
+submission=$(sbatch "${sbatch_args[@]}" \
     "$SCRIPT_DIR/convert_and_eval_mt.sh" "${worker_args[@]}")
 popd >/dev/null
 echo "$submission"
+echo "Submitted $job_count packed jobs for $task_count checkpoints."
 echo "After the array finishes, aggregate with:"
 echo "  python $SCRIPT_DIR/aggregate_mt_results.py --results-root $RESULTS_ROOT"
