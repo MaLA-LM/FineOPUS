@@ -5,7 +5,7 @@
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=1
 #SBATCH --time=1-00:00:00
 #SBATCH --mem=256G
 #SBATCH --account=project_462001087
@@ -35,7 +35,7 @@ EOF
 input_folder=""
 output_folder=""
 concat_n_lines=40
-workers=8
+workers=1
 source_text_col="source_text"
 target_text_col="target_text"
 direction_mode="bidirectional_english"
