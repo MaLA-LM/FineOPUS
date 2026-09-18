@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Base directories
-BASE_DIR="/scratch/project_462001427/FineOPUS/slm_from_scratch"
+BASE_DIR="/scratch/project_462001509/members/zihao/FineOPUS/slm_from_scratch"
 JSONL_BASE="${BASE_DIR}/data/combined/bilingual_mix/_jsonl"
 BIN_BASE="${BASE_DIR}/data/combined/bilingual_mix/_bin"
 
@@ -21,12 +21,15 @@ languages=(
 )
 
 datasets=(
-    "FineOPUS-Filtered-Stage1"
-    "FineOPUS-Filtered-Stage2"
-    "FineOPUS-Filtered-Stage3"
-    "FineOPUS-Filtered-Stage4"
-    "MaLA_Bi"
-    "NLLB"
+    # "FineOPUS-Filtered-Stage1"
+    # "FineOPUS-Filtered-Stage2"
+    # "FineOPUS-Filtered-Stage3"
+    # "FineOPUS-Filtered-Stage4"
+    # "FineOPUS-Filtered-Stage4-High"
+    # "FineOPUS-Filtered-Stage4-xHigh"
+    # "MaLA_Bi"
+    # "NLLB"
+    # "MaLA_Bi_NLLB"
 )
 
 # Loop over all datasets and languages to submit jobs

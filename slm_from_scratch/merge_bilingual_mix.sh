@@ -9,7 +9,7 @@
 #SBATCH --time=1-00:00:00
 #SBATCH --mem=2G
 #SBATCH --account=project_462001087
-#SBATCH --array=0-65%6
+#SBATCH --array=0-10
 
 set -Eeuo pipefail
 
@@ -23,15 +23,18 @@ fi
 DATA_ROOT="$SCRIPT_DIR/data"
 PARALLEL_ROOT="$DATA_ROOT/parallel/bilingual_mix/_jsonl"
 MONOLINGUAL_ROOT="$DATA_ROOT/monolingual/bilingual_mix/_jsonl"
-COMBINED_ROOT="$DATA_ROOT/combined/bilingual_mix/_jsonl"
+COMBINED_ROOT="/scratch/project_462001509/members/zihao/FineOPUS/slm_from_scratch/data/combined/bilingual_mix/_jsonl"
 
 DATASETS=(
-    FineOPUS-Filtered-Stage1
-    FineOPUS-Filtered-Stage2
-    FineOPUS-Filtered-Stage3
-    FineOPUS-Filtered-Stage4
-    MaLA_Bi
-    NLLB
+    # FineOPUS-Filtered-Stage1
+    # FineOPUS-Filtered-Stage2
+    # FineOPUS-Filtered-Stage3
+    # FineOPUS-Filtered-Stage4
+    # FineOPUS-Filtered-Stage4-High
+    # FineOPUS-Filtered-Stage4-xHigh
+    # MaLA_Bi
+    # NLLB
+    # MaLA_Bi_NLLB
 )
 
 LANGUAGES=(
@@ -70,10 +73,25 @@ pair="eng_Latn-$language"
 
 parallel_file="$PARALLEL_ROOT/$dataset/$pair/$pair.jsonl"
 monolingual_file="$MONOLINGUAL_ROOT/$language.jsonl"
+case "$language" in
+    spa_Latn|fra_Latn|deu_Latn|zho_Hans|ara_Arab)
+        english_monolingual_file="$MONOLINGUAL_ROOT/eng_Latn_45B.jsonl"
+        ;;
+    ita_Latn|rus_Cyrl|por_Latn)
+        english_monolingual_file="$MONOLINGUAL_ROOT/eng_Latn_46_5B.jsonl"
+        ;;
+    ell_Grek|ron_Latn|bul_Cyrl)
+        english_monolingual_file="$MONOLINGUAL_ROOT/eng_Latn_47_5B.jsonl"
+        ;;
+    *)
+        echo "Error: no English monolingual file configured for language: $language" >&2
+        exit 1
+        ;;
+esac
 output_dir="$COMBINED_ROOT/$dataset/$pair"
 output_file="$output_dir/combined.jsonl"
 
-for input_file in "$parallel_file" "$monolingual_file"; do
+for input_file in "$parallel_file" "$monolingual_file" "$english_monolingual_file"; do
     if [[ ! -f "$input_file" || ! -r "$input_file" ]]; then
         echo "Error: input file is missing or unreadable: $input_file" >&2
         exit 1
@@ -90,7 +108,8 @@ done
 
 parallel_bytes=$(stat -c '%s' -- "$parallel_file")
 monolingual_bytes=$(stat -c '%s' -- "$monolingual_file")
-expected_bytes=$((parallel_bytes + monolingual_bytes))
+english_monolingual_bytes=$(stat -c '%s' -- "$english_monolingual_file")
+expected_bytes=$((parallel_bytes + monolingual_bytes + english_monolingual_bytes))
 
 mkdir -p -- "$output_dir"
 
@@ -160,13 +179,14 @@ echo "Dataset   : $dataset"
 echo "Language  : $language"
 echo "Parallel  : $parallel_file ($parallel_bytes bytes)"
 echo "Monolingual: $monolingual_file ($monolingual_bytes bytes)"
+echo "English monolingual: $english_monolingual_file ($english_monolingual_bytes bytes)"
 echo "Output    : $output_file ($expected_bytes expected bytes)"
 
 show_progress
 progress_monitor &
 progress_pid=$!
 
-cat -- "$parallel_file" "$monolingual_file" > "$temp_file"
+cat -- "$parallel_file" "$monolingual_file" "$english_monolingual_file" > "$temp_file"
 
 show_progress
 stop_progress

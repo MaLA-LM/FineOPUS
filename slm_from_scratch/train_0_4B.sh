@@ -112,7 +112,7 @@ BIND_MASK="0x${c}000000000000,0x${c}00000000000000,0x${c}0000,0x${c}000000,0x${c
 
 # ❗❗❗PATHS
 BASE_DIR="$SLURM_SUBMIT_DIR"
-OUTPUT_DIR="$BASE_DIR/output/${SLURM_JOB_NAME}"
+OUTPUT_DIR="/scratch/project_462001509/members/zihao/FineOPUS/slm_from_scratch/output/${SLURM_JOB_NAME}"
 CHECKPOINT_PATH="$OUTPUT_DIR/checkpoints"
 TENSORBOARD_DIR="$OUTPUT_DIR/tensorboard/$SLURM_JOB_NAME-$SLURM_JOBID"
 WANDB_DIR="$OUTPUT_DIR/wandb"
@@ -246,7 +246,7 @@ TRAIN_TOKENS="${TRAIN_TOKENS:-100_000_000_000}"    # TRAIN_ITERS computed from t
 LOG_INTERVAL=1
 SAVE_INTERVAL=2000
 EVAL_INTERVAL=2000
-EVAL_ITERS=100
+EVAL_ITERS=0
 
 ######################################################################
 #
@@ -299,7 +299,7 @@ LR_DECAY_ITERS=$TRAIN_ITERS
 DATA_ARGS=(
     --data-path "$DATA_PATH"
     --data-cache-path "$DATA_CACHE_PATH"
-    --split 99,1,0
+    --split 100,0,0
     --tokenizer-type HuggingFaceTokenizer
     --tokenizer-model "$TOKENIZER_MODEL"
     --make-vocab-size-divisible-by 128
