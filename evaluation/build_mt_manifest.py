@@ -12,7 +12,7 @@ from pathlib import Path
 
 BILINGUAL_RE = re.compile(
     r"^0\.4B_Pretrain_eng_Latn-(?P<lang>.+?)_"
-    r"(?:FineOPUS-Stage(?:[1-3]|4(?:-High)?)|MaLA_Bi(?:_NLLB)?|NLLB)$"
+    r"(?:FineOPUS-Stage(?:[1-3]|4(?:-(?:High|xHigh))?)|MaLA_Bi(?:_NLLB)?|NLLB)$"
 )
 HF_TEMPLATES = {
     "0.4B": "openeurollm/Qwen3-0.4B-ne",
