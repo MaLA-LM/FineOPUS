@@ -16,8 +16,10 @@
 #   NUM_CHUNKS=32 ./extract_mix.sh NLLB
 #   NUM_CHUNKS=32 ./extract_mix.sh MaLA_Bi
 #   NUM_CHUNKS=32 ./extract_mix.sh MaLA_Bi_NLLB
+#   NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage6
 #   NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage5
 #   NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage4
+#   QUALITY_PRIORITY=1 NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage6
 #   QUALITY_PRIORITY=1 NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage5
 #   QUALITY_PRIORITY=1 NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage4
 #   NUM_CHUNKS=32 ./extract_mix.sh FineOPUS-Filtered-Stage3
@@ -32,7 +34,7 @@ set -euo pipefail
 # copy in worker mode, so it cannot be used to locate extract_mix.py).
 TOOLS_DIR="${TOOLS_DIR:-/scratch/project_462001427/FineOPUS/tools}"
 
-DATASET="${1:?Usage: ./extract_mix.sh <NLLB|MaLA_Bi|MaLA_Bi_NLLB|FineOPUS-Filtered-Stage5|FineOPUS-Filtered-Stage4|FineOPUS-Filtered-Stage3|FineOPUS-Filtered-Stage2|FineOPUS-Filtered-Stage1>}"
+DATASET="${1:?Usage: ./extract_mix.sh <NLLB|MaLA_Bi|MaLA_Bi_NLLB|FineOPUS-Filtered-Stage6|FineOPUS-Filtered-Stage5|FineOPUS-Filtered-Stage4|FineOPUS-Filtered-Stage3|FineOPUS-Filtered-Stage2|FineOPUS-Filtered-Stage1>}"
 NUM_CHUNKS="${NUM_CHUNKS:-32}"
 SEED="${SEED:-42}"
 CSV="${CSV:-/scratch/project_462001427/FineOPUS/slm_from_scratch/data/parallel/multilingual_mix/Multilingual-Mix-Parallel.csv}"
@@ -48,9 +50,9 @@ esac
 
 if [ "$QUALITY_PRIORITY" = "1" ]; then
     case "$DATASET" in
-        FineOPUS-Filtered-Stage4|FineOPUS-Filtered-Stage5) ;;
+        FineOPUS-Filtered-Stage4|FineOPUS-Filtered-Stage5|FineOPUS-Filtered-Stage6) ;;
         *)
-            echo "QUALITY_PRIORITY=1 only supports FineOPUS-Filtered-Stage4/Stage5" >&2
+            echo "QUALITY_PRIORITY=1 only supports FineOPUS-Filtered-Stage4/Stage5/Stage6" >&2
             exit 2
             ;;
     esac

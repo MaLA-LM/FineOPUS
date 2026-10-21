@@ -28,7 +28,7 @@
 # ──────────────────────── SBATCH directives ────────────────────────
 # These are only parsed when the file is submitted via sbatch.
 #SBATCH --job-name=count_token
-#SBATCH --account=project_462001087
+#SBATCH --account=project_462001249
 #SBATCH --partition=small
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1

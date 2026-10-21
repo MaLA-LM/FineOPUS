@@ -9,7 +9,7 @@ The exact number of rows to sample is derived from the *pre-computed* per-source
 token statistics (token_stats/*.csv): rows = allocated_tokens / (tokens_per_line).
 This avoids re-tokenizing tens of billions of tokens while still hitting the
 token budget in expectation. Random Bernoulli sampling (seeded) is used by
-default. For Stage4/Stage5, ``--quality_priority`` instead uses low-memory,
+default. For Stage4/Stage5/Stage6, ``--quality_priority`` instead uses low-memory,
 score-weighted systematic sampling that favours rows with higher
 ``similarity_score`` and ``qe_score`` and with longer text on both sides.
 If the quota is larger than the available tokens, the available rows are
@@ -65,6 +65,13 @@ DATASETS = {
         "src_col": "source_text",
         "tgt_col": "target_text",
     },
+    "FineOPUS-Filtered-Stage6": {
+        "data_dir": Path("/scratch/project_462001509/members/zihao/FineOPUS/FineOPUS-Filtered-Stage6"),
+        "stats_csv": STATS_DIR / "FineOPUS-Filtered-Stage6_Qwen3_5.csv",
+        "csv_col": "FineOPUS_csv_lang_pair_rows",
+        "src_col": "source_text",
+        "tgt_col": "target_text",
+    },
     "FineOPUS-Filtered-Stage5": {
         "data_dir": Path("/scratch/project_462001249/MaLA-LM/FineOPUS-Filtered-Stage5"),
         "stats_csv": STATS_DIR / "FineOPUS-Filtered-Stage5_Qwen3_5.csv",
@@ -108,6 +115,7 @@ FLUSH_ROWS = 200_000
 QUALITY_DATASETS = {
     "FineOPUS-Filtered-Stage4",
     "FineOPUS-Filtered-Stage5",
+    "FineOPUS-Filtered-Stage6",
 }
 QUALITY_COLS = (
     "similarity_score",
@@ -563,7 +571,7 @@ def main():
     ap.add_argument("--overwrite", action="store_true")
     ap.add_argument(
         "--quality_priority", action="store_true",
-        help=("For FineOPUS Stage4/Stage5, favour high similarity_score, "
+        help=("For FineOPUS Stage4/Stage5/Stage6, favour high similarity_score, "
               "high qe_score, and longer text on both sides."),
     )
     ap.add_argument(
@@ -579,7 +587,7 @@ def main():
     if args.quality_priority and args.dataset not in QUALITY_DATASETS:
         ap.error(
             "--quality_priority is only supported for "
-            "FineOPUS-Filtered-Stage4/Stage5"
+            "FineOPUS-Filtered-Stage4/Stage5/Stage6"
         )
     if (not np.isfinite(args.quality_strength)
             or not 0 <= args.quality_strength <= 20):
