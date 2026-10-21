@@ -1,0 +1,22 @@
+{
+  "seed": 42,
+  "weights": {"P": 0.35, "Q": 0.35, "H": 0.20, "L": 0.10},
+  "llm_weight": 0.20,
+  "score_floor": 0.05,
+  "tail_start": 0.80,
+  "weak_threshold": 0.20,
+  "weak_penalty": 0.50,
+  "copy_penalty": 0.25,
+  "copy_risk_threshold": 0.90,
+  "copy_language_threshold": 0.40,
+  "lid_hard_confidence": 0.90,
+  "lid_hard_min_letters": 40,
+  "copy_hard_min_letters": 20,
+  "script_min_fraction": 0.20,
+  "volume_edges": [100000000, 1000000000, 10000000000],
+  "volume_keep_rates": [0.90, 0.80, 0.61, 0.60],
+  "language_root_aliases": {
+    "zho": "cmn", "ara": "arb", "fas": "pes", "nor": "nob",
+    "msa": "zsm", "fil": "tgl", "sqi": "als"
+  }
+}

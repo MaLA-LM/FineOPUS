@@ -250,3 +250,4 @@ cython_debug/
 /*/*/hostfiles/*
 models/*
 .DS_Store
+/deu_data_check

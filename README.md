@@ -5,7 +5,7 @@
 
 Welcome to the **FineOPUS** repository. This project provides a robust, end-to-end, high-performance computing (HPC) pipeline designed to download, clean, normalize, filter, and evaluate multilingual parallel corpora derived from the OPUS collection. 
 
-The pipeline is organized into numbered stages (**00–07**) that lead you from raw, unverified downloads to a clean, high-quality translation corpus suitable for training large language models (LLMs) or machine translation (MT) systems. It is optimized to run on SLURM-managed clusters (such as CSC Mahti and LUMI) via job arrays, but also supports local execution for debugging.
+The pipeline is organized into numbered stages (**00–08**) that lead you from raw, unverified downloads to a clean, high-quality translation corpus suitable for training large language models (LLMs) or machine translation (MT) systems. It is optimized to run on SLURM-managed clusters (such as CSC Mahti and LUMI) via job arrays, but also supports local execution for debugging.
 
 ---
 
@@ -19,6 +19,7 @@ The pipeline is organized into numbered stages (**00–07**) that lead you from 
 *   [05_quality_estimation](./05_quality_estimation) — Distributed scoring across 5 backends: COMET, MetricX-24, ReMedy, Bicleaner, and offline vLLM (Qwen3, M-Prometheus).
 *   [06_frontier_llm_as_judge](./06_frontier_llm_as_judge) — High-quality evaluation using Azure-hosted DeepSeek-V4-Flash with token bucket rate limiters.
 *   [07_human_eval](./07_human_eval) — Static HTML-based interface for broad quality evaluation (languages, fluency, translation correspondence).
+*   [08_joint_filter](./08_joint_filter) — Stage6 joint filtering: combine existing sample metrics, generate multiple token-budget threshold profiles, then stream the selected profile into a new corpus.
 
 ---
 
