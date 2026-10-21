@@ -32,6 +32,7 @@ VARIANT_ORDER = [
     "FineOPUS Stage 2",
     "FineOPUS Stage 3",
     "FineOPUS Stage 4",
+    "FineOPUS Stage 4 High",
     "FineOPUS Stage 4 xHigh",
     "MaLA Bi",
     "NLLB",
@@ -42,6 +43,7 @@ VARIANT_STYLE = {
     "FineOPUS Stage 2": ("#E69F00", "s", "-"),
     "FineOPUS Stage 3": ("#009E73", "^", "-"),
     "FineOPUS Stage 4": ("#D55E00", "D", "-"),
+    "FineOPUS Stage 4 High": ("#AA4499", "v", "-"),
     "FineOPUS Stage 4 xHigh": ("#882255", "*", "-"),
     "MaLA Bi": ("#CC79A7", "P", "--"),
     "NLLB": ("#6B4C3B", "X", ":"),
@@ -479,6 +481,97 @@ def main() -> int:
         index=False,
     )
 
+    direction_scores = (
+        cells.groupby(
+            [
+                "language", "model", "variant", "checkpoint", "iteration",
+                "direction",
+            ],
+            as_index=False,
+            observed=True,
+        )
+        .agg(
+            bleu=("bleu", "mean"),
+            chrf=("chrf", "mean"),
+            comet=("comet", "mean"),
+            num_datasets=("dataset", "size"),
+        )
+    )
+    direction_ranking = (
+        direction_scores.sort_values("iteration")
+        .groupby(
+            ["language", "variant", "direction"],
+            as_index=False,
+            observed=True,
+        )
+        .tail(1)
+        .copy()
+    )
+    groups = ["language", "direction"]
+    rank_columns = []
+    for metric in METRIC_COLUMNS:
+        column = f"{metric}_rank"
+        direction_ranking[column] = direction_ranking.groupby(
+            groups, observed=True
+        )[metric].rank(ascending=False, method="min").astype(int)
+        rank_columns.append(column)
+    direction_ranking["mean_metric_rank"] = direction_ranking[
+        rank_columns
+    ].mean(axis=1)
+    direction_ranking["overall_rank"] = direction_ranking.groupby(
+        groups, observed=True
+    )["mean_metric_rank"].rank(ascending=True, method="min").astype(int)
+    direction_ranking = direction_ranking.sort_values(
+        [*groups, "overall_rank", "variant"]
+    )
+    direction_ranking.to_csv(
+        args.output_dir / "final_checkpoint_ranking_by_language_direction.tsv",
+        sep="\t",
+        index=False,
+    )
+    compact_ranking = (
+        direction_ranking.groupby(groups, as_index=False, observed=True)["variant"]
+        .agg(lambda values: " > ".join(map(str, values)))
+        .rename(columns={"variant": "ranking"})
+    )
+    compact_ranking.to_csv(
+        args.output_dir / "final_checkpoint_ranking_order_by_language_direction.tsv",
+        sep="\t",
+        index=False,
+    )
+    language_average_ranking = (
+        direction_ranking.groupby(
+            ["direction", "variant"], as_index=False, observed=True
+        )
+        .agg(
+            bleu=("bleu", "mean"),
+            chrf=("chrf", "mean"),
+            comet=("comet", "mean"),
+            num_languages=("language", "nunique"),
+        )
+    )
+    rank_columns = []
+    for metric in METRIC_COLUMNS:
+        column = f"{metric}_rank"
+        language_average_ranking[column] = language_average_ranking.groupby(
+            "direction", observed=True
+        )[metric].rank(ascending=False, method="min").astype(int)
+        rank_columns.append(column)
+    language_average_ranking["mean_metric_rank"] = language_average_ranking[
+        rank_columns
+    ].mean(axis=1)
+    language_average_ranking["overall_rank"] = language_average_ranking.groupby(
+        "direction", observed=True
+    )["mean_metric_rank"].rank(ascending=True, method="min").astype(int)
+    language_average_ranking = language_average_ranking.sort_values(
+        ["direction", "overall_rank", "variant"]
+    )
+    language_average_ranking.to_csv(
+        args.output_dir / "final_checkpoint_language_average_ranking_by_direction.tsv",
+        sep="\t",
+        index=False,
+    )
+
     print(f"Input: {args.input}")
     print(f"Output: {args.output_dir}")
     print(f"Languages plotted: {macro['language'].nunique()}")
@@ -492,6 +585,10 @@ def main() -> int:
         "Final-checkpoint heatmaps by dataset: "
         f"{args.output_dir / 'final_checkpoint_heatmaps_by_dataset'}"
     )
+    print("Final-checkpoint ranking by language and direction:")
+    print(compact_ranking.to_string(index=False))
+    print("Final-checkpoint language-average ranking by direction:")
+    print(language_average_ranking.to_string(index=False))
     return 0
 
 

@@ -281,6 +281,23 @@ def main() -> int:
         index=False,
     )
 
+    direction_scores = (
+        cells.groupby(
+            [
+                "language", "model", "variant", "checkpoint", "iteration",
+                "direction",
+            ],
+            as_index=False,
+            observed=True,
+        )
+        .agg(
+            bleu=("bleu", "mean"),
+            chrf=("chrf", "mean"),
+            comet=("comet", "mean"),
+            num_datasets=("dataset", "size"),
+        )
+    )
+
     ranking = rank_language_averages(macro_scores)
     ranking.to_csv(
         args.output_dir / "multilingual_language_average_ranking.tsv",
@@ -294,6 +311,17 @@ def main() -> int:
         dataset_rankings.append(dataset_ranking)
     pd.concat(dataset_rankings, ignore_index=True).to_csv(
         args.output_dir / "multilingual_language_average_ranking_by_dataset.tsv",
+        sep="\t",
+        index=False,
+    )
+    direction_rankings = []
+    for direction, rows in direction_scores.groupby("direction", observed=True):
+        direction_ranking = rank_language_averages(rows)
+        direction_ranking.insert(0, "direction", direction)
+        direction_rankings.append(direction_ranking)
+    direction_ranking = pd.concat(direction_rankings, ignore_index=True)
+    direction_ranking.to_csv(
+        args.output_dir / "multilingual_language_average_ranking_by_direction.tsv",
         sep="\t",
         index=False,
     )
@@ -332,6 +360,8 @@ def main() -> int:
     print(f"Heatmaps by dataset: {heatmap_dir}")
     print("Language-average ranking:")
     print(ranking.to_string(index=False))
+    print("Language-average ranking by direction:")
+    print(direction_ranking.to_string(index=False))
     return 0
 
 
