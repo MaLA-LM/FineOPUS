@@ -27,6 +27,7 @@ datasets=(
     # "FineOPUS-Filtered-Stage4"
     # "FineOPUS-Filtered-Stage4-High"
     # "FineOPUS-Filtered-Stage4-xHigh"
+    "FineOPUS-Filtered-Stage6"
     # "MaLA_Bi"
     # "NLLB"
     # "MaLA_Bi_NLLB"

@@ -23,16 +23,16 @@ from plot_mt_common import METRIC_COLUMNS, RESULTS_DIR, iteration_from_checkpoin
 
 METRICS = list(METRIC_COLUMNS)
 KEYS = ["model", "variant", "language", "checkpoint", "iteration"]
+DIRECTION_SHEETS = {"Eng-X": "eng_to_x", "X-Eng": "x_to_eng"}
 SUFFIX_LABELS = {
     "FineOPUS": "FineOPUS",
-    "FineOPUS-High": "FineOPUS High",
-    "FineOPUS-xHigh": "FineOPUS xHigh",
+    "FineOPUS-High": "FineOPUS WS4",
+    "FineOPUS-xHigh": "FineOPUS WS16",
     "MaLA_Bi": "MaLA Bi",
-    "MaLA_Bi_NLLB": "MaLA Bi + NLLB",
     "NLLB": "NLLB",
-    **{f"FineOPUS-Stage{stage}": f"FineOPUS Stage {stage}" for stage in range(1, 5)},
-    "FineOPUS-Stage4-High": "FineOPUS Stage 4 High",
-    "FineOPUS-Stage4-xHigh": "FineOPUS Stage 4 xHigh",
+    **{f"FineOPUS-Stage{stage}": f"FineOPUS Stage {stage}" for stage in range(1, 7)},
+    "FineOPUS-Stage4-High": "FineOPUS Stage 4 WS4",
+    "FineOPUS-Stage4-xHigh": "FineOPUS Stage 4 WS16",
 }
 DEFAULT_INPUTS = [
     RESULTS_DIR / "all_results_0.4B_multilingual_flores200.json",
@@ -63,6 +63,12 @@ def load_results(path: Path) -> tuple[list[dict], pd.DataFrame]:
         records = json.load(handle)
     if not isinstance(records, list) or not records or not all(isinstance(row, dict) for row in records):
         raise ValueError(f"Expected a nonempty list of result objects: {path}")
+    records = [
+        row for row in records
+        if not str(row.get("model", "")).endswith("_MaLA_Bi_NLLB")
+    ]
+    if not records:
+        raise ValueError(f"No result records remain after model exclusions: {path}")
     raw = pd.DataFrame(records)
     required = {"model", "language", "checkpoint", "dataset", "source", "target", "status", *METRICS}
     if missing := required - set(raw.columns):
@@ -97,6 +103,24 @@ def rank_models(frame: pd.DataFrame, by_dataset: bool = False) -> pd.DataFrame:
     ranking["overall_rank"] = values.rank(ascending=True, method="min").astype(int)
     order = (["dataset"] if by_dataset else []) + ["overall_rank", "variant"]
     return ranking.sort_values(order, kind="stable").reset_index(drop=True)
+
+
+def direction_average_table(final_direction: pd.DataFrame, direction: str) -> pd.DataFrame:
+    language_scores = (
+        final_direction.loc[final_direction["direction"].eq(direction)]
+        .groupby(["variant", "language"], sort=True)[METRICS].mean()
+    )
+    averages = (
+        language_scores.groupby("variant", sort=True)[METRICS].mean().reset_index()
+        .sort_values(["bleu", "variant"], ascending=[False, True], kind="stable")
+    )
+    averages["variant"] = (
+        averages["variant"].str.replace("FineOPUS Stage ", "FineOPUS-Stage-", regex=False)
+        .str.replace(" ", "-", regex=False)
+    )
+    return averages.rename(columns={
+        "variant": "Model", "bleu": "spBLEU", "chrf": "chrF++", "comet": "COMET",
+    }).reset_index(drop=True)
 
 
 def summary_tables(raw: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -152,6 +176,10 @@ def summary_tables(raw: pd.DataFrame) -> dict[str, pd.DataFrame]:
         "FinalByDirection": final_direction,
         "ModelRanking": rank_models(final),
         "DatasetRanking": rank_models(final_dataset, by_dataset=True),
+        **{
+            name: direction_average_table(final_direction, direction)
+            for name, direction in DIRECTION_SHEETS.items()
+        },
     }
 
 
@@ -166,7 +194,8 @@ def overview(path: Path, raw: pd.DataFrame) -> pd.DataFrame:
         ("Model variants", raw["variant"].nunique()),
         ("Languages", raw["language"].nunique()),
         ("Datasets", ", ".join(sorted(raw["dataset"].unique()))),
-        ("RawData", "All input records and original fields, in source order; variant, iteration and direction are derived columns. No plotting exclusions are applied."),
+        ("Model exclusions", "Models ending in _MaLA_Bi_NLLB are excluded from every worksheet."),
+        ("RawData", "All retained input records and original fields, in source order; variant, iteration and direction are derived columns. High and xHigh variant labels are displayed as WS4 and WS16."),
         ("Coverage", "Raw/complete record counts and observed checkpoint, language, dataset and direction counts per actual model."),
         ("LanguageByCheckpoint", "Each model/language/checkpoint: mean of available dataset scores. num_datasets records actual coverage."),
         ("DatasetByCheckpoint", "Each model/language/checkpoint/dataset: equal-weight mean of available English-to-X and X-to-English directions. num_directions records actual coverage."),
@@ -175,6 +204,8 @@ def overview(path: Path, raw: pd.DataFrame) -> pd.DataFrame:
         ("FinalByDirection", "Direction scores at the selected final checkpoint, with dataset language aliases averaged first. num_alias_pairs shows the number of source rows averaged."),
         ("ModelRanking", "Equal-weight mean of FinalByLanguage across available languages per variant. Higher scores are better; each metric is ranked separately, then overall_rank ranks the mean of the three metric ranks (ties use minimum rank)."),
         ("DatasetRanking", "Same ranking method independently per dataset, using equal-weight language means. num_languages records coverage."),
+        ("Eng-X", "Final checkpoint English-to-X scores: average available datasets within each language, then average languages equally per variant. Sorted by descending spBLEU; all three metrics display three decimal places."),
+        ("X-Eng", "Final checkpoint X-to-English scores: same averaging and display rules as Eng-X. Dataset language aliases are averaged first, as in FinalByDirection."),
         ("Aggregation order", "Dataset aliases -> directions -> available datasets -> languages; no weighting by sentence count. Bilingual Arabic BOUQuET varieties are averaged within each direction first."),
         ("Coverage caution", "Missing datasets, directions or languages are not assigned zero. Rankings use observed coverage, not an enforced common-language subset; compare num_languages and num_datasets."),
         ("Metric columns", "bleu = spBLEU-200 when bleu_tokenizer is flores200; chrf = chrF++ when chrf_word_order is 2; comet remains on its original scale (not multiplied by 100)."),
@@ -190,6 +221,7 @@ def column_width(column: str) -> int:
         "direction": 16, "source": 16, "target": 16, "model": 64,
         "result_dir": 86, "reason": 48, "bleu_signature": 68, "comet_model": 31,
         "bleu_tokenizer": 19, "status": 14, "Field": 27, "Description": 112,
+        "Model": 32, "spBLEU": 18, "chrF++": 18, "COMET": 18,
     }
     return widths.get(column, min(27, max(15, len(column) + 3)))
 
@@ -203,7 +235,9 @@ def style_sheet(sheet, columns: list[str], index: int) -> None:
     sheet.page_setup.fitToHeight = 0
     sheet.print_title_rows = "1:1"
     sheet.row_dimensions[1].height = 30
-    sheet.sheet_properties.tabColor = "24756A" if sheet.title.startswith("Final") else "305C80"
+    sheet.sheet_properties.tabColor = (
+        "24756A" if sheet.title.startswith("Final") or sheet.title in DIRECTION_SHEETS else "305C80"
+    )
     for number, column in enumerate(columns, 1):
         sheet.column_dimensions[get_column_letter(number)].width = column_width(column)
         cell = sheet.cell(1, number)
@@ -218,7 +252,7 @@ def style_sheet(sheet, columns: list[str], index: int) -> None:
             cell.alignment = Alignment(vertical="center", wrap_text=sheet.title == "Overview")
             if column == "comet":
                 cell.number_format = "0.000000"
-            elif column in ("bleu", "chrf", "seconds", "comet_seconds", "mean_metric_rank"):
+            elif column in ("bleu", "chrf", "seconds", "comet_seconds", "mean_metric_rank", "spBLEU", "chrF++", "COMET"):
                 cell.number_format = "0.000"
             elif column.endswith("_rank") or column.startswith("num_") or column in (
                 "iteration", "first_iteration", "last_iteration", "raw_rows", "complete_rows",
@@ -229,11 +263,13 @@ def style_sheet(sheet, columns: list[str], index: int) -> None:
         for row in range(2, sheet.max_row + 1):
             sheet.row_dimensions[row].height = 48 if row >= 11 else 30
     if sheet.max_row > 1:
-        table = Table(displayName=f"T{index:02d}_{sheet.title}", ref=sheet.dimensions)
+        table_name = re.sub(r"[^A-Za-z0-9_]", "_", sheet.title)
+        table = Table(displayName=f"T{index:02d}_{table_name}", ref=sheet.dimensions)
         table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
         sheet.add_table(table)
-        if sheet.title.startswith("Final") or sheet.title.endswith("Ranking"):
-            for metric in METRICS:
+        if sheet.title.startswith("Final") or sheet.title.endswith("Ranking") or sheet.title in DIRECTION_SHEETS:
+            metrics = ["spBLEU", "chrF++", "COMET"] if sheet.title in DIRECTION_SHEETS else METRICS
+            for metric in metrics:
                 if metric in columns:
                     letter = get_column_letter(columns.index(metric) + 1)
                     sheet.conditional_formatting.add(

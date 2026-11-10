@@ -34,6 +34,7 @@ VARIANT_ORDER = [
     "FineOPUS Stage 4",
     "FineOPUS Stage 4 High",
     "FineOPUS Stage 4 xHigh",
+    "FineOPUS Stage 6",
     "MaLA Bi",
     "NLLB",
 ]
@@ -45,6 +46,7 @@ VARIANT_STYLE = {
     "FineOPUS Stage 4": ("#D55E00", "D", "-"),
     "FineOPUS Stage 4 High": ("#AA4499", "v", "-"),
     "FineOPUS Stage 4 xHigh": ("#882255", "*", "-"),
+    "FineOPUS Stage 6": ("#332288", "h", "-"),
     "MaLA Bi": ("#CC79A7", "P", "--"),
     "NLLB": ("#6B4C3B", "X", ":"),
 }
@@ -68,6 +70,7 @@ def variant_from_model(model: str) -> str:
         "FineOPUS-Stage2": "FineOPUS Stage 2",
         "FineOPUS-Stage3": "FineOPUS Stage 3",
         "FineOPUS-Stage4": "FineOPUS Stage 4",
+        "FineOPUS-Stage6": "FineOPUS Stage 6",
         "MaLA_Bi": "MaLA Bi",
         "NLLB": "NLLB",
     }
@@ -141,9 +144,11 @@ def prepare_data(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 def validate_data(macro: pd.DataFrame) -> None:
     problems = []
+    # New stages can be evaluated for only a subset of training languages.
+    required_variants = set(VARIANT_ORDER) - {"FineOPUS Stage 6"}
     for language, group in macro.groupby("language", observed=True):
         variants = set(group["variant"].astype(str))
-        if variants != set(VARIANT_ORDER):
+        if not required_variants.issubset(variants):
             problems.append(f"{language}: variants={sorted(variants)}")
         checkpoint_counts = group.groupby("variant", observed=True)["checkpoint"].nunique()
         if checkpoint_counts.nunique() != 1:
@@ -161,6 +166,8 @@ def plot_language_curves(
         fig, axes = plt.subplots(1, 3, figsize=(18.2, 4.8), sharex=True)
         for variant in VARIANT_ORDER:
             values = language_data[language_data["variant"] == variant].sort_values("iteration")
+            if values.empty:
+                continue
             color, marker, line_style = VARIANT_STYLE[variant]
             for axis, (metric, _) in zip(axes, METRIC_SPECS):
                 axis.plot(
@@ -275,6 +282,8 @@ def plot_language_dataset_curves(
                 values = dataset_data[
                     dataset_data["variant"] == variant
                 ].sort_values("iteration")
+                if values.empty:
+                    continue
                 color, marker, line_style = VARIANT_STYLE[variant]
                 for column, (metric, _) in enumerate(METRIC_SPECS):
                     axes[row, column].plot(
