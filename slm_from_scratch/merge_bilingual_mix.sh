@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=1
 #SBATCH --time=1-00:00:00
 #SBATCH --mem=2G
-#SBATCH --account=project_462001087
+#SBATCH --account=project_462001249
 #SBATCH --array=0-10
 
 set -Eeuo pipefail
@@ -32,6 +32,7 @@ DATASETS=(
     # FineOPUS-Filtered-Stage4
     # FineOPUS-Filtered-Stage4-High
     # FineOPUS-Filtered-Stage4-xHigh
+    # FineOPUS-Filtered-Stage6
     # MaLA_Bi
     # NLLB
     # MaLA_Bi_NLLB

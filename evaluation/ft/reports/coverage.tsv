@@ -1,0 +1,529 @@
+dataset	original_label	reported_code	language	status	dataset_languages	source_uncertain	note
+FLORES-200	ace	ace_Latn	ace_Latn	exact	ace_Latn	False	
+FLORES-200	af	afr_Latn	afr_Latn	exact	afr_Latn	False	
+FLORES-200	als	als_Latn	als_Latn	exact	als_Latn	False	
+FLORES-200	am	amh_Ethi	amh_Ethi	exact	amh_Ethi	False	
+FLORES-200	an	arg_Latn	arg_Latn	unavailable		False	
+FLORES-200	ang	ang_Latn	ang_Latn	unavailable		False	
+FLORES-200	ar	ara_Arab	ara_Arab	mapped	arb_Arab	False	
+FLORES-200	arc	arc_Syrc	arc_Syrc	unavailable		False	
+FLORES-200	arz	arz_Arab	arz_Arab	exact	arz_Arab	False	
+FLORES-200	as	asm_Beng	asm_Beng	exact	asm_Beng	False	
+FLORES-200	ast	ast_Latn	ast_Latn	exact	ast_Latn	False	
+FLORES-200	ay	aym_Latn	aym_Latn	mapped	ayr_Latn	False	
+FLORES-200	az	aze_Latn	aze_Latn	mapped	azj_Latn	False	
+FLORES-200	ba	bak_Cyrl	bak_Cyrl	exact	bak_Cyrl	False	
+FLORES-200	bar	bar_Latn	bar_Latn	unavailable		False	
+FLORES-200	bat-smg	?		unresolved		True	
+FLORES-200	be	bel_Cyrl	bel_Cyrl	exact	bel_Cyrl	False	
+FLORES-200	be-x-old	bel_Cyrl	bel_Cyrl	exact	bel_Cyrl	False	
+FLORES-200	bg	bul_Cyrl	bul_Cyrl	exact	bul_Cyrl	False	
+FLORES-200	bh	?		unresolved		True	
+FLORES-200	bn	ben_Beng	ben_Beng	exact	ben_Beng	False	
+FLORES-200	bo	bod_Tibt?	bod_Tibt	exact	bod_Tibt	True	Removed source uncertainty marker; retained reported language and script.
+FLORES-200	br	bre_Latn	bre_Latn	unavailable		False	
+FLORES-200	bs	bos_Latn	bos_Latn	exact	bos_Latn	False	
+FLORES-200	ca	cat_Latn	cat_Latn	exact	cat_Latn	False	
+FLORES-200	cbk-zam	cbk_Latn	cbk_Latn	unavailable		False	
+FLORES-200	cdo	cdo_Latn	cdo_Latn	unavailable		False	
+FLORES-200	ce	che_Cyrl	che_Cyrl	unavailable		False	
+FLORES-200	ceb	ceb_Latn	ceb_Latn	exact	ceb_Latn	False	
+FLORES-200	ckb	ckb_Arab	ckb_Arab	exact	ckb_Arab	False	
+FLORES-200	co	cos_Latn	cos_Latn	unavailable		False	
+FLORES-200	crh	crh_Latn	crh_Latn	exact	crh_Latn	False	
+FLORES-200	cs	ces_Latn	ces_Latn	exact	ces_Latn	False	
+FLORES-200	csb	csb_Latn	csb_Latn	unavailable		False	
+FLORES-200	cv	chv_Cyrl	chv_Cyrl	unavailable		False	
+FLORES-200	cy	cym_Latn	cym_Latn	exact	cym_Latn	False	
+FLORES-200	da	dan_Latn	dan_Latn	exact	dan_Latn	False	
+FLORES-200	de	deu_Latn	deu_Latn	exact	deu_Latn	False	
+FLORES-200	diq	diq_Latn	diq_Latn	unavailable		False	
+FLORES-200	dv	div_Thaa	div_Thaa	unavailable		False	
+FLORES-200	el	ell_Grek	ell_Grek	exact	ell_Grek	False	
+FLORES-200	eml	?		unresolved		True	
+FLORES-200	en	eng_Latn	eng_Latn	english_anchor		False	
+FLORES-200	eo	epo_Latn	epo_Latn	exact	epo_Latn	False	
+FLORES-200	es	spa_Latn	spa_Latn	exact	spa_Latn	False	
+FLORES-200	et	est_Latn	est_Latn	exact	est_Latn	False	
+FLORES-200	eu	eus_Latn	eus_Latn	exact	eus_Latn	False	
+FLORES-200	ext	ext_Latn	ext_Latn	unavailable		False	
+FLORES-200	fa	fas_Arab	fas_Arab	mapped	pes_Arab	False	
+FLORES-200	fi	fin_Latn	fin_Latn	exact	fin_Latn	False	
+FLORES-200	fiu-vro	?		unresolved		True	
+FLORES-200	fo	fao_Latn	fao_Latn	exact	fao_Latn	False	
+FLORES-200	fr	fra_Latn	fra_Latn	exact	fra_Latn	False	
+FLORES-200	frr	frr_Latn	frr_Latn	unavailable		False	
+FLORES-200	fur	fur_Latn	fur_Latn	exact	fur_Latn	False	
+FLORES-200	fy	fry_Latn	fry_Latn	unavailable		False	
+FLORES-200	ga	gle_Latn	gle_Latn	exact	gle_Latn	False	
+FLORES-200	gan	gan_Hani?	gan_Hani	unavailable		True	Removed source uncertainty marker; retained reported language and script.
+FLORES-200	gd	gla_Latn	gla_Latn	exact	gla_Latn	False	
+FLORES-200	gl	glg_Latn	glg_Latn	exact	glg_Latn	False	
+FLORES-200	gn	grn_Latn	grn_Latn	exact	grn_Latn	False	
+FLORES-200	gu	guj_Gujr	guj_Gujr	exact	guj_Gujr	False	
+FLORES-200	hak	hak_Latn	hak_Latn	unavailable		False	
+FLORES-200	he	heb_Hebr	heb_Hebr	exact	heb_Hebr	False	
+FLORES-200	hi	hin_Deva	hin_Deva	exact	hin_Deva	False	
+FLORES-200	hr	hrv_Latn	hrv_Latn	exact	hrv_Latn	False	
+FLORES-200	hsb	hsb_Latn	hsb_Latn	unavailable		False	
+FLORES-200	hu	hun_Latn	hun_Latn	exact	hun_Latn	False	
+FLORES-200	hy	hye_Armn	hye_Armn	exact	hye_Armn	False	
+FLORES-200	ia	ina_Latn	ina_Latn	unavailable		False	
+FLORES-200	id	ind_Latn	ind_Latn	exact	ind_Latn	False	
+FLORES-200	ig	ibo_Latn	ibo_Latn	exact	ibo_Latn	False	
+FLORES-200	ilo	ilo_Latn	ilo_Latn	exact	ilo_Latn	False	
+FLORES-200	io	ido_Latn	ido_Latn	unavailable		False	
+FLORES-200	is	isl_Latn	isl_Latn	exact	isl_Latn	False	
+FLORES-200	it	ita_Latn	ita_Latn	exact	ita_Latn	False	
+FLORES-200	ja	jpn_Kana?	jpn_Jpan	exact	jpn_Jpan	True	Use the composite Japanese script, rather than sample-only Kana.
+FLORES-200	jbo	jbo_Latn	jbo_Latn	unavailable		False	
+FLORES-200	jv	jav_Latn	jav_Latn	exact	jav_Latn	False	
+FLORES-200	ka	kat_Geor	kat_Geor	exact	kat_Geor	False	
+FLORES-200	kk	kaz_Cyrl	kaz_Cyrl	exact	kaz_Cyrl	False	
+FLORES-200	km	khm_Khmr?	khm_Khmr	exact	khm_Khmr	True	Removed source uncertainty marker; retained reported language and script.
+FLORES-200	kn	kan_Knda	kan_Knda	exact	kan_Knda	False	
+FLORES-200	ko	kor_Hang	kor_Hang	exact	kor_Hang	False	
+FLORES-200	ksh	ksh_Latn	ksh_Latn	unavailable		False	
+FLORES-200	ku	kur_Latn	kur_Latn	mapped	kmr_Latn	False	
+FLORES-200	ky	kir_Cyrl	kir_Cyrl	exact	kir_Cyrl	False	
+FLORES-200	la	lat_Latn	lat_Latn	unavailable		False	
+FLORES-200	lb	ltz_Latn	ltz_Latn	exact	ltz_Latn	False	
+FLORES-200	li	lim_Latn	lim_Latn	exact	lim_Latn	False	
+FLORES-200	lij	lij_Latn	lij_Latn	exact	lij_Latn	False	
+FLORES-200	lmo	lmo_Latn	lmo_Latn	exact	lmo_Latn	False	
+FLORES-200	ln	lin_Latn	lin_Latn	exact	lin_Latn	False	
+FLORES-200	lt	lit_Latn	lit_Latn	exact	lit_Latn	False	
+FLORES-200	lv	lav_Latn	lav_Latn	mapped	lvs_Latn	False	
+FLORES-200	map-bms	?		unresolved		True	
+FLORES-200	mg	mlg_Latn	mlg_Latn	mapped	plt_Latn	False	
+FLORES-200	mhr	mhr_Cyrl	mhr_Cyrl	unavailable		False	
+FLORES-200	mi	mri_Latn	mri_Latn	exact	mri_Latn	False	
+FLORES-200	min	min_Latn	min_Latn	exact	min_Latn	False	
+FLORES-200	mk	mkd_Cyrl	mkd_Cyrl	exact	mkd_Cyrl	False	
+FLORES-200	ml	mal_Mlym	mal_Mlym	exact	mal_Mlym	False	
+FLORES-200	mn	mon_Cyrl	mon_Cyrl	mapped	khk_Cyrl	False	
+FLORES-200	mr	mar_Deva	mar_Deva	exact	mar_Deva	False	
+FLORES-200	ms	msa_Latn	msa_Latn	mapped	zsm_Latn	False	
+FLORES-200	mt	mlt_Latn	mlt_Latn	exact	mlt_Latn	False	
+FLORES-200	mwl	mwl_Latn	mwl_Latn	unavailable		False	
+FLORES-200	my	mya_Mymr	mya_Mymr	exact	mya_Mymr	False	
+FLORES-200	mzn	mzn_Arab	mzn_Arab	unavailable		False	
+FLORES-200	nap	nap_Latn	nap_Latn	unavailable		False	
+FLORES-200	nds	nds_Latn	nds_Latn	unavailable		False	
+FLORES-200	ne	nep_Deva	nep_Deva	mapped	npi_Deva	False	
+FLORES-200	nl	nld_Latn	nld_Latn	exact	nld_Latn	False	
+FLORES-200	nn	nno_Latn	nno_Latn	exact	nno_Latn	False	
+FLORES-200	no	nor_Latn	nor_Latn	mapped	nob_Latn	False	
+FLORES-200	nov	nov_Latn	nov_Latn	unavailable		False	
+FLORES-200	oc	oci_Latn	oci_Latn	exact	oci_Latn	False	
+FLORES-200	or	ori_Orya	ori_Orya	unavailable		False	
+FLORES-200	os	oss_Cyrl	oss_Cyrl	unavailable		False	
+FLORES-200	pa	pan_Guru	pan_Guru	exact	pan_Guru	False	
+FLORES-200	pdc	pdc_Latn	pdc_Latn	unavailable		False	
+FLORES-200	pl	pol_Latn	pol_Latn	exact	pol_Latn	False	
+FLORES-200	pms	pms_Latn	pms_Latn	unavailable		False	
+FLORES-200	pnb	pnb_Arab	pnb_Arab	unavailable		False	
+FLORES-200	ps	pus_Arab	pus_Arab	mapped	pbt_Arab	False	
+FLORES-200	pt	por_Latn	por_Latn	exact	por_Latn	False	
+FLORES-200	qu	que_Latn	que_Latn	mapped	quy_Latn	False	
+FLORES-200	rm	roh_Latn	roh_Latn	unavailable		False	
+FLORES-200	ro	ron_Latn	ron_Latn	exact	ron_Latn	False	
+FLORES-200	ru	rus_Cyrl	rus_Cyrl	exact	rus_Cyrl	False	
+FLORES-200	rw	kin_Latn	kin_Latn	exact	kin_Latn	False	
+FLORES-200	sa	san_Deva	san_Deva	exact	san_Deva	False	
+FLORES-200	sah	sah_Cyrl	sah_Cyrl	unavailable		False	
+FLORES-200	scn	scn_Latn	scn_Latn	exact	scn_Latn	False	
+FLORES-200	sco	sco_Latn	sco_Latn	unavailable		False	
+FLORES-200	sd	snd_Arab	snd_Arab	exact	snd_Arab	False	
+FLORES-200	sh	?		unresolved		True	
+FLORES-200	si	sin_Sinh	sin_Sinh	exact	sin_Sinh	False	
+FLORES-200	simple	stv_Latn?	eng_Latn	english_anchor		True	Simple English Wikipedia is English, not Silt'e (stv).
+FLORES-200	sk	slk_Latn	slk_Latn	exact	slk_Latn	False	
+FLORES-200	sl	slv_Latn	slv_Latn	exact	slv_Latn	False	
+FLORES-200	so	som_Latn	som_Latn	exact	som_Latn	False	
+FLORES-200	sq	sqi_Latn	sqi_Latn	mapped	als_Latn	False	
+FLORES-200	sr	srp_Cyrl	srp_Cyrl	exact	srp_Cyrl	False	
+FLORES-200	su	sun_Latn	sun_Latn	exact	sun_Latn	False	
+FLORES-200	sv	swe_Latn	swe_Latn	exact	swe_Latn	False	
+FLORES-200	sw	swa_Latn	swa_Latn	mapped	swh_Latn	False	
+FLORES-200	szl	szl_Latn	szl_Latn	exact	szl_Latn	False	
+FLORES-200	ta	tam_Taml	tam_Taml	exact	tam_Taml	False	
+FLORES-200	te	tel_Telu?	tel_Telu	exact	tel_Telu	True	Removed source uncertainty marker; retained reported language and script.
+FLORES-200	tg	tgk_Cyrl	tgk_Cyrl	exact	tgk_Cyrl	False	
+FLORES-200	th	tha_Thai	tha_Thai	exact	tha_Thai	False	
+FLORES-200	tk	tuk_Latn	tuk_Latn	exact	tuk_Latn	False	
+FLORES-200	tl	tgl_Latn	tgl_Latn	exact	tgl_Latn	False	
+FLORES-200	tr	tur_Latn	tur_Latn	exact	tur_Latn	False	
+FLORES-200	tt	tat_Cyrl?	tat_Cyrl	exact	tat_Cyrl	True	Removed source uncertainty marker; retained reported language and script.
+FLORES-200	ug	uig_Arab	uig_Arab	exact	uig_Arab	False	
+FLORES-200	uk	ukr_Cyrl	ukr_Cyrl	exact	ukr_Cyrl	False	
+FLORES-200	ur	urd_Arab	urd_Arab	exact	urd_Arab	False	
+FLORES-200	uz	uzb_Latn	uzb_Latn	mapped	uzn_Latn	False	
+FLORES-200	vec	vec_Latn	vec_Latn	exact	vec_Latn	False	
+FLORES-200	vep	vep_Latn	vep_Latn	unavailable		False	
+FLORES-200	vi	vie_Latn	vie_Latn	exact	vie_Latn	False	
+FLORES-200	vls	vls_Latn	vls_Latn	unavailable		False	
+FLORES-200	vo	vol_Latn	vol_Latn	unavailable		False	
+FLORES-200	wa	wln_Latn	wln_Latn	unavailable		False	
+FLORES-200	war	war_Latn	war_Latn	exact	war_Latn	False	
+FLORES-200	wuu	wuu_Hans?	wuu_Hans	unavailable		True	Removed source uncertainty marker; retained reported language and script.
+FLORES-200	xmf	xmf_Geor	xmf_Geor	unavailable		False	
+FLORES-200	yi	yid_Hebr	yid_Hebr	mapped	ydd_Hebr	False	
+FLORES-200	yo	yor_Latn	yor_Latn	exact	yor_Latn	False	
+FLORES-200	zea	zea_Latn	zea_Latn	unavailable		False	
+FLORES-200	zh	zho_Hant?	zho_Hant	exact	zho_Hant	True	Removed source uncertainty marker; retained reported language and script.
+FLORES-200	zh-classical	zho_Hans?	lzh_Hant	unavailable		True	Classical Chinese is distinct from modern Chinese.
+FLORES-200	zh-min-nan	zho_Latn	nan_Latn	unavailable		False	Min Nan Wikipedia is distinct from Mandarin Chinese.
+FLORES-200	zh-yue	zho_Jpan?	yue_Hant	exact	yue_Hant	True	Cantonese Wikipedia uses traditional Chinese, not Japanese script.
+NTREX-128	ace	ace_Latn	ace_Latn	unavailable		False	
+NTREX-128	af	afr_Latn	afr_Latn	exact	afr_Latn	False	
+NTREX-128	als	als_Latn	als_Latn	unavailable		False	
+NTREX-128	am	amh_Ethi	amh_Ethi	exact	amh_Ethi	False	
+NTREX-128	an	arg_Latn	arg_Latn	unavailable		False	
+NTREX-128	ang	ang_Latn	ang_Latn	unavailable		False	
+NTREX-128	ar	ara_Arab	ara_Arab	mapped	arb_Arab	False	
+NTREX-128	arc	arc_Syrc	arc_Syrc	unavailable		False	
+NTREX-128	arz	arz_Arab	arz_Arab	unavailable		False	
+NTREX-128	as	asm_Beng	asm_Beng	unavailable		False	
+NTREX-128	ast	ast_Latn	ast_Latn	unavailable		False	
+NTREX-128	ay	aym_Latn	aym_Latn	unavailable		False	
+NTREX-128	az	aze_Latn	aze_Latn	exact	aze_Latn	False	
+NTREX-128	ba	bak_Cyrl	bak_Cyrl	exact	bak_Cyrl	False	
+NTREX-128	bar	bar_Latn	bar_Latn	unavailable		False	
+NTREX-128	bat-smg	?		unresolved		True	
+NTREX-128	be	bel_Cyrl	bel_Cyrl	exact	bel_Cyrl	False	
+NTREX-128	be-x-old	bel_Cyrl	bel_Cyrl	exact	bel_Cyrl	False	
+NTREX-128	bg	bul_Cyrl	bul_Cyrl	exact	bul_Cyrl	False	
+NTREX-128	bh	?		unresolved		True	
+NTREX-128	bn	ben_Beng	ben_Beng	exact	ben_Beng	False	
+NTREX-128	bo	bod_Tibt?	bod_Tibt	exact	bod_Tibt	True	Removed source uncertainty marker; retained reported language and script.
+NTREX-128	br	bre_Latn	bre_Latn	unavailable		False	
+NTREX-128	bs	bos_Latn	bos_Latn	exact	bos_Latn	False	
+NTREX-128	ca	cat_Latn	cat_Latn	exact	cat_Latn	False	
+NTREX-128	cbk-zam	cbk_Latn	cbk_Latn	unavailable		False	
+NTREX-128	cdo	cdo_Latn	cdo_Latn	unavailable		False	
+NTREX-128	ce	che_Cyrl	che_Cyrl	unavailable		False	
+NTREX-128	ceb	ceb_Latn	ceb_Latn	unavailable		False	
+NTREX-128	ckb	ckb_Arab	ckb_Arab	exact	ckb_Arab	False	
+NTREX-128	co	cos_Latn	cos_Latn	unavailable		False	
+NTREX-128	crh	crh_Latn	crh_Latn	unavailable		False	
+NTREX-128	cs	ces_Latn	ces_Latn	exact	ces_Latn	False	
+NTREX-128	csb	csb_Latn	csb_Latn	unavailable		False	
+NTREX-128	cv	chv_Cyrl	chv_Cyrl	unavailable		False	
+NTREX-128	cy	cym_Latn	cym_Latn	exact	cym_Latn	False	
+NTREX-128	da	dan_Latn	dan_Latn	exact	dan_Latn	False	
+NTREX-128	de	deu_Latn	deu_Latn	exact	deu_Latn	False	
+NTREX-128	diq	diq_Latn	diq_Latn	unavailable		False	
+NTREX-128	dv	div_Thaa	div_Thaa	exact	div_Thaa	False	
+NTREX-128	el	ell_Grek	ell_Grek	exact	ell_Grek	False	
+NTREX-128	eml	?		unresolved		True	
+NTREX-128	en	eng_Latn	eng_Latn	english_anchor		False	
+NTREX-128	eo	epo_Latn	epo_Latn	unavailable		False	
+NTREX-128	es	spa_Latn	spa_Latn	exact	spa_Latn	False	
+NTREX-128	et	est_Latn	est_Latn	exact	est_Latn	False	
+NTREX-128	eu	eus_Latn	eus_Latn	exact	eus_Latn	False	
+NTREX-128	ext	ext_Latn	ext_Latn	unavailable		False	
+NTREX-128	fa	fas_Arab	fas_Arab	exact	fas_Arab	False	
+NTREX-128	fi	fin_Latn	fin_Latn	exact	fin_Latn	False	
+NTREX-128	fiu-vro	?		unresolved		True	
+NTREX-128	fo	fao_Latn	fao_Latn	exact	fao_Latn	False	
+NTREX-128	fr	fra_Latn	fra_Latn	exact	fra_Latn	False	
+NTREX-128	frr	frr_Latn	frr_Latn	unavailable		False	
+NTREX-128	fur	fur_Latn	fur_Latn	unavailable		False	
+NTREX-128	fy	fry_Latn	fry_Latn	unavailable		False	
+NTREX-128	ga	gle_Latn	gle_Latn	exact	gle_Latn	False	
+NTREX-128	gan	gan_Hani?	gan_Hani	unavailable		True	Removed source uncertainty marker; retained reported language and script.
+NTREX-128	gd	gla_Latn	gla_Latn	unavailable		False	
+NTREX-128	gl	glg_Latn	glg_Latn	exact	glg_Latn	False	
+NTREX-128	gn	grn_Latn	grn_Latn	unavailable		False	
+NTREX-128	gu	guj_Gujr	guj_Gujr	exact	guj_Gujr	False	
+NTREX-128	hak	hak_Latn	hak_Latn	unavailable		False	
+NTREX-128	he	heb_Hebr	heb_Hebr	exact	heb_Hebr	False	
+NTREX-128	hi	hin_Deva	hin_Deva	exact	hin_Deva	False	
+NTREX-128	hr	hrv_Latn	hrv_Latn	exact	hrv_Latn	False	
+NTREX-128	hsb	hsb_Latn	hsb_Latn	unavailable		False	
+NTREX-128	hu	hun_Latn	hun_Latn	exact	hun_Latn	False	
+NTREX-128	hy	hye_Armn	hye_Armn	exact	hye_Armn	False	
+NTREX-128	ia	ina_Latn	ina_Latn	unavailable		False	
+NTREX-128	id	ind_Latn	ind_Latn	exact	ind_Latn	False	
+NTREX-128	ig	ibo_Latn	ibo_Latn	exact	ibo_Latn	False	
+NTREX-128	ilo	ilo_Latn	ilo_Latn	unavailable		False	
+NTREX-128	io	ido_Latn	ido_Latn	unavailable		False	
+NTREX-128	is	isl_Latn	isl_Latn	exact	isl_Latn	False	
+NTREX-128	it	ita_Latn	ita_Latn	exact	ita_Latn	False	
+NTREX-128	ja	jpn_Kana?	jpn_Jpan	exact	jpn_Jpan	True	Use the composite Japanese script, rather than sample-only Kana.
+NTREX-128	jbo	jbo_Latn	jbo_Latn	unavailable		False	
+NTREX-128	jv	jav_Latn	jav_Latn	unavailable		False	
+NTREX-128	ka	kat_Geor	kat_Geor	exact	kat_Geor	False	
+NTREX-128	kk	kaz_Cyrl	kaz_Cyrl	exact	kaz_Cyrl	False	
+NTREX-128	km	khm_Khmr?	khm_Khmr	exact	khm_Khmr	True	Removed source uncertainty marker; retained reported language and script.
+NTREX-128	kn	kan_Knda	kan_Knda	exact	kan_Knda	False	
+NTREX-128	ko	kor_Hang	kor_Hang	exact	kor_Hang	False	
+NTREX-128	ksh	ksh_Latn	ksh_Latn	unavailable		False	
+NTREX-128	ku	kur_Latn	kur_Latn	mapped	kmr_Latn	False	
+NTREX-128	ky	kir_Cyrl	kir_Cyrl	exact	kir_Cyrl	False	
+NTREX-128	la	lat_Latn	lat_Latn	unavailable		False	
+NTREX-128	lb	ltz_Latn	ltz_Latn	exact	ltz_Latn	False	
+NTREX-128	li	lim_Latn	lim_Latn	unavailable		False	
+NTREX-128	lij	lij_Latn	lij_Latn	unavailable		False	
+NTREX-128	lmo	lmo_Latn	lmo_Latn	unavailable		False	
+NTREX-128	ln	lin_Latn	lin_Latn	unavailable		False	
+NTREX-128	lt	lit_Latn	lit_Latn	exact	lit_Latn	False	
+NTREX-128	lv	lav_Latn	lav_Latn	exact	lav_Latn	False	
+NTREX-128	map-bms	?		unresolved		True	
+NTREX-128	mg	mlg_Latn	mlg_Latn	exact	mlg_Latn	False	
+NTREX-128	mhr	mhr_Cyrl	mhr_Cyrl	unavailable		False	
+NTREX-128	mi	mri_Latn	mri_Latn	exact	mri_Latn	False	
+NTREX-128	min	min_Latn	min_Latn	unavailable		False	
+NTREX-128	mk	mkd_Cyrl	mkd_Cyrl	exact	mkd_Cyrl	False	
+NTREX-128	ml	mal_Mlym	mal_Mlym	exact	mal_Mlym	False	
+NTREX-128	mn	mon_Cyrl	mon_Cyrl	unavailable		False	
+NTREX-128	mr	mar_Deva	mar_Deva	exact	mar_Deva	False	
+NTREX-128	ms	msa_Latn	msa_Latn	exact	msa_Latn	False	
+NTREX-128	mt	mlt_Latn	mlt_Latn	exact	mlt_Latn	False	
+NTREX-128	mwl	mwl_Latn	mwl_Latn	unavailable		False	
+NTREX-128	my	mya_Mymr	mya_Mymr	exact	mya_Mymr	False	
+NTREX-128	mzn	mzn_Arab	mzn_Arab	unavailable		False	
+NTREX-128	nap	nap_Latn	nap_Latn	unavailable		False	
+NTREX-128	nds	nds_Latn	nds_Latn	unavailable		False	
+NTREX-128	ne	nep_Deva	nep_Deva	exact	nep_Deva	False	
+NTREX-128	nl	nld_Latn	nld_Latn	exact	nld_Latn	False	
+NTREX-128	nn	nno_Latn	nno_Latn	exact	nno_Latn	False	
+NTREX-128	no	nor_Latn	nor_Latn	mapped	nob_Latn	False	
+NTREX-128	nov	nov_Latn	nov_Latn	unavailable		False	
+NTREX-128	oc	oci_Latn	oci_Latn	unavailable		False	
+NTREX-128	or	ori_Orya	ori_Orya	unavailable		False	
+NTREX-128	os	oss_Cyrl	oss_Cyrl	unavailable		False	
+NTREX-128	pa	pan_Guru	pan_Guru	exact	pan_Guru	False	
+NTREX-128	pdc	pdc_Latn	pdc_Latn	unavailable		False	
+NTREX-128	pl	pol_Latn	pol_Latn	exact	pol_Latn	False	
+NTREX-128	pms	pms_Latn	pms_Latn	unavailable		False	
+NTREX-128	pnb	pnb_Arab	pnb_Arab	unavailable		False	
+NTREX-128	ps	pus_Arab	pus_Arab	exact	pus_Arab	False	
+NTREX-128	pt	por_Latn	por_Latn	exact	por_Latn	False	
+NTREX-128	qu	que_Latn	que_Latn	unavailable		False	
+NTREX-128	rm	roh_Latn	roh_Latn	unavailable		False	
+NTREX-128	ro	ron_Latn	ron_Latn	exact	ron_Latn	False	
+NTREX-128	ru	rus_Cyrl	rus_Cyrl	exact	rus_Cyrl	False	
+NTREX-128	rw	kin_Latn	kin_Latn	exact	kin_Latn	False	
+NTREX-128	sa	san_Deva	san_Deva	unavailable		False	
+NTREX-128	sah	sah_Cyrl	sah_Cyrl	unavailable		False	
+NTREX-128	scn	scn_Latn	scn_Latn	unavailable		False	
+NTREX-128	sco	sco_Latn	sco_Latn	unavailable		False	
+NTREX-128	sd	snd_Arab	snd_Arab	exact	snd_Arab	False	
+NTREX-128	sh	?		unresolved		True	
+NTREX-128	si	sin_Sinh	sin_Sinh	exact	sin_Sinh	False	
+NTREX-128	simple	stv_Latn?	eng_Latn	english_anchor		True	Simple English Wikipedia is English, not Silt'e (stv).
+NTREX-128	sk	slk_Latn	slk_Latn	exact	slk_Latn	False	
+NTREX-128	sl	slv_Latn	slv_Latn	exact	slv_Latn	False	
+NTREX-128	so	som_Latn	som_Latn	exact	som_Latn	False	
+NTREX-128	sq	sqi_Latn	sqi_Latn	exact	sqi_Latn	False	
+NTREX-128	sr	srp_Cyrl	srp_Cyrl	exact	srp_Cyrl	False	
+NTREX-128	su	sun_Latn	sun_Latn	unavailable		False	
+NTREX-128	sv	swe_Latn	swe_Latn	exact	swe_Latn	False	
+NTREX-128	sw	swa_Latn	swa_Latn	exact	swa_Latn	False	
+NTREX-128	szl	szl_Latn	szl_Latn	unavailable		False	
+NTREX-128	ta	tam_Taml	tam_Taml	exact	tam_Taml	False	
+NTREX-128	te	tel_Telu?	tel_Telu	exact	tel_Telu	True	Removed source uncertainty marker; retained reported language and script.
+NTREX-128	tg	tgk_Cyrl	tgk_Cyrl	exact	tgk_Cyrl	False	
+NTREX-128	th	tha_Thai	tha_Thai	exact	tha_Thai	False	
+NTREX-128	tk	tuk_Latn	tuk_Latn	exact	tuk_Latn	False	
+NTREX-128	tl	tgl_Latn	tgl_Latn	unavailable		False	
+NTREX-128	tr	tur_Latn	tur_Latn	exact	tur_Latn	False	
+NTREX-128	tt	tat_Cyrl?	tat_Cyrl	exact	tat_Cyrl	True	Removed source uncertainty marker; retained reported language and script.
+NTREX-128	ug	uig_Arab	uig_Arab	exact	uig_Arab	False	
+NTREX-128	uk	ukr_Cyrl	ukr_Cyrl	exact	ukr_Cyrl	False	
+NTREX-128	ur	urd_Arab	urd_Arab	exact	urd_Arab	False	
+NTREX-128	uz	uzb_Latn	uzb_Latn	exact	uzb_Latn	False	
+NTREX-128	vec	vec_Latn	vec_Latn	unavailable		False	
+NTREX-128	vep	vep_Latn	vep_Latn	unavailable		False	
+NTREX-128	vi	vie_Latn	vie_Latn	exact	vie_Latn	False	
+NTREX-128	vls	vls_Latn	vls_Latn	unavailable		False	
+NTREX-128	vo	vol_Latn	vol_Latn	unavailable		False	
+NTREX-128	wa	wln_Latn	wln_Latn	unavailable		False	
+NTREX-128	war	war_Latn	war_Latn	unavailable		False	
+NTREX-128	wuu	wuu_Hans?	wuu_Hans	unavailable		True	Removed source uncertainty marker; retained reported language and script.
+NTREX-128	xmf	xmf_Geor	xmf_Geor	unavailable		False	
+NTREX-128	yi	yid_Hebr	yid_Hebr	unavailable		False	
+NTREX-128	yo	yor_Latn	yor_Latn	exact	yor_Latn	False	
+NTREX-128	zea	zea_Latn	zea_Latn	unavailable		False	
+NTREX-128	zh	zho_Hant?	zho_Hant	exact	zho_Hant	True	Removed source uncertainty marker; retained reported language and script.
+NTREX-128	zh-classical	zho_Hans?	lzh_Hant	unavailable		True	Classical Chinese is distinct from modern Chinese.
+NTREX-128	zh-min-nan	zho_Latn	nan_Latn	unavailable		False	Min Nan Wikipedia is distinct from Mandarin Chinese.
+NTREX-128	zh-yue	zho_Jpan?	yue_Hant	exact	yue_Hant	True	Cantonese Wikipedia uses traditional Chinese, not Japanese script.
+BOUQuET_Sentence	ace	ace_Latn	ace_Latn	unavailable		False	
+BOUQuET_Sentence	af	afr_Latn	afr_Latn	exact	afr_Latn	False	
+BOUQuET_Sentence	als	als_Latn	als_Latn	exact	als_Latn	False	
+BOUQuET_Sentence	am	amh_Ethi	amh_Ethi	exact	amh_Ethi	False	
+BOUQuET_Sentence	an	arg_Latn	arg_Latn	unavailable		False	
+BOUQuET_Sentence	ang	ang_Latn	ang_Latn	unavailable		False	
+BOUQuET_Sentence	ar	ara_Arab	ara_Arab	unavailable		False	
+BOUQuET_Sentence	arc	arc_Syrc	arc_Syrc	unavailable		False	
+BOUQuET_Sentence	arz	arz_Arab	arz_Arab	exact	arz_Arab	False	
+BOUQuET_Sentence	as	asm_Beng	asm_Beng	exact	asm_Beng	False	
+BOUQuET_Sentence	ast	ast_Latn	ast_Latn	unavailable		False	
+BOUQuET_Sentence	ay	aym_Latn	aym_Latn	mapped	ayr_Latn	False	
+BOUQuET_Sentence	az	aze_Latn	aze_Latn	mapped	azj_Latn	False	
+BOUQuET_Sentence	ba	bak_Cyrl	bak_Cyrl	exact	bak_Cyrl	False	
+BOUQuET_Sentence	bar	bar_Latn	bar_Latn	unavailable		False	
+BOUQuET_Sentence	bat-smg	?		unresolved		True	
+BOUQuET_Sentence	be	bel_Cyrl	bel_Cyrl	exact	bel_Cyrl	False	
+BOUQuET_Sentence	be-x-old	bel_Cyrl	bel_Cyrl	exact	bel_Cyrl	False	
+BOUQuET_Sentence	bg	bul_Cyrl	bul_Cyrl	exact	bul_Cyrl	False	
+BOUQuET_Sentence	bh	?		unresolved		True	
+BOUQuET_Sentence	bn	ben_Beng	ben_Beng	exact	ben_Beng	False	
+BOUQuET_Sentence	bo	bod_Tibt?	bod_Tibt	exact	bod_Tibt	True	Removed source uncertainty marker; retained reported language and script.
+BOUQuET_Sentence	br	bre_Latn	bre_Latn	exact	bre_Latn	False	
+BOUQuET_Sentence	bs	bos_Latn	bos_Latn	exact	bos_Latn	False	
+BOUQuET_Sentence	ca	cat_Latn	cat_Latn	exact	cat_Latn	False	
+BOUQuET_Sentence	cbk-zam	cbk_Latn	cbk_Latn	unavailable		False	
+BOUQuET_Sentence	cdo	cdo_Latn	cdo_Latn	unavailable		False	
+BOUQuET_Sentence	ce	che_Cyrl	che_Cyrl	exact	che_Cyrl	False	
+BOUQuET_Sentence	ceb	ceb_Latn	ceb_Latn	exact	ceb_Latn	False	
+BOUQuET_Sentence	ckb	ckb_Arab	ckb_Arab	exact	ckb_Arab	False	
+BOUQuET_Sentence	co	cos_Latn	cos_Latn	unavailable		False	
+BOUQuET_Sentence	crh	crh_Latn	crh_Latn	unavailable		False	
+BOUQuET_Sentence	cs	ces_Latn	ces_Latn	exact	ces_Latn	False	
+BOUQuET_Sentence	csb	csb_Latn	csb_Latn	unavailable		False	
+BOUQuET_Sentence	cv	chv_Cyrl	chv_Cyrl	exact	chv_Cyrl	False	
+BOUQuET_Sentence	cy	cym_Latn	cym_Latn	exact	cym_Latn	False	
+BOUQuET_Sentence	da	dan_Latn	dan_Latn	exact	dan_Latn	False	
+BOUQuET_Sentence	de	deu_Latn	deu_Latn	exact	deu_Latn	False	
+BOUQuET_Sentence	diq	diq_Latn	diq_Latn	exact	diq_Latn	False	
+BOUQuET_Sentence	dv	div_Thaa	div_Thaa	exact	div_Thaa	False	
+BOUQuET_Sentence	el	ell_Grek	ell_Grek	exact	ell_Grek	False	
+BOUQuET_Sentence	eml	?		unresolved		True	
+BOUQuET_Sentence	en	eng_Latn	eng_Latn	english_anchor		False	
+BOUQuET_Sentence	eo	epo_Latn	epo_Latn	unavailable		False	
+BOUQuET_Sentence	es	spa_Latn	spa_Latn	exact	spa_Latn	False	
+BOUQuET_Sentence	et	est_Latn	est_Latn	mapped	ekk_Latn	False	
+BOUQuET_Sentence	eu	eus_Latn	eus_Latn	exact	eus_Latn	False	
+BOUQuET_Sentence	ext	ext_Latn	ext_Latn	unavailable		False	
+BOUQuET_Sentence	fa	fas_Arab	fas_Arab	mapped	pes_Arab	False	
+BOUQuET_Sentence	fi	fin_Latn	fin_Latn	exact	fin_Latn	False	
+BOUQuET_Sentence	fiu-vro	?		unresolved		True	
+BOUQuET_Sentence	fo	fao_Latn	fao_Latn	exact	fao_Latn	False	
+BOUQuET_Sentence	fr	fra_Latn	fra_Latn	exact	fra_Latn	False	
+BOUQuET_Sentence	frr	frr_Latn	frr_Latn	unavailable		False	
+BOUQuET_Sentence	fur	fur_Latn	fur_Latn	unavailable		False	
+BOUQuET_Sentence	fy	fry_Latn	fry_Latn	exact	fry_Latn	False	
+BOUQuET_Sentence	ga	gle_Latn	gle_Latn	exact	gle_Latn	False	
+BOUQuET_Sentence	gan	gan_Hani?	gan_Hani	unavailable		True	Removed source uncertainty marker; retained reported language and script.
+BOUQuET_Sentence	gd	gla_Latn	gla_Latn	exact	gla_Latn	False	
+BOUQuET_Sentence	gl	glg_Latn	glg_Latn	exact	glg_Latn	False	
+BOUQuET_Sentence	gn	grn_Latn	grn_Latn	mapped	gug_Latn	False	
+BOUQuET_Sentence	gu	guj_Gujr	guj_Gujr	exact	guj_Gujr	False	
+BOUQuET_Sentence	hak	hak_Latn	hak_Latn	unavailable		False	
+BOUQuET_Sentence	he	heb_Hebr	heb_Hebr	exact	heb_Hebr	False	
+BOUQuET_Sentence	hi	hin_Deva	hin_Deva	exact	hin_Deva	False	
+BOUQuET_Sentence	hr	hrv_Latn	hrv_Latn	exact	hrv_Latn	False	
+BOUQuET_Sentence	hsb	hsb_Latn	hsb_Latn	unavailable		False	
+BOUQuET_Sentence	hu	hun_Latn	hun_Latn	exact	hun_Latn	False	
+BOUQuET_Sentence	hy	hye_Armn	hye_Armn	exact	hye_Armn	False	
+BOUQuET_Sentence	ia	ina_Latn	ina_Latn	unavailable		False	
+BOUQuET_Sentence	id	ind_Latn	ind_Latn	exact	ind_Latn	False	
+BOUQuET_Sentence	ig	ibo_Latn	ibo_Latn	exact	ibo_Latn	False	
+BOUQuET_Sentence	ilo	ilo_Latn	ilo_Latn	exact	ilo_Latn	False	
+BOUQuET_Sentence	io	ido_Latn	ido_Latn	unavailable		False	
+BOUQuET_Sentence	is	isl_Latn	isl_Latn	exact	isl_Latn	False	
+BOUQuET_Sentence	it	ita_Latn	ita_Latn	exact	ita_Latn	False	
+BOUQuET_Sentence	ja	jpn_Kana?	jpn_Jpan	exact	jpn_Jpan	True	Use the composite Japanese script, rather than sample-only Kana.
+BOUQuET_Sentence	jbo	jbo_Latn	jbo_Latn	unavailable		False	
+BOUQuET_Sentence	jv	jav_Latn	jav_Latn	exact	jav_Latn	False	
+BOUQuET_Sentence	ka	kat_Geor	kat_Geor	exact	kat_Geor	False	
+BOUQuET_Sentence	kk	kaz_Cyrl	kaz_Cyrl	exact	kaz_Cyrl	False	
+BOUQuET_Sentence	km	khm_Khmr?	khm_Khmr	exact	khm_Khmr	True	Removed source uncertainty marker; retained reported language and script.
+BOUQuET_Sentence	kn	kan_Knda	kan_Knda	exact	kan_Knda	False	
+BOUQuET_Sentence	ko	kor_Hang	kor_Hang	mapped	kor_Kore	False	
+BOUQuET_Sentence	ksh	ksh_Latn	ksh_Latn	unavailable		False	
+BOUQuET_Sentence	ku	kur_Latn	kur_Latn	mapped	kmr_Latn	False	
+BOUQuET_Sentence	ky	kir_Cyrl	kir_Cyrl	exact	kir_Cyrl	False	
+BOUQuET_Sentence	la	lat_Latn	lat_Latn	unavailable		False	
+BOUQuET_Sentence	lb	ltz_Latn	ltz_Latn	unavailable		False	
+BOUQuET_Sentence	li	lim_Latn	lim_Latn	exact	lim_Latn	False	
+BOUQuET_Sentence	lij	lij_Latn	lij_Latn	exact	lij_Latn	False	
+BOUQuET_Sentence	lmo	lmo_Latn	lmo_Latn	unavailable		False	
+BOUQuET_Sentence	ln	lin_Latn	lin_Latn	exact	lin_Latn	False	
+BOUQuET_Sentence	lt	lit_Latn	lit_Latn	exact	lit_Latn	False	
+BOUQuET_Sentence	lv	lav_Latn	lav_Latn	mapped	lvs_Latn	False	
+BOUQuET_Sentence	map-bms	?		unresolved		True	
+BOUQuET_Sentence	mg	mlg_Latn	mlg_Latn	mapped	plt_Latn	False	
+BOUQuET_Sentence	mhr	mhr_Cyrl	mhr_Cyrl	unavailable		False	
+BOUQuET_Sentence	mi	mri_Latn	mri_Latn	exact	mri_Latn	False	
+BOUQuET_Sentence	min	min_Latn	min_Latn	unavailable		False	
+BOUQuET_Sentence	mk	mkd_Cyrl	mkd_Cyrl	exact	mkd_Cyrl	False	
+BOUQuET_Sentence	ml	mal_Mlym	mal_Mlym	exact	mal_Mlym	False	
+BOUQuET_Sentence	mn	mon_Cyrl	mon_Cyrl	mapped	khk_Cyrl	False	
+BOUQuET_Sentence	mr	mar_Deva	mar_Deva	exact	mar_Deva	False	
+BOUQuET_Sentence	ms	msa_Latn	msa_Latn	mapped	zsm_Latn	False	
+BOUQuET_Sentence	mt	mlt_Latn	mlt_Latn	exact	mlt_Latn	False	
+BOUQuET_Sentence	mwl	mwl_Latn	mwl_Latn	unavailable		False	
+BOUQuET_Sentence	my	mya_Mymr	mya_Mymr	exact	mya_Mymr	False	
+BOUQuET_Sentence	mzn	mzn_Arab	mzn_Arab	unavailable		False	
+BOUQuET_Sentence	nap	nap_Latn	nap_Latn	unavailable		False	
+BOUQuET_Sentence	nds	nds_Latn	nds_Latn	unavailable		False	
+BOUQuET_Sentence	ne	nep_Deva	nep_Deva	mapped	npi_Deva	False	
+BOUQuET_Sentence	nl	nld_Latn	nld_Latn	exact	nld_Latn	False	
+BOUQuET_Sentence	nn	nno_Latn	nno_Latn	exact	nno_Latn	False	
+BOUQuET_Sentence	no	nor_Latn	nor_Latn	unavailable		False	
+BOUQuET_Sentence	nov	nov_Latn	nov_Latn	unavailable		False	
+BOUQuET_Sentence	oc	oci_Latn	oci_Latn	unavailable		False	
+BOUQuET_Sentence	or	ori_Orya	ori_Orya	unavailable		False	
+BOUQuET_Sentence	os	oss_Cyrl	oss_Cyrl	unavailable		False	
+BOUQuET_Sentence	pa	pan_Guru	pan_Guru	exact	pan_Guru	False	
+BOUQuET_Sentence	pdc	pdc_Latn	pdc_Latn	unavailable		False	
+BOUQuET_Sentence	pl	pol_Latn	pol_Latn	exact	pol_Latn	False	
+BOUQuET_Sentence	pms	pms_Latn	pms_Latn	unavailable		False	
+BOUQuET_Sentence	pnb	pnb_Arab	pnb_Arab	unavailable		False	
+BOUQuET_Sentence	ps	pus_Arab	pus_Arab	mapped	pbt_Arab	False	
+BOUQuET_Sentence	pt	por_Latn	por_Latn	mapped	por_Latn_braz1246	False	
+BOUQuET_Sentence	qu	que_Latn	que_Latn	unavailable		False	
+BOUQuET_Sentence	rm	roh_Latn	roh_Latn	exact	roh_Latn	False	
+BOUQuET_Sentence	ro	ron_Latn	ron_Latn	exact	ron_Latn	False	
+BOUQuET_Sentence	ru	rus_Cyrl	rus_Cyrl	exact	rus_Cyrl	False	
+BOUQuET_Sentence	rw	kin_Latn	kin_Latn	exact	kin_Latn	False	
+BOUQuET_Sentence	sa	san_Deva	san_Deva	unavailable		False	
+BOUQuET_Sentence	sah	sah_Cyrl	sah_Cyrl	unavailable		False	
+BOUQuET_Sentence	scn	scn_Latn	scn_Latn	exact	scn_Latn	False	
+BOUQuET_Sentence	sco	sco_Latn	sco_Latn	unavailable		False	
+BOUQuET_Sentence	sd	snd_Arab	snd_Arab	exact	snd_Arab	False	
+BOUQuET_Sentence	sh	?		unresolved		True	
+BOUQuET_Sentence	si	sin_Sinh	sin_Sinh	exact	sin_Sinh	False	
+BOUQuET_Sentence	simple	stv_Latn?	eng_Latn	english_anchor		True	Simple English Wikipedia is English, not Silt'e (stv).
+BOUQuET_Sentence	sk	slk_Latn	slk_Latn	exact	slk_Latn	False	
+BOUQuET_Sentence	sl	slv_Latn	slv_Latn	exact	slv_Latn	False	
+BOUQuET_Sentence	so	som_Latn	som_Latn	exact	som_Latn	False	
+BOUQuET_Sentence	sq	sqi_Latn	sqi_Latn	mapped	als_Latn	False	
+BOUQuET_Sentence	sr	srp_Cyrl	srp_Cyrl	exact	srp_Cyrl	False	
+BOUQuET_Sentence	su	sun_Latn	sun_Latn	exact	sun_Latn	False	
+BOUQuET_Sentence	sv	swe_Latn	swe_Latn	exact	swe_Latn	False	
+BOUQuET_Sentence	sw	swa_Latn	swa_Latn	mapped	swh_Latn	False	
+BOUQuET_Sentence	szl	szl_Latn	szl_Latn	exact	szl_Latn	False	
+BOUQuET_Sentence	ta	tam_Taml	tam_Taml	exact	tam_Taml	False	
+BOUQuET_Sentence	te	tel_Telu?	tel_Telu	exact	tel_Telu	True	Removed source uncertainty marker; retained reported language and script.
+BOUQuET_Sentence	tg	tgk_Cyrl	tgk_Cyrl	exact	tgk_Cyrl	False	
+BOUQuET_Sentence	th	tha_Thai	tha_Thai	exact	tha_Thai	False	
+BOUQuET_Sentence	tk	tuk_Latn	tuk_Latn	unavailable		False	
+BOUQuET_Sentence	tl	tgl_Latn	tgl_Latn	exact	tgl_Latn	False	
+BOUQuET_Sentence	tr	tur_Latn	tur_Latn	exact	tur_Latn	False	
+BOUQuET_Sentence	tt	tat_Cyrl?	tat_Cyrl	exact	tat_Cyrl	True	Removed source uncertainty marker; retained reported language and script.
+BOUQuET_Sentence	ug	uig_Arab	uig_Arab	exact	uig_Arab	False	
+BOUQuET_Sentence	uk	ukr_Cyrl	ukr_Cyrl	exact	ukr_Cyrl	False	
+BOUQuET_Sentence	ur	urd_Arab	urd_Arab	exact	urd_Arab	False	
+BOUQuET_Sentence	uz	uzb_Latn	uzb_Latn	mapped	uzn_Latn	False	
+BOUQuET_Sentence	vec	vec_Latn	vec_Latn	unavailable		False	
+BOUQuET_Sentence	vep	vep_Latn	vep_Latn	unavailable		False	
+BOUQuET_Sentence	vi	vie_Latn	vie_Latn	exact	vie_Latn	False	
+BOUQuET_Sentence	vls	vls_Latn	vls_Latn	unavailable		False	
+BOUQuET_Sentence	vo	vol_Latn	vol_Latn	unavailable		False	
+BOUQuET_Sentence	wa	wln_Latn	wln_Latn	unavailable		False	
+BOUQuET_Sentence	war	war_Latn	war_Latn	exact	war_Latn	False	
+BOUQuET_Sentence	wuu	wuu_Hans?	wuu_Hans	exact	wuu_Hans	True	Removed source uncertainty marker; retained reported language and script.
+BOUQuET_Sentence	xmf	xmf_Geor	xmf_Geor	unavailable		False	
+BOUQuET_Sentence	yi	yid_Hebr	yid_Hebr	mapped	ydd_Hebr	False	
+BOUQuET_Sentence	yo	yor_Latn	yor_Latn	exact	yor_Latn	False	
+BOUQuET_Sentence	zea	zea_Latn	zea_Latn	unavailable		False	
+BOUQuET_Sentence	zh	zho_Hant?	zho_Hant	mapped	cmn_Hant	True	Removed source uncertainty marker; retained reported language and script.
+BOUQuET_Sentence	zh-classical	zho_Hans?	lzh_Hant	unavailable		True	Classical Chinese is distinct from modern Chinese.
+BOUQuET_Sentence	zh-min-nan	zho_Latn	nan_Latn	unavailable		False	Min Nan Wikipedia is distinct from Mandarin Chinese.
+BOUQuET_Sentence	zh-yue	zho_Jpan?	yue_Hant	exact	yue_Hant	True	Cantonese Wikipedia uses traditional Chinese, not Japanese script.

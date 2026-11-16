@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=2
 #SBATCH --time=0-01:00:00
 #SBATCH --mem=64G
-#SBATCH --account=project_462001087
+#SBATCH --account=project_462001249
 #
 # Extract the token-budgeted multilingual parallel mix.
 #

@@ -1,0 +1,39 @@
+{
+  "source_url": "https://github.com/MaLA-LM/GlotEval/blob/74183ec1f0c8b18cdb36af7057580142dc3061e0/benchmark_data_loader/data_langid_alignment/alignment_reports/wikiann_langs_script_report.csv",
+  "label_overrides": {
+    "simple": {"code": "eng_Latn", "reason": "Simple English Wikipedia is English, not Silt'e (stv)."},
+    "ja": {"code": "jpn_Jpan", "reason": "Use the composite Japanese script, rather than sample-only Kana."},
+    "zh-classical": {"code": "lzh_Hant", "reason": "Classical Chinese is distinct from modern Chinese."},
+    "zh-min-nan": {"code": "nan_Latn", "reason": "Min Nan Wikipedia is distinct from Mandarin Chinese."},
+    "zh-yue": {"code": "yue_Hant", "reason": "Cantonese Wikipedia uses traditional Chinese, not Japanese script."}
+  },
+  "dataset_aliases": {
+    "FLORES-200": {
+      "ara_Arab": ["arb_Arab"], "aym_Latn": ["ayr_Latn"],
+      "aze_Latn": ["azj_Latn"], "fas_Arab": ["pes_Arab"],
+      "kur_Latn": ["kmr_Latn"], "lav_Latn": ["lvs_Latn"],
+      "mlg_Latn": ["plt_Latn"], "mon_Cyrl": ["khk_Cyrl"],
+      "msa_Latn": ["zsm_Latn"], "nep_Deva": ["npi_Deva"],
+      "nor_Latn": ["nob_Latn"], "pus_Arab": ["pbt_Arab"],
+      "que_Latn": ["quy_Latn"], "sqi_Latn": ["als_Latn"],
+      "swa_Latn": ["swh_Latn"], "uzb_Latn": ["uzn_Latn"],
+      "yid_Hebr": ["ydd_Hebr"]
+    },
+    "NTREX-128": {
+      "ara_Arab": ["arb_Arab"], "kur_Latn": ["kmr_Latn"],
+      "nor_Latn": ["nob_Latn"]
+    },
+    "BOUQuET_Sentence": {
+      "aym_Latn": ["ayr_Latn"], "aze_Latn": ["azj_Latn"],
+      "est_Latn": ["ekk_Latn"], "fas_Arab": ["pes_Arab"],
+      "grn_Latn": ["gug_Latn"], "kor_Hang": ["kor_Kore"],
+      "kur_Latn": ["kmr_Latn"], "lav_Latn": ["lvs_Latn"],
+      "mlg_Latn": ["plt_Latn"], "mon_Cyrl": ["khk_Cyrl"],
+      "msa_Latn": ["zsm_Latn"], "nep_Deva": ["npi_Deva"],
+      "por_Latn": ["por_Latn_braz1246"], "pus_Arab": ["pbt_Arab"],
+      "sqi_Latn": ["als_Latn"], "swa_Latn": ["swh_Latn"],
+      "uzb_Latn": ["uzn_Latn"], "yid_Hebr": ["ydd_Hebr"],
+      "zho_Hans": ["cmn_Hans"], "zho_Hant": ["cmn_Hant"]
+    }
+  }
+}
