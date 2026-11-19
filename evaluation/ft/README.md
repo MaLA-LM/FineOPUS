@@ -124,6 +124,22 @@ Smoke results carry a smoke status and are excluded from full evaluation
 aggregates. Avoid using the entire `evaluation/ft/results/` directory as an
 aggregation root, since it may contain multiple configurations.
 
+## Excel export
+
+Export a workbook using the tables, ranking rules, and styling from
+`evaluation/export_mt_results_excel.py`:
+
+```bash
+uv run --no-project evaluation/ft/export_results_excel.py \
+  evaluation/ft/results/3shot/<config_fingerprint>/all_results.json
+```
+
+The output is `ft_mt_results.xlsx` beside the source JSON. Use `--output FILE.xlsx`
+to choose another destination. The workbook contains the same 12 worksheets as
+the shared exporter, including raw data, coverage, language and dataset summaries,
+model rankings, and separate English-to-X and X-to-English averages.
+Final HF checkpoints retain their `final` labels; no training iteration is inferred.
+
 ## Validation
 
 ```bash
