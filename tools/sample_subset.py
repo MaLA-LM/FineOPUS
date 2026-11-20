@@ -242,10 +242,21 @@ def _process_pair(task: tuple) -> dict:
             return result
 
         if out_file.exists() and not overwrite:
-            result["status"] = "skipped"
-            result["error"] = "output exists"
-            result["sampled_rows"] = min(sample_size, result["total_rows"])
-            return result
+            expected_rows = min(sample_size, result["total_rows"])
+            try:
+                existing_rows = pq.read_metadata(out_file).num_rows
+            except Exception as exc:
+                logger.warning("%s: cannot read existing output (%s); resampling", lang_pair, exc)
+            else:
+                if existing_rows == expected_rows:
+                    result["status"] = "skipped"
+                    result["error"] = "output exists with expected row count"
+                    result["sampled_rows"] = existing_rows
+                    return result
+                logger.warning(
+                    "%s: existing output has %d rows, expected %d; resampling",
+                    lang_pair, existing_rows, expected_rows,
+                )
 
         out_pair_dir.mkdir(parents=True, exist_ok=True)
         sampled_rows = sample_pair_to_file(
